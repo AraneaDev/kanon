@@ -12,14 +12,17 @@ export { loadExcludes }
 const SUBDIR_FILES = ['CLAUDE.md', 'CLAUDE.local.md']
 
 /**
- * CLAUDE.md in directories below the project root, excluding the root itself
- * (the root's own file is already covered by the ancestor walk). Dependency
+ * CLAUDE.md in directories below cwd, excluding cwd itself (cwd's own file is
+ * already covered by the ancestor walk). Claude Code discovers on-demand
+ * subdirectory files under the current working directory, not under the git
+ * root, so a session started in one package of a monorepo must not surface
+ * candidates from sibling packages it would never load. Dependency
  * directories and dot-directories are skipped to bound the walk; a load
  * observed inside one is still classified and reported, so skipping them
  * costs no visibility. Directory cycles reachable through symlinks are
  * guarded by device and inode, mirroring rules.ts.
  */
-function subdirCandidates(root: string): Candidate[] {
+export function subdirCandidates(cwd: string): Candidate[] {
   const out: Candidate[] = []
   const seenDirs = new Set<string>()
 
@@ -60,7 +63,7 @@ function subdirCandidates(root: string): Candidate[] {
     }
   }
 
-  visit(root, 0)
+  visit(cwd, 0)
   return out
 }
 
@@ -69,9 +72,21 @@ export function discover(cwd: string, homeConfig: string): { root: string; candi
 
   const base = walkCandidates(cwd, homeConfig)
   const rules = ruleCandidates([join(homeConfig, 'rules'), join(root, '.claude', 'rules')])
-  const subs = subdirCandidates(root)
+  const subs = subdirCandidates(cwd)
 
-  const launchPaths = [...base, ...rules].filter((c) => c.label === 'launch').map((c) => c.path)
+  // claudeMdExcludes is computed up front so it can gate which launch files
+  // seed import resolution: an excluded file is never read by Claude Code,
+  // so its imports must never be followed. A file imported by a second,
+  // non-excluded parent still seeds normally, since only the excluded
+  // parent's path is dropped from the seed list, not the imported result.
+  const excludes = loadExcludes(root, homeConfig)
+  const globs = excludes.map((g) => new Bun.Glob(g))
+  const isExcluded = (p: string): boolean => globs.some((g) => g.match(p))
+
+  const launchPaths = [...base, ...rules]
+    .filter((c) => c.label === 'launch')
+    .map((c) => c.path)
+    .filter((p) => !isExcluded(p))
   const imported = resolveImports(launchPaths)
   const importCandidates: Candidate[] = [...imported.keys()].map((p) => ({
     path: p,
@@ -86,12 +101,11 @@ export function discover(cwd: string, homeConfig: string): { root: string; candi
     if (!merged.has(c.path)) merged.set(c.path, c)
   }
 
-  // claudeMdExcludes applies last: a matched candidate is relabelled, not
-  // dropped, so the report can explain why it is absent from the load.
-  const excludes = loadExcludes(root, homeConfig)
-  const globs = excludes.map((g) => new Bun.Glob(g))
+  // claudeMdExcludes applies last to the full merged set too: a matched
+  // candidate is relabelled, not dropped, so the report can explain why it
+  // is absent from the load.
   const candidates = [...merged.values()].map((c) =>
-    globs.some((g) => g.match(c.path)) ? { ...c, label: 'excluded' as const } : c,
+    isExcluded(c.path) ? { ...c, label: 'excluded' as const } : c,
   )
 
   return { root, candidates }

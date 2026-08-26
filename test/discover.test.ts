@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { discover, loadExcludes } from '../src/discover'
+import { discover, loadExcludes, subdirCandidates } from '../src/discover'
 
 function project() {
   const dir = mkdtempSync(join(tmpdir(), 'kanon-d-'))
@@ -68,4 +68,73 @@ test('an excluded candidate is relabelled rather than dropped', () => {
 test('the root is the git root', () => {
   const { repo, home } = project()
   expect(discover(repo, home).root).toBe(repo)
+})
+
+test('the subdirectory walk is rooted at cwd, not the git root (monorepo)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-mono-'))
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  const pkgA = join(repo, 'packages', 'a')
+  const pkgB = join(repo, 'packages', 'b')
+  mkdirSync(join(pkgA, 'sub'), { recursive: true })
+  mkdirSync(pkgB, { recursive: true })
+  writeFileSync(join(pkgA, 'sub', 'CLAUDE.md'), '# Sub\n')
+  writeFileSync(join(pkgB, 'CLAUDE.md'), '# Sibling\n')
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+
+  const { candidates } = discover(pkgA, home)
+  const byPath = new Map(candidates.map((c) => [c.path, c]))
+  expect(byPath.get(join(pkgA, 'sub', 'CLAUDE.md'))?.label).toBe('on-demand')
+  expect(byPath.has(join(pkgB, 'CLAUDE.md'))).toBe(false)
+})
+
+test('excluding the importing file also excludes what only it imports', () => {
+  const { repo, home } = project()
+  writeFileSync(
+    join(repo, '.claude', 'settings.json'),
+    JSON.stringify({ claudeMdExcludes: [join(repo, 'CLAUDE.md')] }),
+  )
+  const byPath = new Map(discover(repo, home).candidates.map((c) => [c.path, c]))
+  expect(byPath.get(join(repo, 'CLAUDE.md'))?.label).toBe('excluded')
+  expect(byPath.has(join(repo, 'docs', 'extra.md'))).toBe(false)
+})
+
+test('a file imported by a second, non-excluded parent still surfaces', () => {
+  const { repo, home } = project()
+  writeFileSync(join(repo, '.claude', 'rules', 'other.md'), 'see @../../docs/extra.md\n')
+  writeFileSync(
+    join(repo, '.claude', 'settings.json'),
+    JSON.stringify({ claudeMdExcludes: [join(repo, 'CLAUDE.md')] }),
+  )
+  const byPath = new Map(discover(repo, home).candidates.map((c) => [c.path, c]))
+  expect(byPath.get(join(repo, 'CLAUDE.md'))?.label).toBe('excluded')
+  expect(byPath.get(join(repo, 'docs', 'extra.md'))?.label).toBe('launch')
+})
+
+test('a symlink cycle in the subdirectory walk does not produce duplicates or hang', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-cycle-'))
+  mkdirSync(join(dir, 'sub'), { recursive: true })
+  writeFileSync(join(dir, 'sub', 'CLAUDE.md'), '# Sub\n')
+  symlinkSync(dir, join(dir, 'loop'))
+
+  const got = subdirCandidates(dir)
+  const paths = got.map((c) => c.path)
+  const uniquePaths = new Set(paths)
+  expect(uniquePaths.size).toBe(1)
+  expect(paths.length).toBe(1)
+})
+
+test('the subdirectory walk stops at a bounded depth', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-depth-'))
+  const names = Array.from({ length: 9 }, (_, i) => `d${i + 1}`)
+  const shallow = join(dir, ...names.slice(0, 8))
+  const deep = join(dir, ...names)
+  mkdirSync(deep, { recursive: true })
+  writeFileSync(join(shallow, 'CLAUDE.md'), '# Shallow\n')
+  writeFileSync(join(deep, 'CLAUDE.md'), '# Deep\n')
+
+  const paths = subdirCandidates(dir).map((c) => c.path)
+  expect(paths).toContain(join(shallow, 'CLAUDE.md'))
+  expect(paths).not.toContain(join(deep, 'CLAUDE.md'))
 })
