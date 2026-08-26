@@ -48,11 +48,56 @@ test('collects the user scope file as launch', () => {
 
 test('every candidate names the rule that produced it', () => {
   const { home, cwd } = tree()
-  for (const c of walkCandidates(cwd, home)) expect(c.rule.length).toBeGreaterThan(0)
+  const validRules = new Set(['managed-policy', 'user-scope', 'ancestor-walk'])
+  for (const c of walkCandidates(cwd, home)) expect(validRules.has(c.rule)).toBe(true)
 })
 
 test('returns no duplicate paths', () => {
   const { home, cwd } = tree()
   const paths = walkCandidates(cwd, home).map((c) => c.path)
   expect(paths.length).toBe(new Set(paths).size)
+})
+
+test('returns candidates in order: broadest to narrowest', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-w-'))
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, 'mid'), { recursive: true })
+  mkdirSync(join(repo, 'mid', 'deep'), { recursive: true })
+  writeFileSync(join(repo, 'CLAUDE.md'), '')
+  writeFileSync(join(repo, 'mid', 'CLAUDE.md'), '')
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'CLAUDE.md'), '')
+
+  const cwd = join(repo, 'mid', 'deep')
+  const candidates = walkCandidates(cwd, home)
+  const paths = candidates.map((c) => c.path)
+
+  const userScopeIdx = paths.indexOf(join(home, 'CLAUDE.md'))
+  const repoRootIdx = paths.indexOf(join(repo, 'CLAUDE.md'))
+  const midIdx = paths.indexOf(join(repo, 'mid', 'CLAUDE.md'))
+
+  expect(userScopeIdx).toBeLessThan(repoRootIdx)
+  expect(repoRootIdx).toBeLessThan(midIdx)
+})
+
+test('deduplicates when cwd is under home, keeping user-scope rule', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-w-'))
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'CLAUDE.md'), '')
+
+  const projectDir = join(dir, 'home', 'code', 'project')
+  mkdirSync(projectDir, { recursive: true })
+
+  const candidates = walkCandidates(projectDir, home)
+  const paths = candidates.map((c) => c.path)
+  const userScopeFile = join(home, 'CLAUDE.md')
+
+  // Should appear exactly once
+  expect(paths.filter((p) => p === userScopeFile).length).toBe(1)
+
+  // Should have user-scope rule, not ancestor-walk
+  const userScopeCandidate = candidates.find((c) => c.path === userScopeFile)
+  expect(userScopeCandidate?.rule).toBe('user-scope')
 })
