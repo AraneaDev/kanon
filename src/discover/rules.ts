@@ -4,10 +4,12 @@ import type { Candidate } from '../types'
 
 /** True when the file opens with YAML frontmatter carrying a paths key. */
 export function isPathScoped(text: string): boolean {
-  if (!text.startsWith('---')) return false
-  const end = text.indexOf('\n---', 3)
+  // Strip UTF-8 BOM if present
+  const stripped = text.startsWith('﻿') ? text.slice(1) : text
+  if (!stripped.startsWith('---')) return false
+  const end = stripped.indexOf('\n---', 3)
   if (end === -1) return false
-  return /^paths\s*:/m.test(text.slice(3, end))
+  return /^paths\s*:/m.test(stripped.slice(3, end))
 }
 
 /**

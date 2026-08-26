@@ -39,6 +39,13 @@ test('a rule with paths frontmatter is path-scoped', () => {
   expect(byPath.get(join(rules, 'backend', 'api.md'))?.label).toBe('path-scoped')
 })
 
+test('a BOM-prefixed rule with paths frontmatter is path-scoped', () => {
+  const rules = rulesDir()
+  writeFileSync(join(rules, 'bom.md'), '﻿---\npaths:\n  - "src/**/*.ts"\n---\n\n# BOM\n')
+  const byPath = new Map(ruleCandidates([rules]).map((c) => [c.path, c]))
+  expect(byPath.get(join(rules, 'bom.md'))?.label).toBe('path-scoped')
+})
+
 test('follows a symlinked rules subdirectory', () => {
   const rules = rulesDir()
   const other = mkdtempSync(join(tmpdir(), 'kanon-shared-'))
@@ -48,11 +55,26 @@ test('follows a symlinked rules subdirectory', () => {
   expect(names).toContain('shared.md')
 })
 
+test('follows a symlinked rule file', () => {
+  const rules = rulesDir()
+  const external = mkdtempSync(join(tmpdir(), 'kanon-external-'))
+  const filePath = join(external, 'linked.md')
+  writeFileSync(filePath, '---\npaths:\n  - "test/**"\n---\n\n# Linked\n')
+  symlinkSync(filePath, join(rules, 'linked.md'))
+  const byPath = new Map(ruleCandidates([rules]).map((c) => [c.path, c]))
+  expect(byPath.get(join(rules, 'linked.md'))).toBeDefined()
+  expect(byPath.get(join(rules, 'linked.md'))?.label).toBe('path-scoped')
+})
+
 test('survives a symlink cycle without hanging', () => {
   const rules = rulesDir()
   symlinkSync(rules, join(rules, 'loop'))
   const got = ruleCandidates([rules])
-  expect(got.length).toBeGreaterThan(0)
+  // Should find exactly the 2 real files (style.md and backend/api.md), no duplicates
+  const paths = got.map((c) => c.path)
+  const uniquePaths = new Set(paths)
+  expect(uniquePaths.size).toBe(2)
+  expect(paths.length).toBe(2)
 })
 
 test('a missing rules directory yields nothing rather than throwing', () => {
