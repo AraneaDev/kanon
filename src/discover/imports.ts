@@ -2,19 +2,22 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, resolve } from 'node:path'
 
-const IMPORT = /(^|\s)@([^\s`]+)/g
+const IMPORT = /([([{]|^|\s)@([^\s`]+)/g
 
 /** Import targets in a file, with code spans and fenced blocks removed first. */
 export function parseImports(text: string): string[] {
   const stripped = text
-    .replace(/```[\s\S]*?```/g, '')
+    .replace(/```[\s\S]*?(?:```|$)/g, '')
     .replace(/~~~[\s\S]*?~~~/g, '')
     .replace(/`[^`\n]*`/g, '')
 
   const out: string[] = []
   for (const m of stripped.matchAll(IMPORT)) {
-    const target = m[2]
-    if (target) out.push(target)
+    let target = m[2]
+    if (target) {
+      target = target.replace(/[.,;:!?\)}\]'"]+$/, '')
+      if (target) out.push(target)
+    }
   }
   return out
 }
@@ -31,9 +34,10 @@ function resolveTarget(target: string, importer: string): string {
  * hops, so the seed files are depth 0 and depth 4 is the last followed.
  */
 export function resolveImports(files: string[], maxDepth = 4): Map<string, string> {
+  const seedSet = new Set<string>(files.map((f) => resolve(f)))
   const found = new Map<string, string>()
-  const visited = new Set<string>(files.map((f) => resolve(f)))
-  let frontier = files.map((f) => resolve(f))
+  const visited = new Set<string>(seedSet)
+  let frontier = Array.from(seedSet)
 
   for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
     const next: string[] = []
@@ -47,6 +51,7 @@ export function resolveImports(files: string[], maxDepth = 4): Map<string, strin
       for (const target of parseImports(text)) {
         const p = resolveTarget(target, importer)
         if (!existsSync(p)) continue
+        if (seedSet.has(p)) continue
         if (!found.has(p)) found.set(p, importer)
         if (visited.has(p)) continue
         visited.add(p)

@@ -35,9 +35,15 @@ test('follows a chain to depth four', () => {
   writeFileSync(join(dir, 'b.md'), '@c.md\n')
   writeFileSync(join(dir, 'c.md'), '@d.md\n')
   writeFileSync(join(dir, 'd.md'), '@e.md\n')
-  writeFileSync(join(dir, 'e.md'), 'leaf\n')
+  writeFileSync(join(dir, 'e.md'), '@f.md\n')
+  writeFileSync(join(dir, 'f.md'), 'leaf\n')
   const got = resolveImports([join(dir, 'a.md')])
-  expect(got.has(join(dir, 'd.md'))).toBe(true)
+  const keys = new Set(got.keys())
+  expect(keys.has(join(dir, 'b.md'))).toBe(true)
+  expect(keys.has(join(dir, 'c.md'))).toBe(true)
+  expect(keys.has(join(dir, 'd.md'))).toBe(true)
+  expect(keys.has(join(dir, 'e.md'))).toBe(true)
+  expect(keys.has(join(dir, 'f.md'))).toBe(false)
 })
 
 test('stops after four hops', () => {
@@ -49,7 +55,12 @@ test('stops after four hops', () => {
   writeFileSync(join(dir, 'e.md'), '@f.md\n')
   writeFileSync(join(dir, 'f.md'), 'too far\n')
   const got = resolveImports([join(dir, 'a.md')])
-  expect(got.has(join(dir, 'f.md'))).toBe(false)
+  const keys = new Set(got.keys())
+  expect(keys.has(join(dir, 'b.md'))).toBe(true)
+  expect(keys.has(join(dir, 'c.md'))).toBe(true)
+  expect(keys.has(join(dir, 'd.md'))).toBe(true)
+  expect(keys.has(join(dir, 'e.md'))).toBe(true)
+  expect(keys.has(join(dir, 'f.md'))).toBe(false)
 })
 
 test('survives an import cycle', () => {
@@ -60,8 +71,59 @@ test('survives an import cycle', () => {
   expect(got.has(join(dir, 'b.md'))).toBe(true)
 })
 
+test('seed file never appears as a key even in a cycle', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  writeFileSync(join(dir, 'a.md'), '@b.md\n')
+  writeFileSync(join(dir, 'b.md'), '@a.md\n')
+  const got = resolveImports([join(dir, 'a.md')])
+  expect(got.has(join(dir, 'a.md'))).toBe(false)
+  expect(got.has(join(dir, 'b.md'))).toBe(true)
+})
+
 test('ignores an import target that does not exist', () => {
   const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
   writeFileSync(join(dir, 'a.md'), '@ghost.md\n')
   expect(resolveImports([join(dir, 'a.md')]).size).toBe(0)
+})
+
+test('strips trailing period from import', () => {
+  expect(parseImports('see @docs/a.md.')).toEqual(['docs/a.md'])
+})
+
+test('strips trailing paren from import', () => {
+  expect(parseImports('(see @docs/c.md)')).toEqual(['docs/c.md'])
+})
+
+test('matches import with opening bracket', () => {
+  expect(parseImports('[@docs/d.md]')).toEqual(['docs/d.md'])
+})
+
+test('does not match email-like pattern', () => {
+  expect(parseImports('contact foo@bar.com')).toEqual([])
+})
+
+test('handles unterminated code fence', () => {
+  const text = '```\n@docs/nope.md\nmore content with @docs/yes.md\n'
+  expect(parseImports(text)).toEqual([])
+})
+
+test('resolves tilde imports to home directory', () => {
+  const { homedir } = require('node:os')
+  const testFile = join(homedir(), '.claude', 'kanon-test-import.md')
+  const sourceDir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const sourceFile = join(sourceDir, 'source.md')
+
+  writeFileSync(testFile, 'home test file\n')
+  writeFileSync(sourceFile, '@~/.claude/kanon-test-import.md\n')
+
+  try {
+    const got = resolveImports([sourceFile])
+    expect(got.has(testFile)).toBe(true)
+    expect(got.get(testFile)).toBe(sourceFile)
+  } finally {
+    const { unlinkSync } = require('node:fs')
+    try {
+      unlinkSync(testFile)
+    } catch {}
+  }
 })
