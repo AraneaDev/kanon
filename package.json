@@ -1,0 +1,14 @@
+{
+  "name": "kanon",
+  "version": "0.0.1",
+  "description": "An instruction-load ledger with origin classification",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "bun": ">=1.1.0" },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run test"
+  },
+  "devDependencies": { "@types/bun": "latest", "typescript": "^5.5.0" }
+}

@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "InstructionsLoaded": [
+      { "hooks": [ { "type": "command", "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/record.sh\"", "timeout": 5 } ] }
+    ],
+    "ConfigChange": [
+      { "hooks": [ { "type": "command", "command": "sh \"$CLAUDE_PLUGIN_ROOT/hooks/scripts/record.sh\"", "timeout": 5 } ] }
+    ]
+  }
+}
