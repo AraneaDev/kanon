@@ -57,11 +57,14 @@ export function buildReport(
   for (const p of loadedOrder) {
     const candidate = byPath.get(p)
     if (!candidate || candidate.label === 'unreachable') {
-      // Kanon's candidate model was wrong about this path, not the user's
-      // configuration. Report it as a disagreement instead of folding it
-      // into `loaded`, where it would misrepresent a normal, expected load.
+      // Kanon's candidate model was wrong about this path (e.g. a lazily
+      // loaded file under a directory the candidate walk deliberately
+      // skips, like vendor/ or node_modules/). That is a fault in layer
+      // two, the prediction, not in layer one: origin classification needs
+      // no prediction at all, so the file still gets classified and still
+      // appears in `loaded`. `modelDisagrees` records how much to trust
+      // `missing`/`quiet`, it does not gate what actually loaded.
       modelDisagrees.push(p)
-      continue
     }
 
     const origin = classify(p, root, homeConfig)

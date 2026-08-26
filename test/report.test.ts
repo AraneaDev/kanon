@@ -66,17 +66,36 @@ test('a loaded file is classified and carries its reason', () => {
   expect(r.loaded[0]?.reason).toBe('session_start')
 })
 
-test('a load with no matching candidate is recorded as model disagreement', () => {
+test('a load with no matching candidate is recorded as model disagreement AND still classified as loaded', () => {
+  // Origin classification needs no prediction, so a candidate-model miss
+  // must not blank out layer one: the file still shows up in `loaded` with
+  // a real origin. `modelDisagrees` says how much to trust `missing`/`quiet`,
+  // it does not gate what actually loaded.
   const r = buildReport(normalise([line('/elsewhere/CLAUDE.md')]), [], ROOT, HOME, new Map())
   expect(r.modelDisagrees).toEqual(['/elsewhere/CLAUDE.md'])
-  expect(r.loaded).toEqual([])
+  expect(r.loaded.map((c) => c.path)).toEqual(['/elsewhere/CLAUDE.md'])
+  expect(r.loaded[0]?.origin).toBe('foreign')
 })
 
-test('a load labelled unreachable is also a model disagreement', () => {
+test('a load labelled unreachable is also a model disagreement AND still classified as loaded', () => {
   const candidates: Candidate[] = [{ path: '/repo/odd.md', label: 'unreachable', rule: 'none' }]
   const r = buildReport(normalise([line('/repo/odd.md')]), candidates, ROOT, HOME, new Map())
   expect(r.modelDisagrees).toEqual(['/repo/odd.md'])
-  expect(r.loaded).toEqual([])
+  expect(r.loaded.map((c) => c.path)).toEqual(['/repo/odd.md'])
+  expect(r.loaded[0]?.origin).toBe('project')
+})
+
+test('a vendored CLAUDE.md that the candidate walk never enumerates still lands in loaded, marked foreign', () => {
+  // subdirCandidates (Task 6) deliberately skips dependency directories, so
+  // a lazily loaded CLAUDE.md under vendor/ or node_modules/ has no matching
+  // candidate at all. It must still appear in `loaded` with origin foreign,
+  // exactly as the spec's sample report shows for vendor/phpstan/phpstan.
+  const vendored = '/repo/vendor/phpstan/phpstan/CLAUDE.md'
+  const r = buildReport(normalise([line(vendored)]), [], ROOT, HOME, new Map())
+  expect(r.loaded).toHaveLength(1)
+  expect(r.loaded[0]?.path).toBe(vendored)
+  expect(r.loaded[0]?.origin).toBe('foreign')
+  expect(r.modelDisagrees).toEqual([vendored])
 })
 
 test('an import flag is carried onto the loaded entry', () => {
@@ -90,10 +109,12 @@ test('the ruleset version is stamped on every report', () => {
   expect(buildReport([], [], ROOT, HOME, new Map()).ruleset).toBe('2026-08')
 })
 
-test('the same file loaded twice appears once', () => {
+test('the same file loaded twice appears once, keeping the first reason seen', () => {
   const candidates: Candidate[] = [{ path: '/repo/CLAUDE.md', label: 'launch', rule: 'ancestor-walk' }]
   const events = normalise([line('/repo/CLAUDE.md'), line('/repo/CLAUDE.md', 'compact')])
-  expect(buildReport(events, candidates, ROOT, HOME, new Map()).loaded.length).toBe(1)
+  const loaded = buildReport(events, candidates, ROOT, HOME, new Map()).loaded
+  expect(loaded.length).toBe(1)
+  expect(loaded[0]?.reason).toBe('session_start')
 })
 
 test('gitIgnored and gitTracked stay null for a non-foreign origin', () => {
