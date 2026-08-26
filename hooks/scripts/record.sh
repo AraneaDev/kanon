@@ -22,6 +22,15 @@ hook=$(printf '%s' "$payload" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:spa
 
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || ts='1970-01-01T00:00:00Z'
 
-printf '{"t":"%s","hook":"%s","raw":%s}\n' "$ts" "$hook" "$payload" >> "$dir/$sid.jsonl" 2>/dev/null
+# Check if payload looks like JSON object (starts with { after stripping leading whitespace)
+payload_trimmed=$(printf '%s' "$payload" | sed 's/^[[:space:]]*//g')
+if [ -n "$payload_trimmed" ] && [ "${payload_trimmed#\{}" != "$payload_trimmed" ]; then
+  # Payload starts with {, treat as JSON object
+  printf '{"t":"%s","hook":"%s","raw":%s}\n' "$ts" "$hook" "$payload" >> "$dir/$sid.jsonl" 2>/dev/null
+else
+  # Payload is not JSON, escape and use unparsed field
+  escaped=$(printf '%s' "$payload" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/	/\\t/g' | sed 's/\r/\\r/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+  printf '{"t":"%s","hook":"%s","raw":null,"unparsed":"%s"}\n' "$ts" "$hook" "$escaped" >> "$dir/$sid.jsonl" 2>/dev/null
+fi
 
 exit 0

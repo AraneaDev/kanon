@@ -35,10 +35,24 @@ test('appends a wrapped payload to the session log', async () => {
   expect(line.t).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
 })
 
-test('a payload with no session id lands in unknown.jsonl and still exits 0', async () => {
+test('a non-JSON payload lands in unknown.jsonl as valid JSON with unparsed field', async () => {
   const home = mkdtempSync(join(tmpdir(), 'kanon-'))
   await record('not json at all', home)
-  expect(existsSync(join(home, 'sessions', 'unknown.jsonl'))).toBe(true)
+  const file = join(home, 'sessions', 'unknown.jsonl')
+  expect(existsSync(file)).toBe(true)
+  const line = JSON.parse(readFileSync(file, 'utf8').trim())
+  expect(line.hook).toBe('unknown')
+  expect(line.raw).toBe(null)
+  expect(line.unparsed).toBe('not json at all')
+})
+
+test('non-JSON with quotes and backslashes round-trips intact', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const payload = 'test "quote" and \\backslash'
+  await record(payload, home)
+  const file = join(home, 'sessions', 'unknown.jsonl')
+  const line = JSON.parse(readFileSync(file, 'utf8').trim())
+  expect(line.unparsed).toBe(payload)
 })
 
 test('appends rather than truncating', async () => {
