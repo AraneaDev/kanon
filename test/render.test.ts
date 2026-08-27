@@ -5,7 +5,17 @@ import { render } from '../src/render'
 import type { Report } from '../src/types'
 
 function base(): Report {
-  return { root: '/repo', ruleset: '2026-08', loaded: [], missing: [], quiet: [], config: [], modelDisagrees: [], skipped: [] }
+  return {
+    root: '/repo',
+    ruleset: '2026-08',
+    loaded: [],
+    missing: [],
+    quiet: [],
+    config: [],
+    modelDisagrees: [],
+    originDisagrees: [],
+    skipped: [],
+  }
 }
 
 test('names the root and the ruleset', () => {
@@ -107,6 +117,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
       { path: '/root/Knossos-MCP/CLAUDE.md', origin: 'project', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null },
       { path: '/root/Knossos-MCP/vendor/phpstan/phpstan/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal', viaImport: null, gitIgnored: false, gitTracked: false },
     ],
+    originDisagrees: [],
     missing: [{ path: '/root/Knossos-MCP/.claude/rules/testing.md', label: 'launch', rule: 'rules-dir' }],
     quiet: [
       { path: '/root/Knossos-MCP/docs/CLAUDE.md', label: 'on-demand', rule: 'subdirectory' },
@@ -186,4 +197,122 @@ test('renders the SESSION line with root and ruleset separated by a gap', () => 
   const out = render(r)
   const sessionLine = out.split('\n')[0]
   expect(sessionLine).toBe('SESSION  /root/Knossos-MCP          ruleset 2026-08')
+})
+
+/**
+ * An origin disagreement is a different admission from the reachability one:
+ * it says a row in LOADED may name the wrong origin, not that NOT LOADED is
+ * unreliable. It gets its own section so the two are never confused.
+ */
+test('names an origin disagreement and what each side said', () => {
+  const r = base()
+  r.originDisagrees = [{ path: '/repo/CLAUDE.md', claimed: 'User', inferred: 'project' }]
+
+  const out = render(r)
+
+  expect(out).toContain('ORIGIN DISAGREEMENT')
+  expect(out).toContain('CLAUDE.md')
+  expect(out).toContain('Claude Code says User, Kanon inferred project')
+})
+
+test('says nothing about origin disagreements when there are none', () => {
+  expect(render(base())).not.toContain('ORIGIN DISAGREEMENT')
+})
+
+/**
+ * `excluded` is the third quiet label, and the only one that names a
+ * decision the user made. It must read as a setting doing its job, never as
+ * a fault: sharing vocabulary with `missing` here would report the user's
+ * own claudeMdExcludes back to them as a problem.
+ */
+test('a quiet candidate excluded by settings names the setting rather than reading as a fault', () => {
+  const r = base()
+  r.quiet = [{ path: '/repo/CLAUDE.md', label: 'excluded', rule: 'ancestor' }]
+  const out = render(r)
+  expect(out).toContain('excluded by claudeMdExcludes')
+  expect(out).not.toContain('missing')
+})
+
+test('an unreadable skip is named under COULD NOT READ and says what to check', () => {
+  const r = base()
+  r.skipped = [{ path: '/repo/.claude/rules/locked.md', reason: 'unreadable' }]
+  const out = render(r)
+  expect(out).toContain('COULD NOT READ')
+  expect(out).toContain('  unreadable .claude/rules/locked.md')
+  expect(out).toContain('permission')
+})
+
+/**
+ * The two disagreement sections answer different questions and must not be
+ * confused for one another: an origin column being wrong says nothing about
+ * whether NOT LOADED can be trusted, and vice versa.
+ */
+test('an origin disagreement does not mark the NOT LOADED section unreliable', () => {
+  const r = base()
+  r.originDisagrees = [{ path: '/repo/CLAUDE.md', claimed: 'User', inferred: 'project' }]
+  const out = render(r)
+  expect(out).toContain('ORIGIN DISAGREEMENT')
+  expect(out).not.toContain('NOT LOADED section is unreliable')
+})
+
+/**
+ * NOT LOADED exists to name absences. With nothing absent the heading would
+ * be an empty promise, so it is not printed at all.
+ */
+test('a report with nothing absent renders no NOT LOADED section', () => {
+  const r = base()
+  r.loaded = [{ path: '/repo/CLAUDE.md', origin: 'project', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null }]
+  expect(render(r)).not.toContain('NOT LOADED')
+})
+
+test('a session with nothing recorded says so rather than showing an empty LOADED section', () => {
+  const out = render(base())
+  expect(out).toContain('LOADED')
+  expect(out).toContain('nothing recorded')
+})
+
+/**
+ * git-ignored is only added on top of the tracked note, never instead of it:
+ * a vendored file being ignored is the ordinary case, and the reader needs
+ * both facts to tell it from one that was committed deliberately.
+ */
+test('a git-ignored foreign file carries both notes on one line', () => {
+  const r = base()
+  r.loaded = [{ path: '/repo/vendor/p/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal', viaImport: null, gitIgnored: true, gitTracked: false }]
+  expect(render(r)).toContain('untracked in this repo, git-ignored')
+})
+
+/** git-ignored is a foreign-only signal, so a false must add nothing at all. */
+test('a foreign file that is not git-ignored says nothing about ignoring', () => {
+  const r = base()
+  r.loaded = [{ path: '/repo/vendor/p/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal', viaImport: null, gitIgnored: false, gitTracked: false }]
+  expect(render(r)).not.toContain('git-ignored')
+})
+
+/**
+ * The import note is what makes a file four hops down the @path graph
+ * explicable at all, and it is not a foreign-only signal: a project file
+ * pulled in by an import is exactly as surprising to find in the list.
+ */
+test('a non-foreign file reached through an import still names its importer', () => {
+  const r = base()
+  r.loaded = [{ path: '/repo/docs/extra.md', origin: 'project', reason: 'session_start', viaImport: '/repo/CLAUDE.md', gitIgnored: null, gitTracked: null }]
+  const out = render(r)
+  expect(out).toContain('imported by CLAUDE.md')
+  expect(out).not.toContain('tracked')
+})
+
+/**
+ * The tag column is pinned, so a `too large` tag with a space in it must
+ * still land the path where every other row puts it.
+ */
+test('the too-large tag lands the path in the same column as every other skip', () => {
+  const r = base()
+  r.skipped = [
+    { path: '/repo/big.md', reason: 'too-large' },
+    { path: '/repo/locked.md', reason: 'unreadable' },
+  ]
+  const out = render(r)
+  expect(out).toContain('  too large  big.md')
+  expect(out).toContain('  unreadable locked.md')
 })

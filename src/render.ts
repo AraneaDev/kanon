@@ -1,11 +1,11 @@
-import { homedir } from 'node:os'
-import { relative } from 'node:path'
+import { PLAIN, type Paint } from './colour'
+import { short } from './paths'
 import type { Classified, Report, Skipped } from './types'
 
-// Column widths pinned to the worked example in docs/2026-08-27-kanon-design.md
-// section 8: the tag and path fields are padded and then concatenated with no
-// extra separator, so the reason/verdict column lands at a fixed offset
-// regardless of tag or path length.
+// Column widths pinned to the worked example in the original design write-up
+// (no longer kept in this repository): the tag and path fields are padded and
+// then concatenated with no extra separator, so the reason/verdict column lands
+// at a fixed offset regardless of tag or path length.
 const TAG_WIDTH = 11
 const PATH_WIDTH = 37
 
@@ -15,32 +15,13 @@ const PATH_WIDTH = 37
  * space instead of the usual padding, so there is always at least one space
  * of separation. Kanon's real paths routinely exceed PATH_WIDTH, so this is
  * the common case, not an edge case, for the path column.
+ *
+ * Every caller pads the *unstyled* string and applies paint to the result.
+ * Padding a string that already carries escape sequences would count them
+ * toward its length and collapse the pinned columns, so the order matters.
  */
 function pad(value: string, width: number): string {
   return value.length < width ? value.padEnd(width) : `${value} `
-}
-
-/**
- * Shorten a path for display: under the session root it is shown relative
- * to that root (e.g. a `project` file becomes `CLAUDE.md`); otherwise,
- * under the user's home directory, it is shown as `~/...` (matching how the
- * design doc's worked example renders `user` origin paths); otherwise it is
- * shown in full, because a relative path that has to walk back out of the
- * root (`../../etc`) is harder to read than the absolute one.
- *
- * Root-relative is checked first: the session root is very often itself a
- * subdirectory of the home directory (e.g. `~/myproject`), and a project
- * file must render as `CLAUDE.md`, not `~/myproject/CLAUDE.md`.
- */
-function short(path: string, root: string): string {
-  const rel = relative(root, path)
-  if (rel && !rel.startsWith('..')) return rel
-
-  const home = homedir()
-  if (home && (path === home || path.startsWith(`${home}/`))) {
-    return `~${path.slice(home.length)}`
-  }
-  return path
 }
 
 /**
@@ -55,9 +36,9 @@ function trackedNote(c: Classified): string {
   return 'tracked status unknown'
 }
 
-function loadedLine(c: Classified, root: string): string {
+function loadedLine(c: Classified, root: string, paint: Paint): string {
   const tag = c.origin === 'foreign' ? 'FOREIGN' : c.origin
-  const main = `  ${pad(tag, TAG_WIDTH)}${pad(short(c.path, root), PATH_WIDTH)}${c.reason}`
+  const main = `  ${paint.origin(pad(tag, TAG_WIDTH), c.origin)}${paint.path(pad(short(c.path, root), PATH_WIDTH))}${paint.reason(c.reason)}`
 
   const notes: string[] = []
   if (c.viaImport) notes.push(`imported by ${short(c.viaImport, root)}`)
@@ -68,7 +49,7 @@ function loadedLine(c: Classified, root: string): string {
     if (c.gitIgnored === true) notes.push('git-ignored')
   }
 
-  return notes.length > 0 ? `${main}\n${' '.repeat(2 + TAG_WIDTH)}${notes.join(', ')}` : main
+  return notes.length > 0 ? `${main}\n${' '.repeat(2 + TAG_WIDTH)}${paint.note(notes.join(', '))}` : main
 }
 
 /**
@@ -117,15 +98,24 @@ function skipDetail(reason: Skipped['reason']): string {
   }
 }
 
-function skipLine(s: Skipped, root: string): string {
-  const main = `  ${pad(skipTag(s.reason), TAG_WIDTH)}${short(s.path, root)}`
+function skipLine(s: Skipped, root: string, paint: Paint): string {
+  const main = `  ${paint.tag(pad(skipTag(s.reason), TAG_WIDTH), 'skip')}${paint.path(short(s.path, root))}`
   // A broken import is only actionable if you know where it came from, so
   // the importer -- when Kanon has one -- is named alongside the reason.
   const detail = s.importer ? `${skipDetail(s.reason)} Imported by ${short(s.importer, root)}.` : skipDetail(s.reason)
-  return `${main}\n${' '.repeat(2 + TAG_WIDTH)}${detail}`
+  return `${main}\n${' '.repeat(2 + TAG_WIDTH)}${paint.note(detail)}`
 }
 
-export function render(report: Report): string {
+/**
+ * The fixed-column report a human reads.
+ *
+ * `paint` defaults to PLAIN, which is the identity, so the default output is
+ * byte-for-byte what it has always been. Only `report`'s stdout, and only
+ * when that is an interactive terminal, is rendered with COLOUR; the
+ * persisted report file and the piped `/kanon` path both keep the default.
+ * See src/colour.ts for why.
+ */
+export function render(report: Report, paint: Paint = PLAIN): string {
   const { root, ruleset } = report
   const out: string[] = []
 
@@ -133,43 +123,53 @@ export function render(report: Report): string {
   // holds for any root length as long as at least one space separates it
   // from the root.
   const gap = Math.max(1, 27 - root.length)
-  out.push(`SESSION  ${root}${' '.repeat(gap)}ruleset ${ruleset}`)
+  out.push(`${paint.heading('SESSION')}  ${paint.path(root)}${' '.repeat(gap)}${paint.note(`ruleset ${ruleset}`)}`)
   out.push('')
 
-  out.push('LOADED')
-  if (report.loaded.length === 0) out.push('  nothing recorded')
-  for (const c of report.loaded) out.push(loadedLine(c, root))
+  out.push(paint.heading('LOADED'))
+  if (report.loaded.length === 0) out.push(`  ${paint.note('nothing recorded')}`)
+  for (const c of report.loaded) out.push(loadedLine(c, root, paint))
 
   if (report.missing.length > 0 || report.quiet.length > 0) {
     out.push('')
-    out.push('NOT LOADED')
+    out.push(paint.heading('NOT LOADED'))
     for (const c of report.missing) {
-      out.push(`  ${pad('missing', TAG_WIDTH)}${pad(short(c.path, root), PATH_WIDTH)}expected at launch`)
+      out.push(`  ${paint.tag(pad('missing', TAG_WIDTH), 'missing')}${paint.path(pad(short(c.path, root), PATH_WIDTH))}${paint.reason('expected at launch')}`)
     }
     for (const c of report.quiet) {
-      out.push(`  ${pad('quiet', TAG_WIDTH)}${pad(short(c.path, root), PATH_WIDTH)}${quietReason(c.label)}`)
+      out.push(`  ${paint.tag(pad('quiet', TAG_WIDTH), 'quiet')}${paint.path(pad(short(c.path, root), PATH_WIDTH))}${paint.reason(quietReason(c.label))}`)
     }
   }
 
   if (report.config.length > 0) {
     out.push('')
-    out.push('CONFIG CHANGED')
+    out.push(paint.heading('CONFIG CHANGED'))
     for (const e of report.config) {
-      out.push(`  ${e.t.slice(11, 16)}  ${e.source}  (+${e.keys.length})`)
+      out.push(`  ${e.t.slice(11, 16)}  ${e.source}  ${paint.note(`(+${e.keys.length})`)}`)
     }
   }
 
   if (report.modelDisagrees.length > 0) {
     out.push('')
-    out.push('NOTE  the reachability model disagrees with reality for:')
-    for (const p of report.modelDisagrees) out.push(`  ${short(p, root)}`)
-    out.push('  The NOT LOADED section is unreliable for this session.')
+    out.push(paint.warning('NOTE  the reachability model disagrees with reality for:'))
+    for (const p of report.modelDisagrees) out.push(`  ${paint.path(short(p, root))}`)
+    out.push(`  ${paint.note('The NOT LOADED section is unreliable for this session.')}`)
+  }
+
+  if (report.originDisagrees.length > 0) {
+    out.push('')
+    // Separate from the reachability NOTE above on purpose: this one casts
+    // doubt on an origin column, not on the NOT LOADED section.
+    out.push(paint.warning('ORIGIN DISAGREEMENT'))
+    for (const d of report.originDisagrees) {
+      out.push(`  ${paint.path(pad(short(d.path, root), TAG_WIDTH + PATH_WIDTH - 2))}${paint.note(`Claude Code says ${d.claimed}, Kanon inferred ${d.inferred}`)}`)
+    }
   }
 
   if (report.skipped.length > 0) {
     out.push('')
-    out.push('COULD NOT READ')
-    for (const s of report.skipped) out.push(skipLine(s, root))
+    out.push(paint.heading('COULD NOT READ'))
+    for (const s of report.skipped) out.push(skipLine(s, root, paint))
   }
 
   return out.join('\n')

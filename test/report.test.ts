@@ -19,7 +19,9 @@ function line(file: string, reason = 'session_start'): string {
 
 test('normalise turns wrapped payloads into load events', () => {
   const got = normalise([line('/repo/CLAUDE.md')])
-  expect(got).toEqual([{ t: '2026-08-27T00:00:00Z', ev: 'loaded', path: '/repo/CLAUDE.md', reason: 'session_start' }])
+  expect(got).toEqual([
+    { t: '2026-08-27T00:00:00Z', ev: 'loaded', path: '/repo/CLAUDE.md', reason: 'session_start', memoryType: null },
+  ])
 })
 
 test('normalise turns a config change into a config event', () => {
@@ -186,3 +188,90 @@ function mktempGitRepo(): string {
   Bun.spawnSync(['git', 'init', '-q'], { cwd: join(dir, 'repo') })
   return dir
 }
+
+// --- memory_type cross-check -------------------------------------------------
+// Claude Code states a file's scope; Kanon infers one. Where the two are
+// genuinely incompatible, Kanon is the one that is wrong.
+
+function claimLine(file: string, memoryType: string | null): string {
+  const raw: Record<string, unknown> = {
+    session_id: 's',
+    hook_event_name: 'InstructionsLoaded',
+    file_path: file,
+    load_reason: 'session_start',
+  }
+  if (memoryType !== null) raw.memory_type = memoryType
+  return JSON.stringify({ t: '2026-08-27T00:00:00Z', hook: 'InstructionsLoaded', raw })
+}
+
+function reportFor(file: string, memoryType: string | null, root = ROOT) {
+  return buildReport(normalise([claimLine(file, memoryType)]), [], root, '/home/.claude', new Map())
+}
+
+test('a memory_type agreeing with the inferred origin raises nothing', () => {
+  const r = reportFor('/home/.claude/rules/style.md', 'User')
+
+  expect(r.originDisagrees).toEqual([])
+  expect(r.loaded[0]?.origin).toBe('user')
+})
+
+test('an incompatible memory_type is recorded as an origin disagreement', () => {
+  const r = reportFor('/repo/CLAUDE.md', 'User')
+
+  expect(r.originDisagrees).toEqual([{ path: '/repo/CLAUDE.md', claimed: 'User', inferred: 'project' }])
+})
+
+test('Claude Code wins an incompatible claim it states unambiguously', () => {
+  const r = reportFor('/repo/CLAUDE.md', 'User')
+
+  expect(r.loaded[0]?.origin).toBe('user')
+})
+
+/**
+ * The guard that stops this feature crying wolf. Claude Code has no concept
+ * of "foreign": a dependency's CLAUDE.md is just another project-scoped file
+ * to it. `foreign` is a refinement of `Project`, not a contradiction of it,
+ * so the pair must never be reported as a disagreement -- otherwise every
+ * genuine FOREIGN find, the highest-value thing Kanon reports, would arrive
+ * next to a note calling Kanon's own classification into question.
+ */
+test('a Project claim does not contradict an inferred foreign origin', () => {
+  const r = reportFor('/repo/vendor/p/CLAUDE.md', 'Project')
+
+  expect(r.originDisagrees).toEqual([])
+  expect(r.loaded[0]?.origin).toBe('foreign')
+})
+
+/**
+ * An unrecognised value is not evidence of anything. Only `User` has been
+ * seen on a live payload, so the vocabulary is open and an unknown word must
+ * never be turned into a claim about Kanon being wrong.
+ */
+test('an unrecognised memory_type is not treated as a claim', () => {
+  const r = reportFor('/repo/vendor/p/CLAUDE.md', 'SomethingNew')
+
+  expect(r.originDisagrees).toEqual([])
+  expect(r.loaded[0]?.origin).toBe('foreign')
+})
+
+test('a payload with no memory_type is not treated as a claim', () => {
+  const r = reportFor('/repo/CLAUDE.md', null)
+
+  expect(r.originDisagrees).toEqual([])
+  expect(r.loaded[0]?.origin).toBe('project')
+})
+
+/** An origin disagreement says nothing about reachability, so it must not
+ * poison the NOT LOADED section the way modelDisagrees does. */
+test('an origin disagreement leaves the reachability verdict alone', () => {
+  const r = buildReport(
+    normalise([claimLine('/repo/CLAUDE.md', 'User')]),
+    [{ path: '/repo/CLAUDE.md', label: 'launch', rule: 'ancestor-walk' }],
+    ROOT,
+    '/home/.claude',
+    new Map(),
+  )
+
+  expect(r.originDisagrees).toHaveLength(1)
+  expect(r.modelDisagrees).toEqual([])
+})

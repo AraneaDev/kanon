@@ -2,7 +2,18 @@ import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { classify, hasDependencySegment } from './origin'
-import { RULESET, type Candidate, type Classified, type ConfigEvent, type Event, type Report, type Skipped } from './types'
+import {
+  CLAIMED_ORIGINS,
+  RULESET,
+  type Candidate,
+  type Classified,
+  type ConfigEvent,
+  type Event,
+  type Origin,
+  type OriginDisagreement,
+  type Report,
+  type Skipped,
+} from './types'
 
 /** realpath, falling back to the path as given when it cannot be resolved. */
 function realPath(path: string): string {
@@ -41,6 +52,35 @@ function gitFlags(path: string, root: string): { gitIgnored: boolean | null; git
   }
 }
 
+/**
+ * Reconcile Kanon's inferred origin with Claude Code's stated `memory_type`.
+ *
+ * Claude Code is stating a fact about a file it just loaded; Kanon is
+ * inferring one from the path. So where the claim is recognised and cannot
+ * be reconciled with the inference, the claim wins the reported origin and
+ * the disagreement is recorded. Two cases deliberately stay silent: an
+ * unrecognised or absent claim (no evidence, not counter-evidence), and a
+ * claim that merely names a broader scope than Kanon did.
+ *
+ * The claim only *overrides* when it names exactly one origin. A claim like
+ * `Project`, which spans three, identifies that Kanon is wrong without
+ * saying which of the three is right, and guessing there would trade a known
+ * wrong answer for an unknown one.
+ */
+function reconcile(
+  path: string,
+  inferred: Origin,
+  claimed: string | undefined,
+  out: OriginDisagreement[],
+): Origin {
+  if (claimed === undefined) return inferred
+  const compatible = CLAIMED_ORIGINS[claimed]
+  if (compatible === undefined || compatible.includes(inferred)) return inferred
+
+  out.push({ path, claimed, inferred })
+  return compatible.length === 1 ? (compatible[0] as Origin) : inferred
+}
+
 export function buildReport(
   events: Event[],
   candidates: Candidate[],
@@ -55,6 +95,7 @@ export function buildReport(
   // seen; later reasons (e.g. a compact-triggered reload) are discarded.
   const loadedOrder: string[] = []
   const firstReason = new Map<string, string>()
+  const claimedType = new Map<string, string>()
   for (const e of events) {
     if (e.ev !== 'loaded') continue
     // Resolved through realpath so the report names the file's real location
@@ -65,11 +106,13 @@ export function buildReport(
     if (!firstReason.has(p)) {
       firstReason.set(p, e.reason)
       loadedOrder.push(p)
+      if (e.memoryType !== null) claimedType.set(p, e.memoryType)
     }
   }
 
   const loaded: Classified[] = []
   const modelDisagrees: string[] = []
+  const originDisagrees: OriginDisagreement[] = []
   for (const p of loadedOrder) {
     const candidate = byPath.get(p)
     // A path running through a dependency directory (vendor/, node_modules/,
@@ -88,7 +131,8 @@ export function buildReport(
       modelDisagrees.push(p)
     }
 
-    const origin = classify(p, root, homeConfig)
+    const inferred = classify(p, root, homeConfig)
+    const origin = reconcile(p, inferred, claimedType.get(p), originDisagrees)
     const isForeign = origin === 'foreign'
     loaded.push({
       path: p,
@@ -112,5 +156,5 @@ export function buildReport(
 
   const config = events.filter((e): e is ConfigEvent => e.ev === 'config')
 
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, skipped }
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped }
 }
