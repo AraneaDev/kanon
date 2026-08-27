@@ -44,7 +44,9 @@ them all the same way and reports none of it. Kanon writes down what actually ha
 - **Classifies where each one came from.** `user` for your own `~/.claude` standing instructions,
   `project` for the repository you are in, and `FOREIGN` for anything shipped inside a dependency
   directory or living outside both. A foreign file got a voice in your session without you
-  choosing to give it one, and that is the highest-value thing Kanon can tell you.
+  choosing to give it one, and that is the highest-value thing Kanon can tell you. Two more exist
+  for completeness: `managed`, the platform policy file your organisation deploys, and `local`, a
+  `CLAUDE.local.md`. Both are exact matches on where the file sits, so neither needs watching.
 - **Names what did not load.** A launch-time file that never arrived is reported as `missing`,
   which is a fault. A subdirectory or path-scoped rule that simply never triggered is reported as
   `quiet`, which is a fact about the session rather than a fault.
