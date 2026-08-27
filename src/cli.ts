@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { discover } from './discover'
@@ -111,10 +111,27 @@ function recordedRoot(path: string): string | undefined {
  * discoverable root never matches, and if nothing matches, there is no
  * fallback at all -- never a session from a different repository.
  */
+/**
+ * Session roots are compared through realpath, because the two sides reach the
+ * comparison by different routes. On macOS `/tmp` and `/var` are symlinks into
+ * `/private`, so the cwd a hook recorded and the cwd `/kanon` is invoked with
+ * can name the same directory with different strings. Comparing them literally
+ * makes Kanon report "no recorded session found" for a session it holds.
+ * A path that cannot be resolved falls back to itself rather than throwing.
+ */
+function realRoot(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
 function latestSessionFor(cwd: string): string | undefined {
-  const targetRoot = sessionRoot(cwd)
+  const targetRoot = realRoot(sessionRoot(cwd))
   for (const f of sessionFiles()) {
-    if (recordedRoot(f.path) === targetRoot) return f.id
+    const recorded = recordedRoot(f.path)
+    if (recorded !== undefined && realRoot(recorded) === targetRoot) return f.id
   }
   return undefined
 }

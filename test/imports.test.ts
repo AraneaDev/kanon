@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { parseImports, resolveImports } from '../src/discover/imports'
 import { MAX_FILE_BYTES } from '../src/limits'
 
@@ -153,22 +153,23 @@ test('onSkip is optional and existing callers are unaffected', () => {
 })
 
 test('resolves tilde imports to home directory', () => {
-  const { homedir } = require('node:os')
-  const testFile = join(homedir(), '.claude', 'kanon-test-import.md')
+  // Bun caches os.homedir(), so redirecting HOME at runtime does not work.
+  // The target therefore has to live under the real home directory. It goes
+  // in a temp directory there rather than under ~/.claude, which is the one
+  // place Kanon promises never to write, and it is removed afterwards.
+  const homeTmp = mkdtempSync(join(homedir(), '.kanon-test-'))
+  const target = join(homeTmp, 'imported.md')
+  writeFileSync(target, 'home test file\n')
+
   const sourceDir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
   const sourceFile = join(sourceDir, 'source.md')
-
-  writeFileSync(testFile, 'home test file\n')
-  writeFileSync(sourceFile, '@~/.claude/kanon-test-import.md\n')
+  writeFileSync(sourceFile, `@~/${basename(homeTmp)}/imported.md\n`)
 
   try {
     const got = resolveImports([sourceFile])
-    expect(got.has(testFile)).toBe(true)
-    expect(got.get(testFile)).toBe(sourceFile)
+    expect(got.has(target)).toBe(true)
+    expect(got.get(target)).toBe(sourceFile)
   } finally {
-    const { unlinkSync } = require('node:fs')
-    try {
-      unlinkSync(testFile)
-    } catch {}
+    rmSync(homeTmp, { recursive: true, force: true })
   }
 })

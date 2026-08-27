@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { render } from '../src/render'
 import type { Report } from '../src/types'
 
@@ -102,7 +103,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
     root: '/root/Knossos-MCP',
     ruleset: '2026-08',
     loaded: [
-      { path: '/root/.claude/rules/context7.md', origin: 'user', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null },
+      { path: join(homedir(), '.claude', 'rules', 'context7.md'), origin: 'user', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null },
       { path: '/root/Knossos-MCP/CLAUDE.md', origin: 'project', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null },
       { path: '/root/Knossos-MCP/vendor/phpstan/phpstan/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal', viaImport: null, gitIgnored: false, gitTracked: false },
     ],
