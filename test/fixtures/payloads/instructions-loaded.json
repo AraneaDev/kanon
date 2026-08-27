@@ -1,0 +1,9 @@
+{
+  "session_id": "0a829e1e-84d7-4d55-b93b-8d614202a639",
+  "transcript_path": "/root/.claude/projects/-root-kanon/0a829e1e-84d7-4d55-b93b-8d614202a639.jsonl",
+  "cwd": "/root/kanon",
+  "hook_event_name": "InstructionsLoaded",
+  "file_path": "/root/.claude/rules/schrijfstijl.md",
+  "memory_type": "User",
+  "load_reason": "session_start"
+}

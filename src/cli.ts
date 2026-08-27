@@ -2,13 +2,15 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { brief, type BriefInput } from './brief'
+import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
-import { prune } from './limits'
+import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
-import { sessionRoot } from './origin'
+import { classify, sessionRoot } from './origin'
 import { render } from './render'
 import { buildReport } from './report'
-import type { Report } from './types'
+import type { Classified, Report } from './types'
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
@@ -156,6 +158,106 @@ function writeAtomic(path: string, text: string): void {
   }
 }
 
+/**
+ * The first line of a file that reads like a directive rather than
+ * scaffolding. Headings, front-matter fences and blank lines are skipped;
+ * everything else is taken as-is.
+ *
+ * This is the one place Kanon looks at an instruction file's *content*
+ * rather than its provenance, and it is deliberately shallow: enough to let
+ * Claude match a foreign file against the directives already merged into its
+ * context, and nothing that could be mistaken for judging what the file
+ * says. Kanon still does not score, rank, or scan these files.
+ */
+function firstDirective(path: string): string | null {
+  if (tooLarge(path)) return null
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+  let inFrontMatter = false
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line.length === 0) continue
+    if (line.startsWith('---')) {
+      inFrontMatter = !inFrontMatter
+      continue
+    }
+    if (inFrontMatter || line.startsWith('#')) continue
+    return line.length > 120 ? `${line.slice(0, 117)}...` : line
+  }
+  return null
+}
+
+/**
+ * What the brief should say when Kanon has no events for this session.
+ *
+ * SessionStart may fire before the first InstructionsLoaded is recorded, so
+ * going silent (the way `alarm` does) would mean Claude usually learns
+ * nothing at all. Layer two needs no events: `discover` inspects the
+ * filesystem and predicts the launch set, and each prediction is classified
+ * exactly as a real load would be.
+ */
+function predictedFiles(cwd: string, home: string, root: string): Classified[] {
+  const { candidates } = discover(cwd, home)
+  return candidates
+    .filter((c) => c.label === 'launch')
+    .map((c) => ({
+      path: c.path,
+      origin: classify(c.path, root, home),
+      reason: 'expected at launch',
+      viaImport: null,
+      gitIgnored: null,
+      gitTracked: null,
+    }))
+}
+
+function briefInput(session: string | undefined, cwd: string): BriefInput {
+  const home = claudeHome()
+  const root = sessionRoot(cwd)
+  const hasEvents = session !== undefined && existsSync(sessionFile(session))
+
+  if (!hasEvents) return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+
+  const report = collect(session, cwd)
+  // An existing but empty log is still an unobserved session: the file can
+  // be created by a hook that recorded nothing usable. Reporting "no
+  // instruction files govern you" there would be a confident lie, so it
+  // falls back to prediction like any other unrecorded session.
+  if (report.loaded.length === 0) {
+    return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+  }
+  return { root: report.root, basis: 'observed', files: report.loaded, missing: report.missing }
+}
+
+/**
+ * The SessionStart payload for the brief, addressed to both of its readers.
+ *
+ * `systemMessage` is shown in the transcript and, per Claude Code's hook
+ * contract, is explicitly *not* added to Claude's context -- "Claude never
+ * sees it". The brief exists to calibrate Claude's trust in instructions it
+ * holds with no attribution, and it closes by asking Claude to raise anything
+ * alarming with the user; on that channel alone, both were addressed to a
+ * reader that never received them. `hookSpecificOutput.additionalContext` is
+ * the SessionStart channel that does reach the model.
+ *
+ * Both are emitted rather than one: the user keeps the visible line in the
+ * transcript, and Claude gets the text that was written for it. The two carry
+ * the same string on purpose -- a brief that said different things to the two
+ * readers would be the one bug this tool exists to catch.
+ *
+ * No colour on either. This text is quoted verbatim into a JSON payload and
+ * read by a model; see src/colour.ts for why that rules escape codes out.
+ */
+function briefHookPayload(text: string): string {
+  return JSON.stringify({
+    systemMessage: text,
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text },
+  })
+}
+
 function alarmLines(report: Report): string[] {
   const lines: string[] = []
   for (const c of report.loaded) {
@@ -189,8 +291,12 @@ function main(): void {
       return
     }
     const report = collect(session, cwd)
+    // Two renderings of one report, and the plain one is the record. Colour
+    // is a property of the terminal it is being printed to, never of the
+    // report itself, so the file on disk -- read back later, by anything --
+    // gets the same bytes whether or not this run had a terminal.
     const text = render(report)
-    console.log(text)
+    console.log(colourEnabled() ? render(report, COLOUR) : text)
     try {
       const dir = join(kanonHome(), 'reports')
       mkdirSync(dir, { recursive: true })
@@ -200,6 +306,16 @@ function main(): void {
       // own budget, not a write failure here, is what the spec asks us to
       // survive without corrupting the file that's already there.
     }
+    return
+  }
+
+  if (command === 'brief') {
+    // Unlike `alarm`, this always speaks: a session where Claude is told
+    // nothing about what governs it is the failure this command exists to
+    // prevent, so an unrecorded session falls back to prediction rather
+    // than to silence.
+    const text = brief(briefInput(session, cwd), firstDirective)
+    console.log(flag('hook') ? briefHookPayload(text) : text)
     return
   }
 
@@ -223,7 +339,7 @@ function main(): void {
     return
   }
 
-  console.log('usage: kanon [report|alarm] [--session <id>] [--cwd <path>] [--hook]')
+  console.log('usage: kanon [report|brief|alarm] [--session <id>] [--cwd <path>] [--hook]')
 }
 
 try {

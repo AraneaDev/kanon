@@ -10,11 +10,10 @@ interface Wrapped {
 /**
  * Turn recorder lines into events.
  *
- * `file_path` and `load_reason` are the InstructionsLoaded field names from
- * Claude Code's documentation; they have NOT been confirmed against a live
- * session (see Task 1 spike). This function is the only place in the
- * codebase that names them, so if Anthropic renames or the spike turns out
- * to be wrong, this is a one-place edit.
+ * `file_path`, `load_reason` and `memory_type` are the InstructionsLoaded
+ * field names, confirmed against a live session on 2026-08-27 (see
+ * test/fixtures/payloads/). This function is the only place in the codebase
+ * that names them, so if Anthropic renames one, this is a one-place edit.
  */
 export function normalise(lines: string[]): Event[] {
   const out: Event[] = []
@@ -50,7 +49,8 @@ export function normalise(lines: string[]): Event[] {
         continue
       }
       const reason = typeof raw.load_reason === 'string' ? raw.load_reason : 'unknown'
-      out.push({ t, ev: 'loaded', path, reason })
+      const memoryType = typeof raw.memory_type === 'string' ? raw.memory_type : null
+      out.push({ t, ev: 'loaded', path, reason, memoryType })
       continue
     }
 

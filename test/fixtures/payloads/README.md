@@ -1,19 +1,36 @@
-# Payload Fixtures
+# Payload fixtures
 
-## Payload Spike - Pending
+Payloads captured verbatim from a live Claude Code session, kept so the
+normaliser is tested against what Claude Code actually sends rather than
+against what Kanon assumes it sends.
 
-This directory is reserved for real payload samples captured during the payload spike in Task 1 Step 8. The spike requires a live Claude Code session and has not yet been run.
+## What the spike settled
 
-### Questions Awaiting Live Data
+Captured 2026-08-27 from a session in this repository.
 
-1. **Field names:** Does the payload carry `file_path` and `load_reason`, or different names?
-2. **Lazy loading:** Does `InstructionsLoaded` fire for a lazily loaded subdirectory `CLAUDE.md`, or only at launch?
+- **Field names are confirmed.** `InstructionsLoaded` carries `file_path` and
+  `load_reason`, as the documentation said it would.
+- **There is a third field.** `memory_type` states Claude Code's own view of a
+  file's scope. The only value seen so far is `User`. Kanon reads it as a
+  cross-check on the origin it infers itself, and treats an unrecognised value
+  as no claim at all rather than as a contradiction.
+- **`load_reason` is an open vocabulary.** Alongside `session_start`, a second
+  session recorded `compact`, so instruction files reload mid-session. Reasons
+  are printed verbatim, so a new one costs nothing.
 
-### Fixture Files
+## Still open
 
-- `instructions-loaded.json` - Sample `InstructionsLoaded` payload (pending)
-- `config-change.json` - Sample `ConfigChange` payload (pending)
+- **`ConfigChange` has not been observed.** `config-change.json` is absent
+  because no configuration change has been recorded yet. `normalise.ts` reads
+  `config_source` and `changed_keys` from the documentation alone, and that
+  half of the normaliser is still unconfirmed.
+- **Hook ordering is unknown.** Whether `SessionStart` fires before or after
+  the first `InstructionsLoaded` decides whether the session-start brief can
+  describe the current session or must predict it. `hooks.json` now records
+  `SessionStart` too, so the next session answers this.
 
-### Dependency
+## Files
 
-Only `src/normalise.ts` (Task 7) depends on the answers to these questions. Field names determine field mapping in the normaliser. Lazy-loading behavior affects timeline assumptions in the design specification (section 8).
+- `instructions-loaded.json` — a real `InstructionsLoaded` payload. Used by
+  `test/normalise.test.ts`. Re-capture it from `~/.kanon/sessions/*.jsonl` if
+  Claude Code changes shape; the test is written to fail rather than adapt.
