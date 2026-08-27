@@ -4,7 +4,7 @@
     "name": "AraneaDev",
     "url": "https://github.com/AraneaDev"
   },
-  "description": "Small, focused Claude Code plugins.",
+  "description": "A local-first ledger of the instruction files governing a Claude Code session.",
   "plugins": [
     {
       "name": "kanon",
