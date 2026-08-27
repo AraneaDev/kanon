@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { tooLarge } from '../limits'
 import type { Candidate } from '../types'
 
 /** True when the file opens with YAML frontmatter carrying a paths key. */
@@ -52,6 +53,10 @@ export function ruleCandidates(roots: string[]): Candidate[] {
         continue
       }
       if (!name.endsWith('.md')) continue
+      // Checked before the read below, not after: this is what keeps a
+      // 4 MiB+ file's content out of memory, matching Claude Code's own
+      // limit rather than merely reporting it after the fact.
+      if (tooLarge(full)) continue
       const p = resolve(full)
       if (seenFiles.has(p)) continue
       seenFiles.add(p)

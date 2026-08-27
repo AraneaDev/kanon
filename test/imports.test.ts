@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseImports, resolveImports } from '../src/discover/imports'
+import { MAX_FILE_BYTES } from '../src/limits'
 
 test('finds a bare import', () => {
   expect(parseImports('See @docs/git.md for detail')).toEqual(['docs/git.md'])
@@ -105,6 +106,16 @@ test('does not match email-like pattern', () => {
 test('handles unterminated code fence', () => {
   const text = '```\n@docs/nope.md\nmore content with @docs/yes.md\n'
   expect(parseImports(text)).toEqual([])
+})
+
+test('an importer over 4 MiB is skipped rather than read for imports', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const big = join(dir, 'big.md')
+  writeFileSync(big, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
+  writeFileSync(big, '\n@child.md\n', { flag: 'a' })
+  writeFileSync(join(dir, 'child.md'), 'leaf\n')
+  const got = resolveImports([big])
+  expect(got.size).toBe(0)
 })
 
 test('resolves tilde imports to home directory', () => {

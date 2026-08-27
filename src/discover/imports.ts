@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, resolve } from 'node:path'
+import { tooLarge } from '../limits'
 
 const IMPORT = /([([{]|^|\s)@([^\s`]+)/g
 
@@ -42,6 +43,11 @@ export function resolveImports(files: string[], maxDepth = 4): Map<string, strin
   for (let depth = 0; depth < maxDepth && frontier.length > 0; depth++) {
     const next: string[] = []
     for (const importer of frontier) {
+      // Same guard as rules.ts, and for the same reason: an importer over
+      // the limit is a file Claude Code itself would skip loading, so
+      // treating it as having no @imports (rather than reading it in
+      // full to find out) costs no accuracy and bounds the read.
+      if (tooLarge(importer)) continue
       let text = ''
       try {
         text = readFileSync(importer, 'utf8')

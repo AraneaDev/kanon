@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { discover } from './discover'
 import { resolveImports } from './discover/imports'
+import { prune } from './limits'
 import { normalise } from './normalise'
 import { sessionRoot } from './origin'
 import { render } from './render'
@@ -169,6 +170,16 @@ function alarmLines(report: Report): string[] {
 function main(): void {
   const command = process.argv[2] ?? 'report'
   const cwd = arg('cwd') ?? process.cwd()
+
+  // Housekeeping, not reporting: it must never stop a report being
+  // produced, so a failure here (a permissions error, a symlink where a
+  // directory should be, anything) is swallowed rather than surfaced.
+  try {
+    prune(kanonHome(), Date.now())
+  } catch {
+    // See above.
+  }
+
   const sessionArg = arg('session')
   const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
 

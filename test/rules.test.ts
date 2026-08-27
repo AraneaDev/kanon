@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ruleCandidates } from '../src/discover/rules'
+import { MAX_FILE_BYTES } from '../src/limits'
 
 function rulesDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'kanon-r-'))
@@ -79,4 +80,12 @@ test('survives a symlink cycle without hanging', () => {
 
 test('a missing rules directory yields nothing rather than throwing', () => {
   expect(ruleCandidates(['/definitely/not/here'])).toEqual([])
+})
+
+test('a rule file over 4 MiB is skipped rather than read', () => {
+  const rules = rulesDir()
+  const big = join(rules, 'big.md')
+  writeFileSync(big, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
+  const paths = ruleCandidates([rules]).map((c) => c.path)
+  expect(paths).not.toContain(big)
 })
