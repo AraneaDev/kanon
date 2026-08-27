@@ -86,8 +86,22 @@ jobs:
                 echo "FAIL $f exited $rc on payload: ${payload:-<empty>}"
                 status=1
               fi
+
+              # Again with CLAUDE_PLUGIN_ROOT unset. Every run above supplies
+              # it, which is what let two hooks ship a `set -u` abort on an
+              # unbound variable: the shell exits non-zero before the `exit 0`
+              # at the foot of the script can run. The environment belongs to
+              # Claude Code rather than to Kanon, so it is not Kanon's to
+              # assume.
+              printf '%s' "$payload" \
+                | env -u CLAUDE_PLUGIN_ROOT KANON_HOME="$(mktemp -d)" sh "$f" >/dev/null 2>&1
+              rc=$?
+              if [ "$rc" -ne 0 ]; then
+                echo "FAIL $f exited $rc with CLAUDE_PLUGIN_ROOT unset, payload: ${payload:-<empty>}"
+                status=1
+              fi
             done
-            echo "ok   $f exits 0 on every payload"
+            echo "ok   $f exits 0 on every payload, set or unset plugin root"
           done
           exit $status
 

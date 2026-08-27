@@ -590,3 +590,30 @@ test('the hook payload is a single line of valid JSON a shell script can print v
   expect(out.trim().split('\n')).toHaveLength(1)
   expect(() => JSON.parse(out.trim())).not.toThrow()
 })
+
+/**
+ * brief is the one command that must always speak. A log that exists and
+ * cannot be read (a directory where the file should be, a permissions error)
+ * is no more evidence about this session than no log at all, so it predicts
+ * rather than going silent and leaving Claude told nothing.
+ *
+ * report and alarm deliberately behave differently on the same input, which
+ * the two tests above this pin: a report that cannot be produced says so
+ * loudly, and an alarm with no evidence behind it says nothing.
+ */
+test('brief predicts rather than going silent when the session log cannot be read', async () => {
+  const { home, repo, env } = isolated('kanon-cli-brief-unreadable-')
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
+  mkdirSync(join(home, 'sessions', 'demo.jsonl'), { recursive: true })
+
+  const { out, code } = await runFull(['brief', '--session', 'demo', '--cwd', repo, '--hook'], env)
+
+  expect(code).toBe(0)
+  const parsed = JSON.parse(out.trim()) as {
+    systemMessage: string
+    hookSpecificOutput: { additionalContext: string }
+  }
+  expect(parsed.systemMessage).toContain('(predicted)')
+  expect(parsed.systemMessage).toContain('project  CLAUDE.md')
+  expect(parsed.hookSpecificOutput.additionalContext).toBe(parsed.systemMessage)
+})

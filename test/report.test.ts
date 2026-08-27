@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildReport } from '../src/report'
 import { normalise } from '../src/normalise'
-import type { Candidate } from '../src/types'
+import type { Candidate, Event } from '../src/types'
 import { tmp } from './tmp'
 
 const HOME = '/home/x/.claude'
@@ -274,4 +274,41 @@ test('an origin disagreement leaves the reachability verdict alone', () => {
 
   expect(r.originDisagrees).toHaveLength(1)
   expect(r.modelDisagrees).toEqual([])
+})
+
+/**
+ * A file loading twice is ordinary: a compact reload is the usual second.
+ * `memory_type` is not guaranteed on any single payload, so tying the claim
+ * to the first event would throw away a later one's claim whenever the first
+ * carried none, leaving the origin unchecked exactly when Claude Code did
+ * state a scope.
+ */
+test('a memory_type arriving on a later load of the same file is still cross-checked', () => {
+  const events: Event[] = [
+    { t: '', ev: 'loaded', path: '/repo/CLAUDE.md', reason: 'session_start', memoryType: null },
+    { t: '', ev: 'loaded', path: '/repo/CLAUDE.md', reason: 'compact', memoryType: 'User' },
+  ]
+
+  const r = buildReport(events, [], '/repo', '/home/x/.claude', new Map())
+
+  expect(r.originDisagrees).toEqual([{ path: '/repo/CLAUDE.md', claimed: 'User', inferred: 'project' }])
+  // The claim names exactly one origin, so it wins the column.
+  expect(r.loaded[0]?.origin).toBe('user')
+  // The reason still comes from the first load, not the reload.
+  expect(r.loaded[0]?.reason).toBe('session_start')
+})
+
+/** First non-null wins, so a later contradicting claim cannot overwrite one already seen. */
+test('the first claim seen survives a later load claiming something else', () => {
+  const events: Event[] = [
+    { t: '', ev: 'loaded', path: '/repo/CLAUDE.md', reason: 'session_start', memoryType: 'Project' },
+    { t: '', ev: 'loaded', path: '/repo/CLAUDE.md', reason: 'compact', memoryType: 'User' },
+  ]
+
+  const r = buildReport(events, [], '/repo', '/home/x/.claude', new Map())
+
+  // Project is compatible with the inferred project origin, so nothing is
+  // reported; the later User claim must not displace it and invent one.
+  expect(r.originDisagrees).toEqual([])
+  expect(r.loaded[0]?.origin).toBe('project')
 })

@@ -6,7 +6,7 @@
 **Including the ones you thought loaded and didn't.**
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
-[![Tests](https://img.shields.io/badge/tests-247%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-250%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -253,8 +253,9 @@ bash tools/screenshots/make.sh report   # just one
 
 Each shot plants a repository and a session log, runs the real CLI against it, and paints whatever
 came back through a terminal emulator. Nothing is mocked up or retouched, so a change to what
-`render.ts` prints changes the images or makes them wrong. It is free and offline: no Claude Code
-session is started and no network request is made.
+`render.ts` prints changes the images or makes them wrong. No Claude Code session is started and no
+token is spent. Generating the shots makes no network request either, though the first run installs
+pyte and pillow from PyPI to get there.
 
 ## License
 
