@@ -158,3 +158,51 @@ test('the subdirectory walk stops at a bounded depth', () => {
   expect(paths).toContain(join(shallow, 'CLAUDE.md'))
   expect(paths).not.toContain(join(deep, 'CLAUDE.md'))
 })
+
+/**
+ * The subdirectory walk starts at whatever cwd it is handed, which is
+ * Claude Code's working directory rather than anything Kanon picked. A cwd
+ * that has been removed, or that is not a directory at all, has to cost the
+ * report nothing: discovery is layer two, and layer two failing must never
+ * take the observed loads down with it.
+ */
+test('a cwd that does not exist yields no subdirectory candidates rather than throwing', () => {
+  expect(subdirCandidates(join(tmp('kanon-d-'), 'never-created'))).toEqual([])
+})
+
+test('a cwd that is a file yields no subdirectory candidates rather than throwing', () => {
+  const dir = tmp('kanon-d-')
+  const file = join(dir, 'a-file')
+  writeFileSync(file, 'x')
+  expect(subdirCandidates(file)).toEqual([])
+})
+
+test('a dangling symlink under cwd is stepped over during the subdirectory walk', () => {
+  const dir = tmp('kanon-d-')
+  mkdirSync(join(dir, 'sub'), { recursive: true })
+  writeFileSync(join(dir, 'sub', 'CLAUDE.md'), '# Sub\n')
+  symlinkSync(join(dir, 'never-existed'), join(dir, 'dangling'))
+
+  expect(subdirCandidates(dir).map((c) => c.path)).toEqual([join(dir, 'sub', 'CLAUDE.md')])
+})
+
+/**
+ * CLAUDE.local.md is discovered on demand in a subdirectory too, not just
+ * CLAUDE.md. It is classified `local` rather than `project`, so leaving it
+ * out of the walk would make it disappear from the quiet section entirely.
+ */
+test('a subdirectory CLAUDE.local.md is an on-demand candidate alongside CLAUDE.md', () => {
+  const dir = tmp('kanon-d-')
+  mkdirSync(join(dir, 'sub'), { recursive: true })
+  writeFileSync(join(dir, 'sub', 'CLAUDE.local.md'), '# Local\n')
+
+  const byPath = new Map(subdirCandidates(dir).map((c) => [c.path, c]))
+  expect(byPath.get(join(dir, 'sub', 'CLAUDE.local.md'))?.label).toBe('on-demand')
+})
+
+/** cwd's own CLAUDE.md belongs to the ancestor walk; the subdirectory walk must not claim it too. */
+test('the subdirectory walk excludes cwd own CLAUDE.md', () => {
+  const dir = tmp('kanon-d-')
+  writeFileSync(join(dir, 'CLAUDE.md'), '# Here\n')
+  expect(subdirCandidates(dir)).toEqual([])
+})

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { parseImports, resolveImports } from '../src/discover/imports'
@@ -173,4 +173,24 @@ test('resolves tilde imports to home directory', () => {
   } finally {
     rmSync(homeTmp, { recursive: true, force: true })
   }
+})
+
+/**
+ * `@notes` where notes is a directory. It exists, so it is not a broken
+ * import, and it is under the size limit, so it is not oversized -- reading
+ * it is what fails. The walk notes it and keeps going, because one bad
+ * import must not cost the report every file reachable past it.
+ */
+test('an @import pointing at a directory is reported unreadable rather than ending the walk', () => {
+  const dir = tmp('kanon-i-')
+  const claude = join(dir, 'CLAUDE.md')
+  mkdirSync(join(dir, 'notes'), { recursive: true })
+  writeFileSync(join(dir, 'good.md'), '# Good\n')
+  writeFileSync(claude, 'see @notes and @good.md\n')
+
+  const skips: Array<{ path: string; reason: string }> = []
+  const got = resolveImports([claude], 4, (path, reason) => skips.push({ path, reason }))
+
+  expect(skips).toContainEqual({ path: join(dir, 'notes'), reason: 'unreadable' })
+  expect(got.get(join(dir, 'good.md'))).toBe(claude)
 })

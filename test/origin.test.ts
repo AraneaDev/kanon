@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { classify, sessionRoot } from '../src/origin'
+import { classify, hasDependencySegment, managedPath, sessionRoot } from '../src/origin'
 import { tmp } from './tmp'
 
 function tree(): string {
@@ -84,4 +84,59 @@ test('a project file reached through a symlink is project, never foreign', () =>
 
   const root = sessionRoot(join(link, 'repo'))
   expect(classify(join(link, 'repo', 'CLAUDE.md'), root, '/home/x/.claude')).toBe('project')
+})
+
+/**
+ * `sessionRoot` is handed a cwd it did not choose, and a cwd that no longer
+ * exists must not take the CLI down with it: realpath failing falls back to
+ * the path as given, and the ancestor walk carries on from there.
+ */
+test('sessionRoot falls back to the path as given when it cannot be resolved', () => {
+  const gone = join(tmp('kanon-o-'), 'never-created')
+  expect(sessionRoot(gone)).toBe(gone)
+})
+
+test('the managed policy path is the platform one', () => {
+  expect(managedPath('linux')).toBe('/etc/claude-code/CLAUDE.md')
+  expect(managedPath('darwin')).toBe('/Library/Application Support/ClaudeCode/CLAUDE.md')
+  expect(managedPath('win32')).toBe('C:\\Program Files\\ClaudeCode\\CLAUDE.md')
+})
+
+/**
+ * A platform Kanon has no entry for gets the Linux path rather than
+ * `undefined`, which `classify` would otherwise compare against every loaded
+ * path and call a match for nothing at all.
+ */
+test('an unknown platform falls back to the linux managed path rather than undefined', () => {
+  expect(managedPath('freebsd')).toBe(managedPath('linux'))
+})
+
+test('a dependency directory below the root is a dependency segment', () => {
+  expect(hasDependencySegment('/repo/node_modules/pkg/CLAUDE.md', '/repo')).toBe(true)
+})
+
+/**
+ * Only the part of the path below the root is inspected, and this is why. A
+ * project checked out at /srv/vendor/app is not its own dependency: matching
+ * on the whole path would call every file in it FOREIGN, which is the worst
+ * output this tool has.
+ */
+test('a dependency-named directory above the root does not make the project foreign', () => {
+  expect(hasDependencySegment('/srv/vendor/app/CLAUDE.md', '/srv/vendor/app')).toBe(false)
+  expect(classify('/srv/vendor/app/CLAUDE.md', '/srv/vendor/app', '/home/x/.claude')).toBe('project')
+})
+
+/** A path outside the root entirely is inspected whole, since none of it is the project's. */
+test('a dependency segment is still recognised in a path outside the root', () => {
+  expect(hasDependencySegment('/elsewhere/vendor/p/CLAUDE.md', '/repo')).toBe(true)
+})
+
+/**
+ * A file can be reported loaded and then removed before the report is built.
+ * Classifying the path as given is the honest answer there; throwing would
+ * lose every other row in the report along with it.
+ */
+test('a loaded path that no longer exists is still classified rather than throwing', () => {
+  const dir = tmp('kanon-o-')
+  expect(classify(join(dir, 'gone', 'CLAUDE.md'), dir, '/home/x/.claude')).toBe('project')
 })
