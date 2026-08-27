@@ -62,6 +62,14 @@ didn't. Everything else stays on request, and the alarm itself stays out of
 the model's context; it reaches you, as a systemMessage, never the
 conversation. The instruction set is yours to fix, not Claude's.
 
+Claude Code doesn't hand a running session its own session id, so `/kanon`
+can't just ask for one. It picks the most recently recorded session that was
+itself recorded from your repository, and it will not fall back to a
+session from a different one, even a more recently active one. Run two
+Claude Code sessions in two different repositories at once and each one's
+`/kanon` still reports on its own repository. Run it somewhere Kanon has
+recorded nothing yet and it says so plainly instead of guessing.
+
 ## Where the data lives
 
 Everything Kanon writes goes under `~/.kanon/`, never under `~/.claude/`.
