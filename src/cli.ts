@@ -126,11 +126,11 @@ function collect(session: string, cwd: string): Report {
   const events = normalise(lines)
 
   const home = claudeHome()
-  const { root, candidates } = discover(cwd, home)
+  const { root, candidates, skipped } = discover(cwd, home)
   const launch = candidates.filter((c) => c.label === 'launch').map((c) => c.path)
   const importedBy = resolveImports(launch)
 
-  return buildReport(events, candidates, root, home, importedBy)
+  return buildReport(events, candidates, root, home, importedBy, skipped)
 }
 
 /**

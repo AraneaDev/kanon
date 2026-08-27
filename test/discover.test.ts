@@ -112,6 +112,22 @@ test('a file imported by a second, non-excluded parent still surfaces', () => {
   expect(byPath.get(join(repo, 'docs', 'extra.md'))?.label).toBe('launch')
 })
 
+test('an oversized rules file surfaces in skipped, not silently dropped', () => {
+  const { repo, home } = project()
+  const big = join(repo, '.claude', 'rules', 'big.md')
+  writeFileSync(big, Buffer.alloc(4 * 1024 * 1024 + 1, 0x61))
+  const { skipped, candidates } = discover(repo, home)
+  expect(skipped).toContainEqual({ path: big, reason: 'too-large' })
+  expect(candidates.map((c) => c.path)).not.toContain(big)
+})
+
+test('a CLAUDE.md importing a missing file surfaces the target in skipped', () => {
+  const { repo, home } = project()
+  writeFileSync(join(repo, 'CLAUDE.md'), 'see @docs/extra.md and @ghost.md\n')
+  const { skipped } = discover(repo, home)
+  expect(skipped).toContainEqual({ path: join(repo, 'ghost.md'), reason: 'missing-target' })
+})
+
 test('a symlink cycle in the subdirectory walk does not produce duplicates or hang', () => {
   const dir = mkdtempSync(join(tmpdir(), 'kanon-cycle-'))
   mkdirSync(join(dir, 'sub'), { recursive: true })

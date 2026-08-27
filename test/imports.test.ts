@@ -118,6 +118,31 @@ test('an importer over 4 MiB is skipped rather than read for imports', () => {
   expect(got.size).toBe(0)
 })
 
+test('an importer over 4 MiB is reported to onSkip with reason too-large', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const big = join(dir, 'big.md')
+  writeFileSync(big, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
+  const skips: Array<{ path: string; reason: string }> = []
+  resolveImports([big], 4, (path, reason) => skips.push({ path, reason }))
+  expect(skips).toContainEqual({ path: big, reason: 'too-large' })
+})
+
+test('an @import whose target does not exist is reported to onSkip with reason missing-target', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const claude = join(dir, 'CLAUDE.md')
+  writeFileSync(claude, 'see @ghost.md\n')
+  const skips: Array<{ path: string; reason: string }> = []
+  const got = resolveImports([claude], 4, (path, reason) => skips.push({ path, reason }))
+  expect(got.size).toBe(0)
+  expect(skips).toContainEqual({ path: join(dir, 'ghost.md'), reason: 'missing-target' })
+})
+
+test('onSkip is optional and existing callers are unaffected', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  writeFileSync(join(dir, 'a.md'), 'see @ghost.md\n')
+  expect(() => resolveImports([join(dir, 'a.md')])).not.toThrow()
+})
+
 test('resolves tilde imports to home directory', () => {
   const { homedir } = require('node:os')
   const testFile = join(homedir(), '.claude', 'kanon-test-import.md')

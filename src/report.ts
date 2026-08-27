@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { classify } from './origin'
-import { RULESET, type Candidate, type Classified, type ConfigEvent, type Event, type Report } from './types'
+import { RULESET, type Candidate, type Classified, type ConfigEvent, type Event, type Report, type Skipped } from './types'
 
 /**
  * Run a git plumbing query and turn its exit code into a tri-state answer.
@@ -36,6 +36,7 @@ export function buildReport(
   root: string,
   homeConfig: string,
   importedBy: Map<string, string>,
+  skipped: Skipped[] = [],
 ): Report {
   const byPath = new Map(candidates.map((c) => [c.path, c]))
 
@@ -91,5 +92,5 @@ export function buildReport(
 
   const config = events.filter((e): e is ConfigEvent => e.ev === 'config')
 
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees }
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, skipped }
 }

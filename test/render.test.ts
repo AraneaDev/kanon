@@ -4,7 +4,7 @@ import { render } from '../src/render'
 import type { Report } from '../src/types'
 
 function base(): Report {
-  return { root: '/repo', ruleset: '2026-08', loaded: [], missing: [], quiet: [], config: [], modelDisagrees: [] }
+  return { root: '/repo', ruleset: '2026-08', loaded: [], missing: [], quiet: [], config: [], modelDisagrees: [], skipped: [] }
 }
 
 test('names the root and the ruleset', () => {
@@ -113,6 +113,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
     ],
     config: [{ t: '2026-08-27T00:52:00Z', ev: 'config', source: 'skills', keys: ['a'] }],
     modelDisagrees: [],
+    skipped: [],
   }
   const out = render(r)
   expect(out).toContain('  user       ~/.claude/rules/context7.md          session_start')
@@ -136,6 +137,29 @@ test('a path longer than the path column still gets a space before the reason', 
   expect(out).not.toContain(`${rel}session_start`)
   // Reason is still present, and separated from the path by whitespace.
   expect(out).toContain(`${rel} session_start`)
+})
+
+test('a report with no skips renders no COULD NOT READ section at all', () => {
+  const out = render(base())
+  expect(out).not.toContain('COULD NOT READ')
+})
+
+test('a skipped oversized file is named under COULD NOT READ', () => {
+  const r = base()
+  r.skipped = [{ path: '/repo/vendor/big.md', reason: 'too-large' }]
+  const out = render(r)
+  expect(out).toContain('COULD NOT READ')
+  expect(out).toContain('vendor/big.md')
+  expect(out).toContain('4 MiB')
+})
+
+test('a skipped missing import target names the target path and reason', () => {
+  const r = base()
+  r.skipped = [{ path: '/repo/docs/ghost.md', reason: 'missing-target' }]
+  const out = render(r)
+  expect(out).toContain('COULD NOT READ')
+  expect(out).toContain('docs/ghost.md')
+  expect(out).toContain('does not exist')
 })
 
 test('renders the SESSION line with root and ruleset separated by a gap', () => {

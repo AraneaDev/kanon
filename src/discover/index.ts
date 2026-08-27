@@ -1,7 +1,7 @@
 import { readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { sessionRoot } from '../origin'
-import { DEPENDENCY_SEGMENTS, type Candidate } from '../types'
+import { DEPENDENCY_SEGMENTS, type Candidate, type SkipReason, type Skipped } from '../types'
 import { loadExcludes } from './excludes'
 import { resolveImports } from './imports'
 import { ruleCandidates } from './rules'
@@ -67,11 +67,22 @@ export function subdirCandidates(cwd: string): Candidate[] {
   return out
 }
 
-export function discover(cwd: string, homeConfig: string): { root: string; candidates: Candidate[] } {
+export function discover(
+  cwd: string,
+  homeConfig: string,
+): { root: string; candidates: Candidate[]; skipped: Skipped[] } {
   const root = sessionRoot(cwd)
 
+  // Keyed by path so the same file being flagged more than once (e.g. a
+  // missing import target named by two different importers) still lands
+  // as one entry in the report rather than a repeated one.
+  const skippedByPath = new Map<string, Skipped>()
+  const onSkip = (path: string, reason: SkipReason): void => {
+    if (!skippedByPath.has(path)) skippedByPath.set(path, { path, reason })
+  }
+
   const base = walkCandidates(cwd, homeConfig)
-  const rules = ruleCandidates([join(homeConfig, 'rules'), join(root, '.claude', 'rules')])
+  const rules = ruleCandidates([join(homeConfig, 'rules'), join(root, '.claude', 'rules')], onSkip)
   const subs = subdirCandidates(cwd)
 
   // claudeMdExcludes is computed up front so it can gate which launch files
@@ -87,7 +98,7 @@ export function discover(cwd: string, homeConfig: string): { root: string; candi
     .filter((c) => c.label === 'launch')
     .map((c) => c.path)
     .filter((p) => !isExcluded(p))
-  const imported = resolveImports(launchPaths)
+  const imported = resolveImports(launchPaths, 4, onSkip)
   const importCandidates: Candidate[] = [...imported.keys()].map((p) => ({
     path: p,
     label: 'launch',
@@ -108,5 +119,5 @@ export function discover(cwd: string, homeConfig: string): { root: string; candi
     isExcluded(c.path) ? { ...c, label: 'excluded' as const } : c,
   )
 
-  return { root, candidates }
+  return { root, candidates, skipped: [...skippedByPath.values()] }
 }

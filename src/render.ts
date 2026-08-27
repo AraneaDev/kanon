@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { relative } from 'node:path'
-import type { Classified, Report } from './types'
+import type { Classified, Report, Skipped } from './types'
 
 // Column widths pinned to the worked example in docs/2026-08-27-kanon-design.md
 // section 8: the tag and path fields are padded and then concatenated with no
@@ -88,6 +88,40 @@ function quietReason(label: string): string {
   }
 }
 
+/** The short, scannable label for a skip, shown in the tag column. */
+function skipTag(reason: Skipped['reason']): string {
+  switch (reason) {
+    case 'too-large':
+      return 'too large'
+    case 'unreadable':
+      return 'unreadable'
+    default:
+      return 'missing target'
+  }
+}
+
+/**
+ * A plain explanation of why a file never became a candidate, addressed to
+ * the reader directly: this section exists precisely because a silent skip
+ * leaves the report looking complete when it isn't, so the wording has to
+ * tell you what to do about it, not just name the failure.
+ */
+function skipDetail(reason: Skipped['reason']): string {
+  switch (reason) {
+    case 'too-large':
+      return 'over 4 MiB, the same limit Claude Code applies. Split it or shrink it if you want it loaded.'
+    case 'unreadable':
+      return 'could not be read. Check that you have permission to read it.'
+    default:
+      return 'the file an @import points to does not exist. Check the path, or remove the import if it is stale.'
+  }
+}
+
+function skipLine(s: Skipped, root: string): string {
+  const main = `  ${pad(skipTag(s.reason), TAG_WIDTH)}${short(s.path, root)}`
+  return `${main}\n${' '.repeat(2 + TAG_WIDTH)}${skipDetail(s.reason)}`
+}
+
 export function render(report: Report): string {
   const { root, ruleset } = report
   const out: string[] = []
@@ -127,6 +161,12 @@ export function render(report: Report): string {
     out.push('NOTE  the reachability model disagrees with reality for:')
     for (const p of report.modelDisagrees) out.push(`  ${short(p, root)}`)
     out.push('  The NOT LOADED section is unreliable for this session.')
+  }
+
+  if (report.skipped.length > 0) {
+    out.push('')
+    out.push('COULD NOT READ')
+    for (const s of report.skipped) out.push(skipLine(s, root))
   }
 
   return out.join('\n')

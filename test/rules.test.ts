@@ -89,3 +89,17 @@ test('a rule file over 4 MiB is skipped rather than read', () => {
   const paths = ruleCandidates([rules]).map((c) => c.path)
   expect(paths).not.toContain(big)
 })
+
+test('a rule file over 4 MiB is reported to onSkip with reason too-large', () => {
+  const rules = rulesDir()
+  const big = join(rules, 'big.md')
+  writeFileSync(big, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
+  const skips: Array<{ path: string; reason: string }> = []
+  ruleCandidates([rules], (path, reason) => skips.push({ path, reason }))
+  expect(skips).toContainEqual({ path: big, reason: 'too-large' })
+})
+
+test('onSkip is optional and existing callers are unaffected', () => {
+  const rules = rulesDir()
+  expect(() => ruleCandidates([rules])).not.toThrow()
+})

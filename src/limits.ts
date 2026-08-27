@@ -32,8 +32,9 @@ const PRUNED_DIRS = ['sessions', 'state', 'reports']
  * stops a report being produced (every failure here is swallowed per
  * entry, and the caller wraps the whole call besides).
  *
- * Two checks keep it inside the fence, both using `lstat` rather than
- * `stat` so a symlink is inspected as itself, never followed:
+ * Two checks are what actually keep it inside the fence, both using
+ * `lstat` rather than `stat` so a symlink is inspected as itself, never
+ * followed:
  *  - each of `sessions`/`state`/`reports` must itself be a real directory.
  *    If one of those names has been replaced by a symlink -- to `/`, say
  *    -- it is skipped rather than traversed, so `readdirSync` is never run
@@ -42,9 +43,12 @@ const PRUNED_DIRS = ['sessions', 'state', 'reports']
  *    plain files there, so a symlinked entry is left alone rather than
  *    having its *target's* mtime decide whether to unlink the link, and a
  *    stray subdirectory is never recursed into or removed.
- * A resolved-path containment check backs both up in case a future writer
- * changes what lives under `kanonHome` in a way these two checks don't
- * anticipate.
+ * The resolved-path containment check below this is not a third defence:
+ * it uses `resolve()`, not `realpathSync()`, so it does not see through a
+ * symlink in an intermediate path component, and by the time it runs the
+ * two `lstat` checks above have already excluded everything that could
+ * disagree with it. It is left in as a plain assertion of intent, not
+ * load-bearing.
  */
 export function prune(kanonHome: string, now: number, maxAgeDays = 90): string[] {
   const cutoff = now - maxAgeDays * 24 * 60 * 60 * 1000
@@ -71,7 +75,7 @@ export function prune(kanonHome: string, now: number, maxAgeDays = 90): string[]
       try {
         const st = lstatSync(full)
         if (!st.isFile()) continue // symlinks and subdirectories: never followed, never removed
-        if (!resolve(full).startsWith(home + sep)) continue // belt and braces
+        if (!resolve(full).startsWith(home + sep)) continue // non-load-bearing; see the doc comment above
         if (st.mtimeMs >= cutoff) continue
         rmSync(full, { force: true })
         removed.push(full)

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tooLarge } from '../limits'
-import type { Candidate } from '../types'
+import type { Candidate, SkipReason } from '../types'
 
 /** True when the file opens with YAML frontmatter carrying a paths key. */
 export function isPathScoped(text: string): boolean {
@@ -17,7 +17,10 @@ export function isPathScoped(text: string): boolean {
  * Every .md under each rules directory, recursively, following symlinks.
  * Cycles are guarded by device and inode, so a directory is visited once.
  */
-export function ruleCandidates(roots: string[]): Candidate[] {
+export function ruleCandidates(
+  roots: string[],
+  onSkip?: (path: string, reason: SkipReason) => void,
+): Candidate[] {
   const out: Candidate[] = []
   const seenDirs = new Set<string>()
   const seenFiles = new Set<string>()
@@ -53,11 +56,17 @@ export function ruleCandidates(roots: string[]): Candidate[] {
         continue
       }
       if (!name.endsWith('.md')) continue
+      const p = resolve(full)
       // Checked before the read below, not after: this is what keeps a
       // 4 MiB+ file's content out of memory, matching Claude Code's own
-      // limit rather than merely reporting it after the fact.
-      if (tooLarge(full)) continue
-      const p = resolve(full)
+      // limit rather than merely reporting it after the fact. It is also
+      // noted, not just skipped: an instruction file that silently drops
+      // out of every section of the report is a worse failure than one
+      // that shows up under COULD NOT READ.
+      if (tooLarge(full)) {
+        onSkip?.(p, 'too-large')
+        continue
+      }
       if (seenFiles.has(p)) continue
       seenFiles.add(p)
 
@@ -65,6 +74,7 @@ export function ruleCandidates(roots: string[]): Candidate[] {
       try {
         text = readFileSync(p, 'utf8')
       } catch {
+        onSkip?.(p, 'unreadable')
         continue
       }
       out.push({
