@@ -5,4 +5,5 @@ dist/
 *.bak
 .claude/
 .momus/
+CLAUDE.md
 tools/screenshots/.venv/
