@@ -1,7 +1,7 @@
 {
   "name": "kanon",
   "displayName": "Kanon",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Reports every instruction file that governs a session, where each one came from, and the ones you expected that never loaded.",
   "author": {
     "name": "AraneaDev",

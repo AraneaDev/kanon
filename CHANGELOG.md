@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.2](https://github.com/AraneaDev/kanon/compare/v0.0.1...v0.0.2) (2026-08-27)
+
+
+### Features
+
+* brief Claude at session start, and colour the report for a terminal ([3311b54](https://github.com/AraneaDev/kanon/commit/3311b5404800ff34ed48c004d30146e4c55d80fd))
+
+
+### Fixes
+
+* never let an unset CLAUDE_PLUGIN_ROOT fail a session ([e8d4ce2](https://github.com/AraneaDev/kanon/commit/e8d4ce2c6650ec2ceffa308610099a95ec766c50))
+
+
+### Documentation
+
+* show the report, the brief and the self-doubt sections as screenshots ([29b1ba1](https://github.com/AraneaDev/kanon/commit/29b1ba12b2ed8428e7fbd21ccac943110c35a4e0))
+
+
+### Tests
+
+* cover the failure branches discovery and pruning never reached ([b5a55a8](https://github.com/AraneaDev/kanon/commit/b5a55a899120d735a5024f92b34d714e94f04228))
+
 ## 0.0.1 (2026-08-27)
 
 
