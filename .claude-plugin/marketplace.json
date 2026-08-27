@@ -1,0 +1,15 @@
+{
+  "name": "kanon",
+  "owner": {
+    "name": "AraneaDev",
+    "url": "https://github.com/AraneaDev"
+  },
+  "description": "Small, focused Claude Code plugins.",
+  "plugins": [
+    {
+      "name": "kanon",
+      "source": "./",
+      "description": "Every rule governing this session, named, including the ones you thought loaded and didn't."
+    }
+  ]
+}
