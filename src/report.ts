@@ -106,8 +106,16 @@ export function buildReport(
     if (!firstReason.has(p)) {
       firstReason.set(p, e.reason)
       loadedOrder.push(p)
-      if (e.memoryType !== null) claimedType.set(p, e.memoryType)
     }
+    // The claim is captured independently of the reason, and deliberately
+    // not inside the block above. A file commonly loads more than once (a
+    // compact reload is the usual second), and `memory_type` is not
+    // guaranteed on any of them; tying the claim to the *first* event would
+    // discard a later payload's claim whenever the first one carried none,
+    // leaving the origin unchecked precisely when Claude Code did state a
+    // scope. First non-null still wins, so a later contradicting claim can
+    // never overwrite one already seen.
+    if (e.memoryType !== null && !claimedType.has(p)) claimedType.set(p, e.memoryType)
   }
 
   const loaded: Classified[] = []

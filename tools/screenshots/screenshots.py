@@ -23,8 +23,9 @@ exactly what the model receives.
 
 Usage:  python screenshots.py [report|brief|admits|all]
 
-Free and offline. No Claude Code session is started, no token is spent, and
-no network request is made.
+Free: no Claude Code session is started and no token is spent. Generating the
+shots makes no network request either, though make.sh's first run installs
+pyte and pillow from PyPI to get here.
 """
 import os
 import shutil
@@ -289,10 +290,9 @@ def shot_admits():
       - an @import pointing at a file that does not exist,
       - a rules file over the 4 MiB limit Claude Code itself applies.
 
-    The disagreeing claim has to ride on the file's *first* recorded load:
-    buildReport keeps the first reason and the first claim seen for a path
-    and discards later ones, so a contradiction appended as a second load of
-    an already-loaded file is silently dropped.
+    buildReport keeps the first reason seen for a path and the first non-null
+    memory_type, so the disagreeing claim below rides on that file's only
+    recorded load rather than being appended as a second one.
     """
     home, repo, claude = plant("admits")
     write(repo / "CLAUDE.md",

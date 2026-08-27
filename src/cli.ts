@@ -221,7 +221,19 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
 
   if (!hasEvents) return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
 
-  const report = collect(session, cwd)
+  let report: Report
+  try {
+    report = collect(session, cwd)
+  } catch {
+    // The log exists and still cannot be read: a directory sitting where the
+    // file should be, a permissions error, a truncated mount. That is no more
+    // evidence about this session than having no log at all, and `brief` is
+    // the one command that must always speak, so it predicts rather than
+    // going silent. `report` and `alarm` deliberately do not do this: a
+    // report that cannot be produced should say so loudly, and an alarm with
+    // no evidence behind it should say nothing.
+    return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+  }
   // An existing but empty log is still an unobserved session: the file can
   // be created by a hook that recorded nothing usable. Reporting "no
   // instruction files govern you" there would be a confident lie, so it

@@ -5,8 +5,12 @@
 #   bash tools/screenshots/make.sh report     just the report shot
 #
 # Every shot runs the real CLI against a planted repository. Nothing here
-# starts a Claude Code session, spends a token, or makes a network request, so
-# this is free to run as often as you like.
+# starts a Claude Code session or spends a token, so this is free to run as
+# often as you like.
+#
+# The first run is the one exception to "offline": it installs pyte and pillow
+# from PyPI into the virtualenv below, which needs the network. Every run after
+# that makes no network request at all.
 #
 # Dependencies go in a virtualenv beside this script rather than in the system
 # python, which on most distributions refuses the install anyway (PEP 668).
