@@ -103,3 +103,56 @@ test('onSkip is optional and existing callers are unaffected', () => {
   const rules = rulesDir()
   expect(() => ruleCandidates([rules])).not.toThrow()
 })
+
+/**
+ * A rules root that is not a directory at all: `readdirSync` fails with
+ * ENOTDIR where `statSync` succeeded, and the walk has to treat that the way
+ * it treats a missing directory. Nothing in Kanon chooses these two paths --
+ * they are `~/.claude/rules` and `<root>/.claude/rules`, whatever the user
+ * happens to have put there.
+ */
+test('a rules path that is a file rather than a directory yields nothing', () => {
+  const dir = tmp('kanon-r-')
+  const file = join(dir, 'rules')
+  writeFileSync(file, 'someone put a file here\n')
+  expect(ruleCandidates([file])).toEqual([])
+})
+
+/**
+ * The walk follows symlinks, so a link whose target has been deleted stats
+ * as nothing at all. It is stepped over; the real rules beside it still have
+ * to come back.
+ */
+test('a dangling symlink in a rules directory is stepped over, not fatal', () => {
+  const rules = rulesDir()
+  symlinkSync(join(rules, 'never-existed.md'), join(rules, 'dangling.md'))
+  const paths = ruleCandidates([rules]).map((c) => c.path)
+  expect(paths).toContain(join(rules, 'style.md'))
+  expect(paths).toContain(join(rules, 'backend', 'api.md'))
+  expect(paths).not.toContain(join(rules, 'dangling.md'))
+})
+
+/**
+ * A .md entry that exists, is not a directory, is under the size limit, and
+ * still cannot be opened. An unreadable rule is noted rather than silently
+ * dropped, for the same reason an oversized one is: a file that vanishes
+ * from every section of the report is a worse failure than one listed under
+ * COULD NOT READ.
+ *
+ * A unix socket is what makes this portable. `chmod 000` would do it for an
+ * ordinary user and do nothing at all for root, and CI runs as both.
+ */
+test('a .md entry that exists but cannot be read is reported unreadable, not dropped', () => {
+  const rules = rulesDir()
+  const sock = join(rules, 'socket.md')
+  const server = Bun.listen({ unix: sock, socket: { data() {} } })
+  try {
+    const skips: Array<{ path: string; reason: string }> = []
+    const paths = ruleCandidates([rules], (path, reason) => skips.push({ path, reason })).map((c) => c.path)
+    expect(skips).toContainEqual({ path: sock, reason: 'unreadable' })
+    expect(paths).not.toContain(sock)
+    expect(paths).toContain(join(rules, 'style.md'))
+  } finally {
+    server.stop(true)
+  }
+})
