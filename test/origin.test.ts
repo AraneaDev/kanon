@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { classify, sessionRoot } from '../src/origin'
+import { tmp } from './tmp'
 
 function tree(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-o-'))
+  const dir = tmp('kanon-o-')
   mkdirSync(join(dir, 'repo', '.git'), { recursive: true })
   mkdirSync(join(dir, 'repo', 'src'), { recursive: true })
   mkdirSync(join(dir, 'repo', 'node_modules', 'pkg'), { recursive: true })
@@ -20,7 +20,7 @@ test('session root is the git root containing cwd', () => {
 })
 
 test('session root falls back to cwd outside a repository', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-o-'))
+  const dir = tmp('kanon-o-')
   expect(sessionRoot(dir)).toBe(dir)
 })
 
@@ -62,7 +62,7 @@ test('sessionRoot resolves the root through symlinks', () => {
   // started there produced a root that none of its own files appeared to sit
   // under, and every project file was classified foreign. Both sides of that
   // comparison have to be real paths.
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-sym-'))
+  const dir = tmp('kanon-sym-')
   const real = join(dir, 'real')
   mkdirSync(join(real, 'repo', '.git'), { recursive: true })
   const link = join(dir, 'link')
@@ -75,7 +75,7 @@ test('sessionRoot resolves the root through symlinks', () => {
 })
 
 test('a project file reached through a symlink is project, never foreign', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-sym-'))
+  const dir = tmp('kanon-sym-')
   const real = join(dir, 'real')
   mkdirSync(join(real, 'repo', '.git'), { recursive: true })
   writeFileSync(join(real, 'repo', 'CLAUDE.md'), '# Project\n')

@@ -1,25 +1,25 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MAX_FILE_BYTES, prune, tooLarge } from '../src/limits'
+import { tmp } from './tmp'
 
 test('a small file is not too large', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-l-'))
+  const dir = tmp('kanon-l-')
   const f = join(dir, 'small.md')
   writeFileSync(f, 'hello')
   expect(tooLarge(f)).toBe(false)
 })
 
 test('a file over the limit is too large', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-l-'))
+  const dir = tmp('kanon-l-')
   const f = join(dir, 'big.md')
   writeFileSync(f, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
   expect(tooLarge(f)).toBe(true)
 })
 
 test('a file exactly at the limit is not too large', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-l-'))
+  const dir = tmp('kanon-l-')
   const f = join(dir, 'exact.md')
   writeFileSync(f, Buffer.alloc(MAX_FILE_BYTES, 0x61))
   expect(tooLarge(f)).toBe(false)
@@ -30,7 +30,7 @@ test('a missing file is not too large', () => {
 })
 
 test('prune removes files older than the cutoff', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
+  const home = tmp('kanon-p-')
   mkdirSync(join(home, 'sessions'), { recursive: true })
   const old = join(home, 'sessions', 'old.jsonl')
   writeFileSync(old, '{}')
@@ -42,7 +42,7 @@ test('prune removes files older than the cutoff', () => {
 })
 
 test('prune keeps recent files', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
+  const home = tmp('kanon-p-')
   mkdirSync(join(home, 'sessions'), { recursive: true })
   const fresh = join(home, 'sessions', 'fresh.jsonl')
   writeFileSync(fresh, '{}')
@@ -51,7 +51,7 @@ test('prune keeps recent files', () => {
 })
 
 test('prune respects a custom maxAgeDays', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
+  const home = tmp('kanon-p-')
   mkdirSync(join(home, 'state'), { recursive: true })
   const f = join(home, 'state', 'recent.json')
   writeFileSync(f, '{}')
@@ -66,7 +66,7 @@ test('prune on a missing directory returns nothing rather than throwing', () => 
 })
 
 test('prune covers sessions, state and reports', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
+  const home = tmp('kanon-p-')
   const longAgo = new Date('2020-01-01T00:00:00Z')
   const paths: string[] = []
   for (const sub of ['sessions', 'state', 'reports']) {
@@ -84,8 +84,8 @@ test('prune covers sessions, state and reports', () => {
 })
 
 test('prune does not follow a symlinked sessions directory out of kanonHome', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
-  const outside = mkdtempSync(join(tmpdir(), 'kanon-outside-'))
+  const home = tmp('kanon-p-')
+  const outside = tmp('kanon-outside-')
   const victim = join(outside, 'victim.jsonl')
   writeFileSync(victim, '{}')
   const longAgo = new Date('2020-01-01T00:00:00Z')
@@ -97,9 +97,9 @@ test('prune does not follow a symlinked sessions directory out of kanonHome', ()
 })
 
 test('prune does not delete through a symlinked entry pointing outside kanonHome', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
+  const home = tmp('kanon-p-')
   mkdirSync(join(home, 'sessions'), { recursive: true })
-  const outside = mkdtempSync(join(tmpdir(), 'kanon-outside-'))
+  const outside = tmp('kanon-outside-')
   const victim = join(outside, 'victim.jsonl')
   writeFileSync(victim, '{}')
   const longAgo = new Date('2020-01-01T00:00:00Z')
@@ -111,7 +111,7 @@ test('prune does not delete through a symlinked entry pointing outside kanonHome
 })
 
 test('prune leaves a stray subdirectory alone rather than recursing into it', () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-p-'))
+  const home = tmp('kanon-p-')
   const nested = join(home, 'sessions', 'nested')
   mkdirSync(nested, { recursive: true })
   const f = join(nested, 'inner.jsonl')

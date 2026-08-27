@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { parseImports, resolveImports } from '../src/discover/imports'
 import { MAX_FILE_BYTES } from '../src/limits'
+import { tmp } from './tmp'
 
 test('finds a bare import', () => {
   expect(parseImports('See @docs/git.md for detail')).toEqual(['docs/git.md'])
@@ -23,7 +24,7 @@ test('finds a home-relative import', () => {
 })
 
 test('resolves relative to the importing file, not the cwd', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'CLAUDE.md'), 'see @child.md\n')
   writeFileSync(join(dir, 'child.md'), 'leaf\n')
   const got = resolveImports([join(dir, 'CLAUDE.md')])
@@ -31,7 +32,7 @@ test('resolves relative to the importing file, not the cwd', () => {
 })
 
 test('follows a chain to depth four', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'a.md'), '@b.md\n')
   writeFileSync(join(dir, 'b.md'), '@c.md\n')
   writeFileSync(join(dir, 'c.md'), '@d.md\n')
@@ -48,7 +49,7 @@ test('follows a chain to depth four', () => {
 })
 
 test('stops after four hops', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'a.md'), '@b.md\n')
   writeFileSync(join(dir, 'b.md'), '@c.md\n')
   writeFileSync(join(dir, 'c.md'), '@d.md\n')
@@ -65,7 +66,7 @@ test('stops after four hops', () => {
 })
 
 test('survives an import cycle', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'a.md'), '@b.md\n')
   writeFileSync(join(dir, 'b.md'), '@a.md\n')
   const got = resolveImports([join(dir, 'a.md')])
@@ -73,7 +74,7 @@ test('survives an import cycle', () => {
 })
 
 test('seed file never appears as a key even in a cycle', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'a.md'), '@b.md\n')
   writeFileSync(join(dir, 'b.md'), '@a.md\n')
   const got = resolveImports([join(dir, 'a.md')])
@@ -82,7 +83,7 @@ test('seed file never appears as a key even in a cycle', () => {
 })
 
 test('ignores an import target that does not exist', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'a.md'), '@ghost.md\n')
   expect(resolveImports([join(dir, 'a.md')]).size).toBe(0)
 })
@@ -109,7 +110,7 @@ test('handles unterminated code fence', () => {
 })
 
 test('an importer over 4 MiB is skipped rather than read for imports', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   const big = join(dir, 'big.md')
   writeFileSync(big, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
   writeFileSync(big, '\n@child.md\n', { flag: 'a' })
@@ -119,7 +120,7 @@ test('an importer over 4 MiB is skipped rather than read for imports', () => {
 })
 
 test('an importer over 4 MiB is reported to onSkip with reason too-large', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   const big = join(dir, 'big.md')
   writeFileSync(big, Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
   const skips: Array<{ path: string; reason: string }> = []
@@ -128,7 +129,7 @@ test('an importer over 4 MiB is reported to onSkip with reason too-large', () =>
 })
 
 test('an @import whose target does not exist is reported to onSkip with reason missing-target', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   const claude = join(dir, 'CLAUDE.md')
   writeFileSync(claude, 'see @ghost.md\n')
   const skips: Array<{ path: string; reason: string }> = []
@@ -138,7 +139,7 @@ test('an @import whose target does not exist is reported to onSkip with reason m
 })
 
 test('an @import whose target does not exist reports the importer to onSkip', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   const claude = join(dir, 'CLAUDE.md')
   writeFileSync(claude, 'see @ghost.md\n')
   const skips: Array<{ path: string; reason: string; importer?: string }> = []
@@ -147,7 +148,7 @@ test('an @import whose target does not exist reports the importer to onSkip', ()
 })
 
 test('onSkip is optional and existing callers are unaffected', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const dir = tmp('kanon-i-')
   writeFileSync(join(dir, 'a.md'), 'see @ghost.md\n')
   expect(() => resolveImports([join(dir, 'a.md')])).not.toThrow()
 })
@@ -161,7 +162,7 @@ test('resolves tilde imports to home directory', () => {
   const target = join(homeTmp, 'imported.md')
   writeFileSync(target, 'home test file\n')
 
-  const sourceDir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const sourceDir = tmp('kanon-i-')
   const sourceFile = join(sourceDir, 'source.md')
   writeFileSync(sourceFile, `@~/${basename(homeTmp)}/imported.md\n`)
 

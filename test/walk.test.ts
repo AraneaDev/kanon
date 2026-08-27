@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { walkCandidates } from '../src/discover/walk'
+import { tmp } from './tmp'
 
 function tree() {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-w-'))
+  const dir = tmp('kanon-w-')
   const repo = join(dir, 'repo')
   mkdirSync(join(repo, '.git'), { recursive: true })
   mkdirSync(join(repo, 'pkg', 'app'), { recursive: true })
@@ -59,7 +59,7 @@ test('returns no duplicate paths', () => {
 })
 
 test('returns candidates in order: broadest to narrowest', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-w-'))
+  const dir = tmp('kanon-w-')
   const repo = join(dir, 'repo')
   mkdirSync(join(repo, 'mid'), { recursive: true })
   mkdirSync(join(repo, 'mid', 'deep'), { recursive: true })
@@ -82,7 +82,7 @@ test('returns candidates in order: broadest to narrowest', () => {
 })
 
 test('deduplicates when cwd is under home, keeping user-scope rule', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-w-'))
+  const dir = tmp('kanon-w-')
   const home = join(dir, 'home', '.claude')
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, 'CLAUDE.md'), '')

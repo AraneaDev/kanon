@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { discover, loadExcludes, subdirCandidates } from '../src/discover'
+import { tmp } from './tmp'
 
 function project() {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-d-'))
+  const dir = tmp('kanon-d-')
   const repo = join(dir, 'repo')
   mkdirSync(join(repo, '.git'), { recursive: true })
   mkdirSync(join(repo, '.claude', 'rules'), { recursive: true })
@@ -71,7 +71,7 @@ test('the root is the git root', () => {
 })
 
 test('the subdirectory walk is rooted at cwd, not the git root (monorepo)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-mono-'))
+  const dir = tmp('kanon-mono-')
   const repo = join(dir, 'repo')
   mkdirSync(join(repo, '.git'), { recursive: true })
   const pkgA = join(repo, 'packages', 'a')
@@ -133,7 +133,7 @@ test('a CLAUDE.md importing a missing file surfaces the target in skipped, namin
 })
 
 test('a symlink cycle in the subdirectory walk does not produce duplicates or hang', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-cycle-'))
+  const dir = tmp('kanon-cycle-')
   mkdirSync(join(dir, 'sub'), { recursive: true })
   writeFileSync(join(dir, 'sub', 'CLAUDE.md'), '# Sub\n')
   symlinkSync(dir, join(dir, 'loop'))
@@ -146,7 +146,7 @@ test('a symlink cycle in the subdirectory walk does not produce duplicates or ha
 })
 
 test('the subdirectory walk stops at a bounded depth', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-depth-'))
+  const dir = tmp('kanon-depth-')
   const names = Array.from({ length: 9 }, (_, i) => `d${i + 1}`)
   const shallow = join(dir, ...names.slice(0, 8))
   const deep = join(dir, ...names)

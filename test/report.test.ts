@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildReport } from '../src/report'
 import { normalise } from '../src/normalise'
 import type { Candidate } from '../src/types'
+import { tmp } from './tmp'
 
 const HOME = '/home/x/.claude'
 const ROOT = '/repo'
@@ -169,7 +169,7 @@ test('gitIgnored and gitTracked are null, not a false "no", when git cannot answ
 })
 
 test('gitIgnored is null rather than false when root is not a git repository at all', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-r-'))
+  const dir = tmp('kanon-r-')
   const foreign = join(dir, 'node_modules', 'pkg', 'CLAUDE.md')
   mkdirSync(join(dir, 'node_modules', 'pkg'), { recursive: true })
   writeFileSync(foreign, '')
@@ -181,7 +181,7 @@ test('gitIgnored is null rather than false when root is not a git repository at 
 })
 
 function mktempGitRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-r-'))
+  const dir = tmp('kanon-r-')
   mkdirSync(join(dir, 'repo'))
   Bun.spawnSync(['git', 'init', '-q'], { cwd: join(dir, 'repo') })
   return dir

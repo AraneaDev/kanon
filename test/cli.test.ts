@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp'
 
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts')
 
@@ -13,7 +13,7 @@ async function run(args: string[], env: Record<string, string>): Promise<string>
 }
 
 function seeded() {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-cli-'))
+  const home = tmp('kanon-cli-')
   const repo = join(home, 'repo')
   mkdirSync(join(repo, '.git'), { recursive: true })
   mkdirSync(join(repo, 'vendor', 'p'), { recursive: true })
@@ -37,7 +37,7 @@ function seeded() {
  * recorded in would hand repo A's `/kanon` run repo B's events.
  */
 function twoRepos() {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-cli-multi-'))
+  const home = tmp('kanon-cli-multi-')
   const repoA = join(home, 'repoA')
   const repoB = join(home, 'repoB')
   mkdirSync(join(repoA, '.git'), { recursive: true })
@@ -73,7 +73,7 @@ function twoRepos() {
  * is already promoted to a launch candidate by the time cli.ts sees it).
  */
 function seededWithImport() {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-cli-import-'))
+  const home = tmp('kanon-cli-import-')
   const repo = join(home, 'repo')
   mkdirSync(join(repo, '.git'), { recursive: true })
   mkdirSync(join(repo, 'docs'), { recursive: true })

@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { ruleCandidates } from '../src/discover/rules'
 import { MAX_FILE_BYTES } from '../src/limits'
+import { tmp } from './tmp'
 
 function rulesDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'kanon-r-'))
+  const dir = tmp('kanon-r-')
   const rules = join(dir, '.claude', 'rules')
   mkdirSync(join(rules, 'backend'), { recursive: true })
   writeFileSync(join(rules, 'style.md'), '# Style\n\nUse two spaces.\n')
@@ -49,7 +49,7 @@ test('a BOM-prefixed rule with paths frontmatter is path-scoped', () => {
 
 test('follows a symlinked rules subdirectory', () => {
   const rules = rulesDir()
-  const other = mkdtempSync(join(tmpdir(), 'kanon-shared-'))
+  const other = tmp('kanon-shared-')
   writeFileSync(join(other, 'shared.md'), '# Shared\n')
   symlinkSync(other, join(rules, 'shared'))
   const names = ruleCandidates([rules]).map((c) => c.path.split('/').pop())
@@ -58,7 +58,7 @@ test('follows a symlinked rules subdirectory', () => {
 
 test('follows a symlinked rule file', () => {
   const rules = rulesDir()
-  const external = mkdtempSync(join(tmpdir(), 'kanon-external-'))
+  const external = tmp('kanon-external-')
   const filePath = join(external, 'linked.md')
   writeFileSync(filePath, '---\npaths:\n  - "test/**"\n---\n\n# Linked\n')
   symlinkSync(filePath, join(rules, 'linked.md'))

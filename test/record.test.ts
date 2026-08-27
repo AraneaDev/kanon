@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmp } from './tmp'
 
 const SCRIPT = join(import.meta.dir, '..', 'hooks', 'scripts', 'record.sh')
 
@@ -17,7 +17,7 @@ async function record(payload: string, home: string): Promise<void> {
 }
 
 test('appends a wrapped payload to the session log', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const home = tmp('kanon-')
   const payload = JSON.stringify({
     session_id: 'abc123',
     hook_event_name: 'InstructionsLoaded',
@@ -36,7 +36,7 @@ test('appends a wrapped payload to the session log', async () => {
 })
 
 test('a non-JSON payload lands in unknown.jsonl as valid JSON with unparsed field', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const home = tmp('kanon-')
   await record('not json at all', home)
   const file = join(home, 'sessions', 'unknown.jsonl')
   expect(existsSync(file)).toBe(true)
@@ -47,7 +47,7 @@ test('a non-JSON payload lands in unknown.jsonl as valid JSON with unparsed fiel
 })
 
 test('non-JSON with quotes and backslashes round-trips intact', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const home = tmp('kanon-')
   const payload = 'test "quote" and \\backslash'
   await record(payload, home)
   const file = join(home, 'sessions', 'unknown.jsonl')
@@ -56,7 +56,7 @@ test('non-JSON with quotes and backslashes round-trips intact', async () => {
 })
 
 test('a pretty-printed multi-line JSON payload is collapsed to one JSONL line', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const home = tmp('kanon-')
   const payload = JSON.stringify(
     {
       session_id: 'pretty1',
@@ -81,7 +81,7 @@ test('a pretty-printed multi-line JSON payload is collapsed to one JSONL line', 
 })
 
 test('appends rather than truncating', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const home = tmp('kanon-')
   const one = JSON.stringify({ session_id: 's', hook_event_name: 'InstructionsLoaded', file_path: '/a' })
   const two = JSON.stringify({ session_id: 's', hook_event_name: 'InstructionsLoaded', file_path: '/b' })
   await record(one, home)
