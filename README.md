@@ -1,104 +1,150 @@
+<div align="center">
+
 # Kanon
 
-Kanon answers one question: which instruction files govern this Claude Code
-session, and where did each one come from.
+**Every rule governing this session, named.**
+**Including the ones you thought loaded and didn't.**
 
-A CLAUDE.md file can arrive from a lot of places: your own project, your
-`~/.claude` setup, a nested subdirectory, an `@path` import buried inside
-another file, or a dependency you never meant to give a voice in your
-session. Claude Code loads all of these the same way. Kanon tells them apart
-and writes down what actually happened, not just what should have happened.
+[![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
+[![Tests](https://img.shields.io/badge/tests-135%20passing-2b8a3e)](test/)
+[![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
+[![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
+[![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
+[![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
+[![Status](https://img.shields.io/badge/status-pre--release-orange)](#install)
 
-## What it reports
+</div>
 
-Every instruction file that loaded gets classified into an origin. Three of
-them are the ones worth watching:
+---
 
-- **user** - under `~/.claude/`. Your own standing instructions.
-- **project** - under the session's repository root. What the project itself
-  asks for.
-- **foreign** - a dependency directory (`node_modules`, `vendor`, `.venv`,
-  and the like), or anywhere else outside both of the above. A foreign file
-  loaded into your session without you choosing it, and Kanon treats that as
-  the highest-value signal it can raise.
+> **Kanon** (κανών) is the measuring rod, the straight edge a craftsman lays against his work to
+> see whether it is true. The word became "canon": the list of texts a community agreed to be
+> bound by. This tool does the smaller version. It tells you which texts your session is actually
+> bound by, rather than which ones you believe it is.
 
-Two more origins exist for completeness: **managed**, the platform's policy
-file, and **local**, a `CLAUDE.local.md`. Both are exact matches on where the
-file lives, so there's nothing to watch for there.
+A Claude Code plugin. It records every instruction file that loads into a session, says where
+each one came from, and names the ones you expected that never arrived.
 
-Kanon also tracks the other direction: a launch-time file it expected to load
-and never did. That's reported as **missing**. A subdirectory or path-scoped
-rule that simply never triggered is reported separately, as **quiet**, since
-that's a fact about the session rather than a fault.
+A `CLAUDE.md` can reach your context from a lot of places: the project you are in, your own
+`~/.claude` setup, a directory above you, a subdirectory Claude wandered into, an `@path` import
+buried four hops deep, or a dependency that shipped one and never mentioned it. Claude Code loads
+them all the same way and reports none of it. Kanon writes down what actually happened.
 
-## Installation
+> **Status:** pre-release. Kanon is installable from source and from this repository, and the
+> hook payload field names have not yet been confirmed against a live session. If they turn out
+> different the failure is loud rather than silent: the report says nothing was recorded, and the
+> raw log still holds the truth.
 
-Kanon needs Bun 1.1 or newer on the machine running Claude Code. Install the
-plugin the way you install any Claude Code plugin, then start a session as
-usual. Kanon only sees sessions that started after it was installed; there's
-no way to reconstruct history from before that.
+---
 
-## The `/kanon` command
+## What it does
 
-Run `/kanon` at any point in a session to see the full report:
+- **Names every instruction file that loaded**, in the order it arrived, with the reason Claude
+  Code gave for loading it.
+- **Classifies where each one came from.** `user` for your own `~/.claude` standing instructions,
+  `project` for the repository you are in, and `FOREIGN` for anything shipped inside a dependency
+  directory or living outside both. A foreign file got a voice in your session without you
+  choosing to give it one, and that is the highest-value thing Kanon can tell you.
+- **Names what did not load.** A launch-time file that never arrived is reported as `missing`,
+  which is a fault. A subdirectory or path-scoped rule that simply never triggered is reported as
+  `quiet`, which is a fact about the session rather than a fault.
+- **Admits when it is wrong.** Kanon models Claude Code's loader to work out what it expected. If
+  a file loads that its model never predicted, it says so and marks its own NOT LOADED section
+  unreliable, rather than blaming you.
+- **Says what it could not read.** An instruction file over 4 MiB, one it could not open, or an
+  `@path` import pointing at a file that does not exist, is listed rather than quietly dropped.
+- **Stays quiet otherwise.** It speaks unprompted only when a foreign file loads or an expected
+  one is missing. Everything else waits for you to ask.
 
-```
-SESSION  /root/myproject            ruleset 2026-08
+```text
+SESSION  /home/you/project           ruleset 2026-08
 
 LOADED
-  user       ~/.claude/rules/schrijfstijl.md      session_start
+  user       ~/.claude/rules/style.md             session_start
   project    CLAUDE.md                            session_start
-  FOREIGN    vendor/phpstan/phpstan/CLAUDE.md     nested_traversal
+  project    .claude/rules/style.md               session_start
+  FOREIGN    vendor/phpstan/CLAUDE.md             nested_traversal
              untracked in this repo
 
 NOT LOADED
   missing    .claude/rules/testing.md             expected at launch
+  quiet      .claude/rules/api.md                 path-scoped, no match
   quiet      docs/CLAUDE.md                       on-demand, not triggered
+
+CONFIG CHANGED
+  06:58  skills  (+1)
 ```
 
-Kanon also speaks without being asked, but only for the two things worth
-interrupting you for: a foreign file loading, and a launch-time file that
-didn't. Everything else stays on request, and the alarm itself stays out of
-the model's context; it reaches you, as a systemMessage, never the
-conversation. The instruction set is yours to fix, not Claude's.
+That is a real run, not a mock-up.
 
-Claude Code doesn't hand a running session its own session id, so `/kanon`
-can't just ask for one. It picks the most recently recorded session that was
-itself recorded from your repository, and it will not fall back to a
-session from a different one, even a more recently active one. Run two
-Claude Code sessions in two different repositories at once and each one's
-`/kanon` still reports on its own repository. Run it somewhere Kanon has
-recorded nothing yet and it says so plainly instead of guessing.
+## Requirements
+
+[Bun](https://bun.sh/) 1.1 or newer, on the machine running Claude Code. Nothing else. Kanon makes
+no network request of any kind, has no API key, sends no telemetry, and never blocks a session.
+
+## Install
+
+```bash
+claude plugin marketplace add AraneaDev/aranea-claude-tools
+claude plugin install kanon@aranea-claude-tools
+```
+
+Hooks bind when a session starts, so start a new session before Kanon sees anything. It only sees
+sessions that began after it was installed, and there is no way to reconstruct what happened
+before that.
+
+## The `/kanon` command
+
+`/kanon` prints the report for the current session.
+
+With no arguments it picks the most recent session recorded from the repository you are in. It
+will not fall back to a session from a different repository, because reporting one repository's
+loads against another's expectations invents alarms that are not real. If nothing was recorded
+for the directory you are in, it says so plainly.
 
 ## Where the data lives
 
-Everything Kanon writes goes under `~/.kanon/`, never under `~/.claude/`.
-That's a hard rule, not a convention: Kanon reads your Claude Code
-configuration but never touches it.
+Everything sits under `~/.kanon/`, and Kanon never writes anywhere else. It reads `~/.claude/` and
+never writes to it.
 
-- `~/.kanon/sessions/<session_id>.jsonl` - the raw, append-only event log.
-- `~/.kanon/reports/<session_id>.txt` - the rendered report, written again
-  at the end of every session.
+| Path | What is in it |
+| --- | --- |
+| `~/.kanon/sessions/<id>.jsonl` | One append-only line per hook event, raw |
+| `~/.kanon/reports/<id>.txt` | The rendered report, written when the session ends |
 
-Records older than 90 days are pruned automatically. Nothing here is synced,
-uploaded, or read by anything other than Kanon itself.
+Records older than 90 days are pruned on the next run. Point `KANON_HOME` somewhere else if you
+want the data to live elsewhere.
 
 ## The ruleset
 
-Every report is stamped with a ruleset version, currently `2026-08`. That
-stamp names the version of Claude Code's own loading rules that Kanon's
-model is built against. If Anthropic changes how instructions load, the
-stamp is what tells you Kanon's picture might be out of date, rather than
-letting it go stale silently. When Kanon's model of reachability disagrees
-with what it actually observed loading, it says so plainly in the report
-instead of quietly guessing.
+Every report carries a `ruleset` stamp, currently `2026-08`. Kanon has to model how Claude Code
+resolves instruction files in order to say what it expected, and that behaviour belongs to
+Anthropic and can change. The stamp is there so a stale model is visible rather than silent.
 
-## What Kanon doesn't do
+If Kanon's expectations and reality disagree, it tells you and stops trusting its own NOT LOADED
+section for that session. What it observed loading is never in doubt, because that half needs no
+model at all.
 
-Kanon never blocks a session. It has no opinion strong enough to be worth
-the cost of stopping you, and it makes that trade deliberately: even the
-hook wired for a moment that could block, `ConfigChange`, is one Kanon
-declines to use that way.
+## What Kanon does not do
 
-Kanon makes no network calls, sends no telemetry, and asks for no API key.
-Everything it does is a local file read and a local file write.
+It reports which files reached your context and where they came from. It does not read them for
+meaning, score them, rank them, or scan them for prompt injection. Deciding whether a dependency's
+instructions belong in your session is your call. Kanon's job is making sure you know they are
+there.
+
+It never blocks. `ConfigChange` can block a configuration change and Kanon declines to.
+
+## Development
+
+```bash
+git clone https://github.com/AraneaDev/kanon.git
+cd kanon
+bun install
+bun run check      # typecheck, then the full suite
+```
+
+The design and the implementation plan live in [`docs/`](docs/).
+
+## License
+
+MIT.
