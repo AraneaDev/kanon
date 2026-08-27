@@ -1,6 +1,17 @@
+import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+
 import { classify, hasDependencySegment } from './origin'
 import { RULESET, type Candidate, type Classified, type ConfigEvent, type Event, type Report, type Skipped } from './types'
+
+/** realpath, falling back to the path as given when it cannot be resolved. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
 
 /**
  * Run a git plumbing query and turn its exit code into a tri-state answer.
@@ -46,7 +57,11 @@ export function buildReport(
   const firstReason = new Map<string, string>()
   for (const e of events) {
     if (e.ev !== 'loaded') continue
-    const p = resolve(root, e.path)
+    // Resolved through realpath so the report names the file's real location
+    // and `render` can express it relative to the root, which is itself real.
+    // Without this a session reached through a symlink prints every path in
+    // full instead of relative to the project.
+    const p = realPath(resolve(root, e.path))
     if (!firstReason.has(p)) {
       firstReason.set(p, e.reason)
       loadedOrder.push(p)

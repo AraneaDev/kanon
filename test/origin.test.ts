@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { classify, sessionRoot } from '../src/origin'
@@ -55,4 +55,33 @@ test('an ordinary file inside the root is project', () => {
 
 test('foreign wins over local, so a vendored CLAUDE.local.md is foreign', () => {
   expect(classify('/repo/vendor/a/CLAUDE.local.md', '/repo', '/home/x/.claude')).toBe('foreign')
+})
+
+test('sessionRoot resolves the root through symlinks', () => {
+  // macOS reaches /tmp and /var through symlinks into /private, so a session
+  // started there produced a root that none of its own files appeared to sit
+  // under, and every project file was classified foreign. Both sides of that
+  // comparison have to be real paths.
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-sym-'))
+  const real = join(dir, 'real')
+  mkdirSync(join(real, 'repo', '.git'), { recursive: true })
+  const link = join(dir, 'link')
+  symlinkSync(real, link)
+
+  const viaLink = sessionRoot(join(link, 'repo'))
+  const viaReal = sessionRoot(join(real, 'repo'))
+  expect(viaLink).toBe(viaReal)
+  expect(viaLink).not.toContain('link')
+})
+
+test('a project file reached through a symlink is project, never foreign', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-sym-'))
+  const real = join(dir, 'real')
+  mkdirSync(join(real, 'repo', '.git'), { recursive: true })
+  writeFileSync(join(real, 'repo', 'CLAUDE.md'), '# Project\n')
+  const link = join(dir, 'link')
+  symlinkSync(real, link)
+
+  const root = sessionRoot(join(link, 'repo'))
+  expect(classify(join(link, 'repo', 'CLAUDE.md'), root, '/home/x/.claude')).toBe('project')
 })

@@ -12,14 +12,34 @@ export function managedPath(platform: string = process.platform): string {
   return MANAGED[platform as keyof typeof MANAGED] ?? MANAGED.linux
 }
 
-/** The git repository root containing cwd, or cwd when it is not in a repo. */
+/**
+ * The git repository root containing cwd, or cwd when it is not in a repo.
+ *
+ * The result is resolved through realpath, because `classify` realpaths the
+ * file paths it is handed and the two have to be comparable. On macOS `/tmp`
+ * and `/var` are symlinks into `/private`, so a session started through one of
+ * them would otherwise produce a root that none of its own files appear to sit
+ * under, and every file in the project would be classified `foreign`. A false
+ * FOREIGN alarm is the worst output this tool has, so the two sides are made
+ * consistent here rather than at each call site.
+ */
 export function sessionRoot(cwd: string): string {
-  let dir = resolve(cwd)
+  const start = realPath(resolve(cwd))
+  let dir = start
   for (;;) {
     if (existsSync(join(dir, '.git'))) return dir
     const up = dirname(dir)
-    if (up === dir) return resolve(cwd)
+    if (up === dir) return start
     dir = up
+  }
+}
+
+/** realpath, falling back to the path as given when it cannot be resolved. */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
   }
 }
 
