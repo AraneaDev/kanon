@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/AraneaDev/kanon/compare/v0.0.2...v0.0.3) (2026-08-27)
+
+
+### Documentation
+
+* link the README to the project page ([043ccd8](https://github.com/AraneaDev/kanon/commit/043ccd8c0a2d96d70d91b1ff43dee497a470b1a1))
+
 ## [0.0.2](https://github.com/AraneaDev/kanon/compare/v0.0.1...v0.0.2) (2026-08-27)
 
 
