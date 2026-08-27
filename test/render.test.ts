@@ -76,6 +76,7 @@ test('a quiet path-scoped candidate is described as no match, not as not trigger
   r.quiet = [{ path: '/repo/.claude/rules/api.md', label: 'path-scoped', rule: 'paths' }]
   const out = render(r)
   expect(out).toContain('path-scoped, no match')
+  expect(out).not.toContain('not triggered')
 })
 
 test('the model-disagrees note does not blame the user', () => {
@@ -122,4 +123,25 @@ test('reproduces the worked example from the design doc column-for-column', () =
   expect(out).toContain('  quiet      docs/CLAUDE.md                       on-demand, not triggered')
   expect(out).toContain('  quiet      .claude/rules/api.md                 path-scoped, no match')
   expect(out).toContain('  00:52  skills  (+1)')
+})
+
+test('a path longer than the path column still gets a space before the reason', () => {
+  const r = base()
+  const path = '/repo/a/very/deeply/nested/directory/tree/CLAUDE.md'
+  r.loaded = [{ path, origin: 'project', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null }]
+  const out = render(r)
+  const rel = path.slice('/repo/'.length)
+  // The fused form the pre-fix code produced when a value reached or
+  // exceeded the column width: no whitespace at all between path and reason.
+  expect(out).not.toContain(`${rel}session_start`)
+  // Reason is still present, and separated from the path by whitespace.
+  expect(out).toContain(`${rel} session_start`)
+})
+
+test('renders the SESSION line with root and ruleset separated by a gap', () => {
+  const r = base()
+  r.root = '/root/Knossos-MCP'
+  const out = render(r)
+  const sessionLine = out.split('\n')[0]
+  expect(sessionLine).toBe('SESSION  /root/Knossos-MCP          ruleset 2026-08')
 })

@@ -10,6 +10,17 @@ const TAG_WIDTH = 11
 const PATH_WIDTH = 37
 
 /**
+ * Pad a value to a fixed column width, but never let it fuse into the next
+ * column: a value that reaches or exceeds the width gets a single trailing
+ * space instead of the usual padding, so there is always at least one space
+ * of separation. Kanon's real paths routinely exceed PATH_WIDTH, so this is
+ * the common case, not an edge case, for the path column.
+ */
+function pad(value: string, width: number): string {
+  return value.length < width ? value.padEnd(width) : `${value} `
+}
+
+/**
  * Shorten a path for display: under the session root it is shown relative
  * to that root (e.g. a `project` file becomes `CLAUDE.md`); otherwise,
  * under the user's home directory, it is shown as `~/...` (matching how the
@@ -46,7 +57,7 @@ function trackedNote(c: Classified): string {
 
 function loadedLine(c: Classified, root: string): string {
   const tag = c.origin === 'foreign' ? 'FOREIGN' : c.origin
-  const main = `  ${tag.padEnd(TAG_WIDTH)}${short(c.path, root).padEnd(PATH_WIDTH)}${c.reason}`
+  const main = `  ${pad(tag, TAG_WIDTH)}${pad(short(c.path, root), PATH_WIDTH)}${c.reason}`
 
   const notes: string[] = []
   if (c.viaImport) notes.push(`imported by ${short(c.viaImport, root)}`)
@@ -96,10 +107,10 @@ export function render(report: Report): string {
     out.push('')
     out.push('NOT LOADED')
     for (const c of report.missing) {
-      out.push(`  ${'missing'.padEnd(TAG_WIDTH)}${short(c.path, root).padEnd(PATH_WIDTH)}expected at launch`)
+      out.push(`  ${pad('missing', TAG_WIDTH)}${pad(short(c.path, root), PATH_WIDTH)}expected at launch`)
     }
     for (const c of report.quiet) {
-      out.push(`  ${'quiet'.padEnd(TAG_WIDTH)}${short(c.path, root).padEnd(PATH_WIDTH)}${quietReason(c.label)}`)
+      out.push(`  ${pad('quiet', TAG_WIDTH)}${pad(short(c.path, root), PATH_WIDTH)}${quietReason(c.label)}`)
     }
   }
 
