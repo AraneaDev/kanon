@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync,
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { discover } from './discover'
-import { resolveImports } from './discover/imports'
 import { prune } from './limits'
 import { normalise } from './normalise'
 import { sessionRoot } from './origin'
@@ -126,9 +125,7 @@ function collect(session: string, cwd: string): Report {
   const events = normalise(lines)
 
   const home = claudeHome()
-  const { root, candidates, skipped } = discover(cwd, home)
-  const launch = candidates.filter((c) => c.label === 'launch').map((c) => c.path)
-  const importedBy = resolveImports(launch)
+  const { root, candidates, skipped, importedBy } = discover(cwd, home)
 
   return buildReport(events, candidates, root, home, importedBy, skipped)
 }

@@ -137,6 +137,15 @@ test('an @import whose target does not exist is reported to onSkip with reason m
   expect(skips).toContainEqual({ path: join(dir, 'ghost.md'), reason: 'missing-target' })
 })
 
+test('an @import whose target does not exist reports the importer to onSkip', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
+  const claude = join(dir, 'CLAUDE.md')
+  writeFileSync(claude, 'see @ghost.md\n')
+  const skips: Array<{ path: string; reason: string; importer?: string }> = []
+  resolveImports([claude], 4, (path, reason, importer) => skips.push({ path, reason, importer }))
+  expect(skips).toContainEqual({ path: join(dir, 'ghost.md'), reason: 'missing-target', importer: claude })
+})
+
 test('onSkip is optional and existing callers are unaffected', () => {
   const dir = mkdtempSync(join(tmpdir(), 'kanon-i-'))
   writeFileSync(join(dir, 'a.md'), 'see @ghost.md\n')

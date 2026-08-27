@@ -43,13 +43,13 @@ no way to reconstruct history from before that.
 Run `/kanon` at any point in a session to see the full report:
 
 ```
-SESSION  /root/myproject                    ruleset 2026-08
+SESSION  /root/myproject            ruleset 2026-08
 
 LOADED
   user       ~/.claude/rules/schrijfstijl.md      session_start
   project    CLAUDE.md                            session_start
   FOREIGN    vendor/phpstan/phpstan/CLAUDE.md     nested_traversal
-             composer dependency, untracked in this repo
+             untracked in this repo
 
 NOT LOADED
   missing    .claude/rules/testing.md             expected at launch

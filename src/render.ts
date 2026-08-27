@@ -119,7 +119,10 @@ function skipDetail(reason: Skipped['reason']): string {
 
 function skipLine(s: Skipped, root: string): string {
   const main = `  ${pad(skipTag(s.reason), TAG_WIDTH)}${short(s.path, root)}`
-  return `${main}\n${' '.repeat(2 + TAG_WIDTH)}${skipDetail(s.reason)}`
+  // A broken import is only actionable if you know where it came from, so
+  // the importer -- when Kanon has one -- is named alongside the reason.
+  const detail = s.importer ? `${skipDetail(s.reason)} Imported by ${short(s.importer, root)}.` : skipDetail(s.reason)
+  return `${main}\n${' '.repeat(2 + TAG_WIDTH)}${detail}`
 }
 
 export function render(report: Report): string {

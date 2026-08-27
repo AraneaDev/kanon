@@ -29,7 +29,14 @@ function isUnder(path: string, parent: string): boolean {
   return p === q || p.startsWith(q.endsWith(sep) ? q : q + sep)
 }
 
-function hasDependencySegment(path: string, root: string): boolean {
+/**
+ * True when `path` runs through a dependency directory (`node_modules`,
+ * `vendor`, and the like) relative to `root`. Exported so callers outside
+ * origin classification -- report.ts's modelDisagrees check, in particular
+ * -- can tell "expected to be unenumerated" apart from a genuine miss by
+ * the candidate model, without duplicating this walk.
+ */
+export function hasDependencySegment(path: string, root: string): boolean {
   const rel = isUnder(path, root) ? path.slice(root.length) : path
   return rel.split(sep).some((seg) => DEPENDENCY_SEGMENTS.includes(seg))
 }

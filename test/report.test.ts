@@ -95,7 +95,22 @@ test('a vendored CLAUDE.md that the candidate walk never enumerates still lands 
   expect(r.loaded).toHaveLength(1)
   expect(r.loaded[0]?.path).toBe(vendored)
   expect(r.loaded[0]?.origin).toBe('foreign')
-  expect(r.modelDisagrees).toEqual([vendored])
+})
+
+test('a vendored load is never counted as a model disagreement: it is unenumerated by design, not a model failure', () => {
+  // Finding 3: subdirCandidates skips dependency directories on purpose, so
+  // a load under one of them never gets a matching candidate. That must not
+  // trip modelDisagrees -- doing so would permanently invalidate the NOT
+  // LOADED section's reliability note for a reason that isn't a model
+  // failure at all.
+  const vendored = '/repo/vendor/phpstan/phpstan/CLAUDE.md'
+  const r = buildReport(normalise([line(vendored)]), [], ROOT, HOME, new Map())
+  expect(r.modelDisagrees).toEqual([])
+})
+
+test('a genuine disagreement (an unexpected path with no dependency segment) still trips modelDisagrees', () => {
+  const r = buildReport(normalise([line('/elsewhere/CLAUDE.md')]), [], ROOT, HOME, new Map())
+  expect(r.modelDisagrees).toEqual(['/elsewhere/CLAUDE.md'])
 })
 
 test('an import flag is carried onto the loaded entry', () => {

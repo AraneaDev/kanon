@@ -55,6 +55,31 @@ test('non-JSON with quotes and backslashes round-trips intact', async () => {
   expect(line.unparsed).toBe(payload)
 })
 
+test('a pretty-printed multi-line JSON payload is collapsed to one JSONL line', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'kanon-'))
+  const payload = JSON.stringify(
+    {
+      session_id: 'pretty1',
+      hook_event_name: 'InstructionsLoaded',
+      cwd: '/root/aranea',
+      file_path: '/root/aranea/CLAUDE.md',
+      load_reason: 'session_start',
+    },
+    null,
+    2,
+  )
+  await record(payload, home)
+
+  const file = join(home, 'sessions', 'pretty1.jsonl')
+  expect(existsSync(file)).toBe(true)
+  const text = readFileSync(file, 'utf8')
+  const lines = text.trim().split('\n')
+  expect(lines.length).toBe(1)
+  const line = JSON.parse(lines[0]!)
+  expect(line.hook).toBe('InstructionsLoaded')
+  expect(line.raw.file_path).toBe('/root/aranea/CLAUDE.md')
+})
+
 test('appends rather than truncating', async () => {
   const home = mkdtempSync(join(tmpdir(), 'kanon-'))
   const one = JSON.stringify({ session_id: 's', hook_event_name: 'InstructionsLoaded', file_path: '/a' })

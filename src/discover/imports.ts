@@ -38,7 +38,7 @@ function resolveTarget(target: string, importer: string): string {
 export function resolveImports(
   files: string[],
   maxDepth = 4,
-  onSkip?: (path: string, reason: SkipReason) => void,
+  onSkip?: (path: string, reason: SkipReason, importer?: string) => void,
 ): Map<string, string> {
   const seedSet = new Set<string>(files.map((f) => resolve(f)))
   const found = new Map<string, string>()
@@ -68,8 +68,10 @@ export function resolveImports(
         const p = resolveTarget(target, importer)
         if (!existsSync(p)) {
           // The target, not the importer, is what's missing: it's the
-          // target's path a reader would want to see and check.
-          onSkip?.(p, 'missing-target')
+          // target's path a reader would want to see and check. The
+          // importer is passed along too, since a broken import is only
+          // actionable if you know where it came from.
+          onSkip?.(p, 'missing-target', importer)
           continue
         }
         if (seedSet.has(p)) continue

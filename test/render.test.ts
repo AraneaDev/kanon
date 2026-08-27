@@ -162,6 +162,23 @@ test('a skipped missing import target names the target path and reason', () => {
   expect(out).toContain('does not exist')
 })
 
+test('a skipped missing import target names the importer when one is known', () => {
+  const r = base()
+  r.skipped = [{ path: '/repo/docs/ghost.md', reason: 'missing-target', importer: '/repo/CLAUDE.md' }]
+  const out = render(r)
+  expect(out).toContain('Imported by CLAUDE.md')
+})
+
+test('the missing-target tag never fuses into the path column', () => {
+  const r = base()
+  r.skipped = [{ path: '/repo/docs/ghost.md', reason: 'missing-target' }]
+  const out = render(r)
+  // "missing target" is 14 characters against an 11-character TAG_WIDTH;
+  // pad() must still leave at least one space before the path.
+  expect(out).not.toContain('targetdocs/ghost.md')
+  expect(out).toContain('missing target docs/ghost.md')
+})
+
 test('renders the SESSION line with root and ruleset separated by a gap', () => {
   const r = base()
   r.root = '/root/Knossos-MCP'

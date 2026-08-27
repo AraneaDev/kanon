@@ -35,6 +35,13 @@ export type SkipReason = 'too-large' | 'unreadable' | 'missing-target'
 export interface Skipped {
   path: string
   reason: SkipReason
+  /**
+   * For a `missing-target` skip, the file whose @import named it -- a
+   * broken import is only actionable if you know where it came from.
+   * Absent for `too-large`/`unreadable`, where the skipped path and the
+   * file that would have imported it are the same file.
+   */
+  importer?: string
 }
 
 export interface Report {

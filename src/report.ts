@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { classify } from './origin'
+import { classify, hasDependencySegment } from './origin'
 import { RULESET, type Candidate, type Classified, type ConfigEvent, type Event, type Report, type Skipped } from './types'
 
 /**
@@ -57,14 +57,19 @@ export function buildReport(
   const modelDisagrees: string[] = []
   for (const p of loadedOrder) {
     const candidate = byPath.get(p)
-    if (!candidate || candidate.label === 'unreachable') {
-      // Kanon's candidate model was wrong about this path (e.g. a lazily
-      // loaded file under a directory the candidate walk deliberately
-      // skips, like vendor/ or node_modules/). That is a fault in layer
-      // two, the prediction, not in layer one: origin classification needs
-      // no prediction at all, so the file still gets classified and still
-      // appears in `loaded`. `modelDisagrees` records how much to trust
-      // `missing`/`quiet`, it does not gate what actually loaded.
+    // A path running through a dependency directory (vendor/, node_modules/,
+    // ...) is never enumerated as a candidate BY DESIGN -- subdirCandidates
+    // deliberately skips those directories -- so it is expected to be
+    // unmodelled, not a failure of the reachability model. Only flag a miss
+    // that the model actually got wrong: an unexpected path outside any
+    // dependency directory, or one explicitly marked unreachable.
+    if ((!candidate || candidate.label === 'unreachable') && !hasDependencySegment(p, root)) {
+      // Kanon's candidate model was wrong about this path. That is a fault
+      // in layer two, the prediction, not in layer one: origin
+      // classification needs no prediction at all, so the file still gets
+      // classified and still appears in `loaded`. `modelDisagrees` records
+      // how much to trust `missing`/`quiet`, it does not gate what actually
+      // loaded.
       modelDisagrees.push(p)
     }
 

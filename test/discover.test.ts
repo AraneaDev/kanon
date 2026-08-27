@@ -121,11 +121,15 @@ test('an oversized rules file surfaces in skipped, not silently dropped', () => 
   expect(candidates.map((c) => c.path)).not.toContain(big)
 })
 
-test('a CLAUDE.md importing a missing file surfaces the target in skipped', () => {
+test('a CLAUDE.md importing a missing file surfaces the target in skipped, naming the importer', () => {
   const { repo, home } = project()
   writeFileSync(join(repo, 'CLAUDE.md'), 'see @docs/extra.md and @ghost.md\n')
   const { skipped } = discover(repo, home)
-  expect(skipped).toContainEqual({ path: join(repo, 'ghost.md'), reason: 'missing-target' })
+  expect(skipped).toContainEqual({
+    path: join(repo, 'ghost.md'),
+    reason: 'missing-target',
+    importer: join(repo, 'CLAUDE.md'),
+  })
 })
 
 test('a symlink cycle in the subdirectory walk does not produce duplicates or hang', () => {

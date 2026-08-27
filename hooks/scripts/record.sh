@@ -25,8 +25,13 @@ ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || ts='1970-01-01T00:00:00Z'
 # Check if payload looks like JSON object (starts with { after stripping leading whitespace)
 payload_trimmed=$(printf '%s' "$payload" | sed 's/^[[:space:]]*//g')
 if [ -n "$payload_trimmed" ] && [ "${payload_trimmed#\{}" != "$payload_trimmed" ]; then
-  # Payload starts with {, treat as JSON object
-  printf '{"t":"%s","hook":"%s","raw":%s}\n' "$ts" "$hook" "$payload" >> "$dir/$sid.jsonl" 2>/dev/null
+  # Payload starts with {, treat as JSON object. A pretty-printed payload
+  # carries real newlines, which would otherwise be written verbatim into
+  # the JSONL file and shatter one record across several unparsable lines.
+  # Collapsing them to spaces first is lossless for valid JSON, since
+  # whitespace between tokens is insignificant.
+  json_payload=$(printf '%s' "$payload" | tr '\n' ' ')
+  printf '{"t":"%s","hook":"%s","raw":%s}\n' "$ts" "$hook" "$json_payload" >> "$dir/$sid.jsonl" 2>/dev/null
 else
   # Payload is not JSON, escape and use unparsed field
   escaped=$(printf '%s' "$payload" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/	/\\t/g' | sed 's/\r/\\r/g' | sed ':a;N;$!ba;s/\n/\\n/g')

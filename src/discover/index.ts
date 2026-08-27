@@ -70,15 +70,15 @@ export function subdirCandidates(cwd: string): Candidate[] {
 export function discover(
   cwd: string,
   homeConfig: string,
-): { root: string; candidates: Candidate[]; skipped: Skipped[] } {
+): { root: string; candidates: Candidate[]; skipped: Skipped[]; importedBy: Map<string, string> } {
   const root = sessionRoot(cwd)
 
   // Keyed by path so the same file being flagged more than once (e.g. a
   // missing import target named by two different importers) still lands
   // as one entry in the report rather than a repeated one.
   const skippedByPath = new Map<string, Skipped>()
-  const onSkip = (path: string, reason: SkipReason): void => {
-    if (!skippedByPath.has(path)) skippedByPath.set(path, { path, reason })
+  const onSkip = (path: string, reason: SkipReason, importer?: string): void => {
+    if (!skippedByPath.has(path)) skippedByPath.set(path, importer ? { path, reason, importer } : { path, reason })
   }
 
   const base = walkCandidates(cwd, homeConfig)
@@ -119,5 +119,12 @@ export function discover(
     isExcluded(c.path) ? { ...c, label: 'excluded' as const } : c,
   )
 
-  return { root, candidates, skipped: [...skippedByPath.values()] }
+  // Returned alongside candidates/skipped, rather than recomputed by the
+  // caller: resolveImports deliberately skips its own seeds (launchPaths),
+  // so calling it a second time with the merged `launch` candidates -- which
+  // already contain every import target -- always finds nothing. cli.ts
+  // used to do exactly that, which is why viaImport was always null outside
+  // tests that hand-built the map. This is the one real walk of the import
+  // graph; there must not be a second.
+  return { root, candidates, skipped: [...skippedByPath.values()], importedBy: imported }
 }

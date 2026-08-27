@@ -64,6 +64,39 @@ function twoRepos() {
   return { home, repoA, repoB }
 }
 
+/**
+ * A CLAUDE.md that @-imports a second file, with both files recorded as
+ * loaded. Regression fixture for Finding 1: discover() must hand cli.ts the
+ * import map it already computed internally, not have cli.ts re-run
+ * resolveImports over the merged launch candidates (which always finds
+ * nothing, since resolveImports skips its own seeds and every import target
+ * is already promoted to a launch candidate by the time cli.ts sees it).
+ */
+function seededWithImport() {
+  const home = mkdtempSync(join(tmpdir(), 'kanon-cli-import-'))
+  const repo = join(home, 'repo')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  mkdirSync(join(repo, 'docs'), { recursive: true })
+  writeFileSync(join(repo, 'CLAUDE.md'), 'see @docs/extra.md\n')
+  writeFileSync(join(repo, 'docs', 'extra.md'), '# Extra\n')
+  const sessions = join(home, 'sessions')
+  mkdirSync(sessions, { recursive: true })
+  const wrap = (f: string, reason: string) =>
+    JSON.stringify({ t: '2026-08-27T00:00:00Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: f, load_reason: reason } })
+  writeFileSync(
+    join(sessions, 's.jsonl'),
+    [wrap(join(repo, 'CLAUDE.md'), 'session_start'), wrap(join(repo, 'docs', 'extra.md'), 'session_start')].join('\n') + '\n',
+  )
+  return { home, repo }
+}
+
+test('report shows an @-imported file annotated with the file that imported it (Finding 1 regression)', async () => {
+  const { home, repo } = seededWithImport()
+  const out = await run(['report', '--session', 's', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('extra.md')
+  expect(out).toContain('imported by')
+})
+
 function freshRepo(home: string) {
   const repo = join(home, 'repoC')
   mkdirSync(join(repo, '.git'), { recursive: true })
