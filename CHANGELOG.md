@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.4](https://github.com/AraneaDev/kanon/compare/v0.0.3...v0.0.4) (2026-08-28)
+
+
+### Documentation
+
+* point at the site's marketplace ([6e17b5d](https://github.com/AraneaDev/kanon/commit/6e17b5d27d631c6f4d962c06ed6225b328668172))
+
+
+### Continuous integration
+
+* assert the marketplace Kanon actually ships from ([27c4b3d](https://github.com/AraneaDev/kanon/commit/27c4b3d1e35e6cf38758c74013812e0108afda25))
+
 ## [0.0.3](https://github.com/AraneaDev/kanon/compare/v0.0.2...v0.0.3) (2026-08-27)
 
 
