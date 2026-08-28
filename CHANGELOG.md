@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/AraneaDev/kanon/compare/v0.0.4...v0.0.5) (2026-08-28)
+
+
+### Documentation
+
+* correct what the session-start brief says on a resumed session ([13d0b43](https://github.com/AraneaDev/kanon/commit/13d0b4347ada81800a5ac4afb86173062905c224))
+
 ## [0.0.4](https://github.com/AraneaDev/kanon/compare/v0.0.3...v0.0.4) (2026-08-28)
 
 
