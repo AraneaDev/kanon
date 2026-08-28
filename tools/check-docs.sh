@@ -37,7 +37,12 @@ fi
 
 # --- install commands name the real plugin -----------------------------------
 plugin=$(jq -r .name .claude-plugin/plugin.json)
-market=$(jq -r .name ../aranea-claude-tools/.claude-plugin/marketplace.json 2>/dev/null || echo aranea-claude-tools)
+# The marketplace Kanon is published in. It used to be read from a sibling
+# checkout of the old marketplace repository, which never resolved in CI: the
+# sibling is not checked out there, so it always fell through to the literal
+# below and only ever checked the fallback. Kanon now ships from the marketplace
+# on aranea-development.nl, so the literal is the fact worth asserting.
+market=aranea
 if grep -q "plugin install ${plugin}@${market}" README.md; then
   ok "install command names ${plugin}@${market}"
 else
