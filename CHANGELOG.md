@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/AraneaDev/kanon/compare/v0.0.5...v0.0.6) (2026-08-28)
+
+
+### Continuous integration
+
+* move off the actions still running on Node 20 ([df0d7fa](https://github.com/AraneaDev/kanon/commit/df0d7fa2ea621cfc85218ac36c581fb6040a31c6))
+
 ## [0.0.5](https://github.com/AraneaDev/kanon/compare/v0.0.4...v0.0.5) (2026-08-28)
 
 
