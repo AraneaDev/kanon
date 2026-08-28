@@ -138,10 +138,15 @@ Claude was told without asking it. The two carry the same text, character for ch
 that said one thing to you and another to Claude would be the exact failure this tool exists to
 catch.
 
-`SessionStart` fires before any instruction file loads, so the brief says `predicted` and
-describes the set it expects rather than one it watched arrive. Prediction never reports a file as
-missing: nothing has loaded yet, so an absence is not evidence. Run `bun src/cli.ts brief` by hand
-mid-session and it says `observed` instead.
+On a session starting fresh, `SessionStart` fires before any instruction file loads, so the brief
+says `predicted` and describes the set it expects rather than one it watched arrive. A prediction
+never reports a file as missing: nothing has loaded yet, so an absence is not evidence.
+
+Resume a session and the same hook says `observed`. The event log from the earlier run is already
+on disk, `hasEvents` is true, and the brief reads what actually loaded instead of predicting it. A
+brief on a resumed session can therefore name a file that was expected and never arrived, which is
+the one thing a prediction will not do. Running `bun src/cli.ts brief` by hand mid-session gives
+you the same observed brief.
 
 ## When Kanon doubts itself
 
