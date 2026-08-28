@@ -183,8 +183,8 @@ no network request of any kind, has no API key, sends no telemetry, and never bl
 ## Install
 
 ```bash
-claude plugin marketplace add AraneaDev/aranea-claude-tools
-claude plugin install kanon@aranea-claude-tools
+claude plugin marketplace add https://aranea-development.nl/plugins/marketplace.json
+claude plugin install kanon@aranea
 ```
 
 Hooks bind when a session starts, so start a new session before Kanon sees anything. It only sees
