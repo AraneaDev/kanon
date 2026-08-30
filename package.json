@@ -1,6 +1,6 @@
 {
   "name": "kanon",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "An instruction-load ledger with origin classification",
   "license": "MIT",
   "type": "module",
