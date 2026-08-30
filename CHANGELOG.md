@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.7](https://github.com/AraneaDev/kanon/compare/v0.0.6...v0.0.7) (2026-08-30)
+
+
+### Documentation
+
+* name the SSH clone failure in the install section ([#14](https://github.com/AraneaDev/kanon/issues/14)) ([56278c2](https://github.com/AraneaDev/kanon/commit/56278c288071703a7f19398027cec485eb4b7628))
+
 ## [0.0.6](https://github.com/AraneaDev/kanon/compare/v0.0.5...v0.0.6) (2026-08-28)
 
 
