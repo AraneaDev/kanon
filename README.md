@@ -196,6 +196,35 @@ Hooks bind when a session starts, so start a new session before Kanon sees anyth
 sessions that began after it was installed, and there is no way to reconstruct what happened
 before that.
 
+### If the install fails on port 22
+
+Claude Code clones a plugin from its GitHub repository over SSH. On a machine with no SSH key for
+GitHub, or with outbound port 22 blocked, the install stops here:
+
+```text
+Failed to clone repository: ssh: connect to host github.com port 22: Connection timed out
+fatal: Could not read from remote repository.
+Please make sure you have the correct access rights and the repository exists.
+```
+
+The message points at access rights. This repository is public, so what failed is the transport.
+Adding the marketplace succeeds either way, because that clone uses HTTPS, which is why other
+plugins from the same marketplace install on such a machine while this one does not.
+
+Tell git to reach GitHub over HTTPS, then install again:
+
+```bash
+git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+```
+
+That rewrites outgoing GitHub SSH URLs and nothing else, so it takes nothing away on a machine that
+could not use them in the first place. To undo it:
+
+```bash
+git config --global --unset-all url."https://github.com/".insteadOf
+```
+
 ## The `/kanon` command
 
 `/kanon` prints the report for the current session.
