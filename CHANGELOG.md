@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.9](https://github.com/AraneaDev/kanon/compare/v0.0.8...v0.0.9) (2026-09-01)
+
+
+### Features
+
+* run the kanon command without a bash tool call ([#19](https://github.com/AraneaDev/kanon/issues/19)) ([36aa83a](https://github.com/AraneaDev/kanon/commit/36aa83a409c60c264e932378a2561124bd30044c))
+
 ## [0.0.8](https://github.com/AraneaDev/kanon/compare/v0.0.7...v0.0.8) (2026-09-01)
 
 
