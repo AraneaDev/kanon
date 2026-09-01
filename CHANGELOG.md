@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.10](https://github.com/AraneaDev/kanon/compare/v0.0.9...v0.0.10) (2026-09-01)
+
+
+### Documentation
+
+* stop showing the brief twice, and correct the colour table ([#21](https://github.com/AraneaDev/kanon/issues/21)) ([ce81f5e](https://github.com/AraneaDev/kanon/commit/ce81f5e46e81d66de348449d1fde47bb824e2cda))
+
 ## [0.0.9](https://github.com/AraneaDev/kanon/compare/v0.0.8...v0.0.9) (2026-09-01)
 
 
