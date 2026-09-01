@@ -295,3 +295,7 @@ pyte and pillow from PyPI to get there.
 ## License
 
 MIT.
+
+---
+
+Built by [Aranea Development](https://aranea-development.nl).
