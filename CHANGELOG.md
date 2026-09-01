@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.8](https://github.com/AraneaDev/kanon/compare/v0.0.7...v0.0.8) (2026-09-01)
+
+
+### Documentation
+
+* link the project site from the readme ([#18](https://github.com/AraneaDev/kanon/issues/18)) ([91bc3dd](https://github.com/AraneaDev/kanon/commit/91bc3dd18fa9c89891ddfe30e58a31d6052ff40f))
+* point the badge at the renamed /tools section ([#16](https://github.com/AraneaDev/kanon/issues/16)) ([ec691e7](https://github.com/AraneaDev/kanon/commit/ec691e7d142d99f11093d636304d1071bceb876d))
+
 ## [0.0.7](https://github.com/AraneaDev/kanon/compare/v0.0.6...v0.0.7) (2026-08-30)
 
 
