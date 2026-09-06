@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
 import { mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readSnapshot } from '../src/state'
+import { SNAPSHOT_VERSION } from '../src/drift'
+import { sessionRoot } from '../src/origin'
+import { readSnapshot, writeSnapshot } from '../src/state'
 import { tmp } from './tmp'
 
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts')
@@ -364,6 +366,47 @@ test('brief treats an existing but empty event log as unobserved and predicts in
   const out = await run(['brief', '--session', 's', '--cwd', repo], env)
   expect(out).toContain('(predicted)')
   expect(out).toContain('project  CLAUDE.md')
+})
+
+/**
+ * Task 5 fix round 1: the per-basis drift filter (`driftForBasis` in
+ * cli.ts) had no end-to-end coverage. `test/brief.test.ts` only injects an
+ * already-filtered `Drift` into `brief()` directly, so it can prove the
+ * rendering is right but can never exercise the filter itself. This test
+ * drives the filter by planting a snapshot with two files that are absent
+ * from the *predicted* set -- one still on disk, one not -- and running the
+ * real `brief` CLI command with no session recorded, which is the only way
+ * `briefInput` takes the `predicted` branch.
+ */
+test('a predicted brief suppresses a vanished file still on disk, but reports one that is actually gone', async () => {
+  const { home, repo, env } = isolated('kanon-cli-drift-')
+  // Gives predictedFiles() a non-empty result, so `brief()` reaches the
+  // drift block at all instead of taking its "no instruction files" branch.
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
+
+  const stillOnDisk = join(repo, 'old-still-here.md')
+  writeFileSync(stillOnDisk, '# not a candidate, just present\n')
+  const actuallyGone = join(repo, 'deleted-rule.md')
+  // Deliberately never written: this is the file the filter must report.
+
+  writeSnapshot(home, {
+    v: SNAPSHOT_VERSION,
+    root: sessionRoot(repo),
+    ruleset: 'test',
+    session: 'previous-session',
+    t: '2026-08-27T00:00:00Z',
+    files: [
+      { path: stillOnDisk, origin: 'project', sha256: 'x' },
+      { path: actuallyGone, origin: 'project', sha256: 'y' },
+    ],
+  })
+
+  // No session file planted, so `briefInput` has no events and takes the
+  // predicted path -- the only path `driftForBasis` narrows.
+  const out = await run(['brief', '--cwd', repo], env)
+  expect(out).toContain('(predicted)')
+  expect(out).toContain('deleted-rule.md')
+  expect(out).not.toContain('old-still-here.md')
 })
 
 test('alarm names a launch file that was expected and never loaded', async () => {
