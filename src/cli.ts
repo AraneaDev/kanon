@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { brief, type BriefBasis, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
@@ -9,6 +9,7 @@ import { discover } from './discover'
 import { diff, digest, SNAPSHOT_VERSION, type Drift } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
+import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { render } from './render'
 import { buildReport } from './report'
@@ -382,6 +383,56 @@ function main(): void {
     // verbatim, so the calling shell script never has to escape a string
     // itself: JSON.stringify is exact, unlike ad hoc sed/printf escaping.
     console.log(flag('hook') ? JSON.stringify({ systemMessage: text }) : text)
+    return
+  }
+
+  if (command === 'notice') {
+    // Nothing recorded means nothing to say, exactly as with `alarm`.
+    if (!session || !existsSync(sessionFile(session))) return
+    // Every recorded line ends in its own newline, so a plain split leaves a
+    // trailing empty string that is not a line at all. Counting it would
+    // make the watermark overshoot by one and, on a file with a single
+    // trailing newline and nothing else, advance past a line that was never
+    // examined -- filter it out so the watermark counts real lines only.
+    const lines = readFileSync(sessionFile(session), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+    const seen = readWatermark(kanonHome(), session)
+    const home = claudeHome()
+    const root = sessionRoot(cwd)
+
+    const fresh: Classified[] = []
+    for (const e of normalise(lines.slice(seen))) {
+      if (e.ev !== 'loaded') continue
+      if (BRIEFED_REASONS.has(e.reason)) continue
+      const path = resolve(root, e.path)
+      if (classify(path, root, home) !== 'foreign') continue
+      if (fresh.some((f) => f.path === path)) continue
+      fresh.push({ path, origin: 'foreign', reason: e.reason, viaImport: null, gitIgnored: null, gitTracked: null })
+    }
+
+    const text = notice({ root, files: fresh }, firstDirective)
+    // Printed BEFORE the watermark advances. A crash between the two repeats
+    // an alarm on the next turn; the reverse order would lose one, and for
+    // an alarm a duplicate is the safe failure and silence is not.
+    if (text.length > 0) {
+      console.log(
+        flag('hook')
+          ? JSON.stringify({
+              systemMessage: text,
+              hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text },
+            })
+          : text,
+      )
+    }
+    // Advanced whether or not there was anything to say, so a turn that
+    // merely reloaded a known file does not make the guard spawn Bun again.
+    try {
+      writeWatermark(kanonHome(), session, lines.length)
+    } catch {
+      // A watermark that cannot be written costs a repeated notice, never a
+      // lost one. Never worth failing the command over.
+    }
     return
   }
 

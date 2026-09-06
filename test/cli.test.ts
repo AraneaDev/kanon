@@ -3,7 +3,7 @@ import { mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { SNAPSHOT_VERSION } from '../src/drift'
 import { sessionRoot } from '../src/origin'
-import { readSnapshot, writeSnapshot } from '../src/state'
+import { readSnapshot, readWatermark, writeSnapshot } from '../src/state'
 import { tmp } from './tmp'
 
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts')
@@ -688,4 +688,48 @@ test('a rewritten file is reported as changed on the next run', async () => {
   const out = await run(['report', '--cwd', repo], { KANON_HOME: home })
   expect(out).toContain('DRIFT')
   expect(out).toContain('changed')
+})
+
+// --- notice: a foreign file that loaded after the brief already went out ----
+
+test('notice names a foreign file that loaded mid-session', async () => {
+  const { home, repo } = seeded()
+  const out = await run(['notice', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('KANON')
+  expect(out).toContain('vendor/p/CLAUDE.md')
+})
+
+/**
+ * The brief already named every session_start load. Replaying them here
+ * would say the same thing twice to the same two readers.
+ */
+test('notice says nothing on a second run, because the watermark advanced', async () => {
+  const { home, repo } = seeded()
+  await run(['notice', '--cwd', repo], { KANON_HOME: home })
+  expect((await run(['notice', '--cwd', repo], { KANON_HOME: home })).trim()).toBe('')
+})
+
+/**
+ * Otherwise the guard would start Bun again on every following turn, which
+ * is exactly the per-prompt cost the guard exists to avoid.
+ */
+test('the watermark advances even when there was nothing to say', async () => {
+  const { home, repo, env } = isolated('kanon-notice-')
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  const line = JSON.stringify({
+    t: '2026-08-27T00:00:00Z',
+    hook: 'InstructionsLoaded',
+    raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: join(repo, 'CLAUDE.md'), load_reason: 'session_start' },
+  })
+  writeFileSync(join(home, 'sessions', 's.jsonl'), `${line}\n`)
+  expect((await run(['notice', '--cwd', repo], env)).trim()).toBe('')
+  expect(readWatermark(home, 's')).toBe(1)
+})
+
+test('notice with --hook emits both UserPromptSubmit channels', async () => {
+  const { home, repo } = seeded()
+  const out = await run(['notice', '--cwd', repo, '--hook'], { KANON_HOME: home })
+  const payload = JSON.parse(out)
+  expect(payload.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit')
+  expect(payload.hookSpecificOutput.additionalContext).toBe(payload.systemMessage)
 })
