@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-250%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-294%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -65,6 +65,12 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   one context with no attribution, so it cannot tell a rule you wrote from one a dependency
   shipped. The brief restores that: every file named against its origin, the directive each
   foreign one carries quoted, and an instruction to raise anything alarming with you.
+- **Says what changed since last time.** Kanon remembers the instruction files that governed the
+  last session in a repository, along with a digest of each. When one appears, vanishes, or is
+  rewritten between sessions, it says so. The case this exists for is a dependency that updates
+  and quietly rewrites its `CLAUDE.md`, where the file list looks identical.
+- **Speaks up mid-session.** An instruction file can load hours into a session, long after the
+  session-start brief has gone out. When a foreign one does, Kanon names it at the next prompt.
 
 ```text
 SESSION  /home/you/project           ruleset 2026-08
@@ -217,6 +223,25 @@ will not fall back to a session from a different repository, because reporting o
 loads against another's expectations invents alarms that are not real. If nothing was recorded
 for the directory you are in, it says so plainly.
 
+## The hooks Kanon installs
+
+| Event | What it does |
+| --- | --- |
+| `InstructionsLoaded`, `ConfigChange` | Appends the raw payload to the session log. One `sed`, one append. |
+| `SessionStart` | Emits the brief. |
+| `SessionEnd` | Renders the report and commits the snapshot drift is measured against. |
+| `UserPromptSubmit` | Delivers a notice when a foreign file loaded since the last prompt. |
+
+The last one runs on **every prompt**, which deserves saying plainly for a tool whose whole pitch
+is that it stays out of the way. It exists because `InstructionsLoaded` has no decision control:
+Claude Code discards that event's output, so the hook that detects a mid-session load cannot tell
+anyone about it. Delivery has to happen somewhere that can speak.
+
+What it costs on a normal turn is one `wc -l`. The script compares the session log's line count
+against a watermark and exits without starting Bun unless the log actually grew, which on most
+turns it has not. And it never blocks: it returns context, or nothing. `UserPromptSubmit` *can*
+reject a prompt, and Kanon declines to, the same way it declines to block a `ConfigChange`.
+
 ## Where the data lives
 
 Everything sits under `~/.kanon/`, and Kanon never writes anywhere else. It reads `~/.claude/` and
@@ -226,6 +251,8 @@ never writes to it.
 | --- | --- |
 | `~/.kanon/sessions/<id>.jsonl` | One append-only line per hook event, raw |
 | `~/.kanon/reports/<id>.txt` | The rendered report, written when the session ends |
+| `~/.kanon/state/<digest>.json` | The instruction files that governed this repository's last session, and a digest of each |
+| `~/.kanon/state/<id>.turn` | How much of a session's log has already been examined for notices |
 
 Records older than 90 days are pruned on the next run. Point `KANON_HOME` somewhere else if you
 want the data to live elsewhere.
@@ -252,6 +279,11 @@ It never blocks. `ConfigChange` can block a configuration change and Kanon decli
 One exception to reading files for meaning: the session-start brief quotes the first directive
 line of a **foreign** file, so Claude can match it against the instructions already merged into
 its context. That is a quotation, not a judgement. Nothing is scored or scanned.
+
+Drift uses a sha256 of each file's bytes. A digest answers "is this the same file as last time"
+without Kanon forming any view of what the file says, so nothing here is scored or scanned. It
+also means Kanon can tell you a file changed but never what changed in it. That diff is yours to
+read.
 
 ## Development
 
