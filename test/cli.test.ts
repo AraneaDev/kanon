@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SNAPSHOT_VERSION } from '../src/drift'
 import { sessionRoot } from '../src/origin'
@@ -789,4 +789,91 @@ test('notice with --hook emits both UserPromptSubmit channels', async () => {
   const payload = JSON.parse(out)
   expect(payload.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit')
   expect(payload.hookSpecificOutput.additionalContext).toBe(payload.systemMessage)
+})
+
+/**
+ * The sequential-subset bug. Session A loads a nested rule, session B never
+ * enters that directory and commits a narrower snapshot, session C returns.
+ * Before the union, C announced a file that had been in the repository the
+ * whole time.
+ */
+test('a nested rule loaded by one session is not appeared when a later session returns to it', async () => {
+  const { home, repo, env } = isolated('kanon-cli-union-')
+  writeFileSync(join(repo, 'CLAUDE.md'), '# root\n')
+  mkdirSync(join(repo, 'subdir'), { recursive: true })
+  const nested = join(repo, 'subdir', 'CLAUDE.md')
+  writeFileSync(nested, '# nested\n')
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+
+  const line = (session: string, file: string, reason: string) =>
+    JSON.stringify({
+      t: '2026-09-06T00:00:00Z',
+      hook: 'InstructionsLoaded',
+      raw: { session_id: session, hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: file, load_reason: reason },
+    })
+
+  // Session A: both files load.
+  writeFileSync(
+    join(home, 'sessions', 'a.jsonl'),
+    `${line('a', join(repo, 'CLAUDE.md'), 'session_start')}\n${line('a', nested, 'nested_traversal')}\n`,
+  )
+  await run(['report', '--session', 'a', '--cwd', repo, '--commit-state'], env)
+
+  // Session B: only the root file loads, and it commits.
+  writeFileSync(join(home, 'sessions', 'b.jsonl'), `${line('b', join(repo, 'CLAUDE.md'), 'session_start')}\n`)
+  await run(['report', '--session', 'b', '--cwd', repo, '--commit-state'], env)
+
+  // Session C: the nested file loads again. It is not new.
+  writeFileSync(
+    join(home, 'sessions', 'c.jsonl'),
+    `${line('c', join(repo, 'CLAUDE.md'), 'session_start')}\n${line('c', nested, 'nested_traversal')}\n`,
+  )
+  const out = await run(['report', '--session', 'c', '--cwd', repo], env)
+  expect(out).not.toContain('appeared')
+})
+
+/**
+ * The branch-switch cycle. A file removed and restored must produce exactly
+ * one `vanished` and never an `appeared`.
+ */
+test('a file removed and restored reports vanished once and is never appeared', async () => {
+  const { home, repo, env } = isolated('kanon-cli-cycle-')
+  writeFileSync(join(repo, 'CLAUDE.md'), '# root\n')
+  const rule = join(repo, 'RULE.md')
+  writeFileSync(rule, '# rule\n')
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+
+  const log = (session: string, files: string[]) =>
+    writeFileSync(
+      join(home, 'sessions', `${session}.jsonl`),
+      `${files
+        .map((f) =>
+          JSON.stringify({
+            t: '2026-09-06T00:00:00Z',
+            hook: 'InstructionsLoaded',
+            raw: { session_id: session, hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: f, load_reason: 'session_start' },
+          }),
+        )
+        .join('\n')}\n`,
+    )
+
+  log('one', [join(repo, 'CLAUDE.md'), rule])
+  await run(['report', '--session', 'one', '--cwd', repo, '--commit-state'], env)
+
+  rmSync(rule)
+  log('two', [join(repo, 'CLAUDE.md')])
+  const gone = await run(['report', '--session', 'two', '--cwd', repo, '--commit-state'], env)
+  expect(gone).toContain('vanished')
+  expect(gone).toContain('RULE.md')
+
+  // Still absent: the transition already fired, so it must not fire again.
+  log('three', [join(repo, 'CLAUDE.md')])
+  const quiet = await run(['report', '--session', 'three', '--cwd', repo, '--commit-state'], env)
+  expect(quiet).not.toContain('vanished')
+
+  // Restored: known to Kanon, so not new.
+  writeFileSync(rule, '# rule\n')
+  log('four', [join(repo, 'CLAUDE.md'), rule])
+  const back = await run(['report', '--session', 'four', '--cwd', repo], env)
+  expect(back).not.toContain('appeared')
 })

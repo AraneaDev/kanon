@@ -6,7 +6,7 @@ import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
-import { diff, digest, SNAPSHOT_VERSION } from './drift'
+import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
@@ -326,15 +326,21 @@ function main(): void {
     if (flag('commit-state')) {
       try {
         const stamp = new Date().toISOString()
+        // Read the previous snapshot again rather than threading it out of
+        // collect(): it is a small JSON file, and the alternative is another
+        // parameter on a function that already has enough.
+        const previous = readSnapshot(kanonHome(), report.root)
         writeSnapshot(kanonHome(), {
           v: SNAPSHOT_VERSION,
           root: report.root,
           ruleset: report.ruleset,
           session,
           t: stamp,
-          // Union with the previous snapshot arrives in the next task; this
-          // commit still records only what this session observed.
-          files: digest(report.loaded).map((d) => ({ ...d, lastSeen: stamp, present: true })),
+          // The union is what makes this a record of the repository rather
+          // than of this session. Without it the session that visited fewest
+          // directories overwrites a richer snapshot, and the next session
+          // announces long-standing files as new.
+          files: merge(previous?.files ?? null, digest(report.loaded), existsSync, new Date(stamp)),
         })
       } catch {
         // Housekeeping, like prune: a snapshot that cannot be written must
