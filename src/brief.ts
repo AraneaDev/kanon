@@ -23,9 +23,10 @@ export interface BriefInput {
   missing: Candidate[]
   /**
    * What changed since the last session in this root, or null when there is
-   * no baseline. Already filtered for basis by the caller: under a predicted
-   * basis, cli.ts drops any `vanished` file still present on disk, because
-   * a file that layer two merely stopped predicting has not gone anywhere.
+   * no baseline. Already filtered by the caller so that `vanished` only
+   * ever names a file genuinely absent from disk -- see `verified()` in
+   * drift.ts for why that rule holds on both bases alike, not just the
+   * predicted one.
    */
   drift: Drift | null
 }

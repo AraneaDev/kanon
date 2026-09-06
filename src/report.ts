@@ -1,6 +1,7 @@
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { diff, digest, type Drift, type FileDigest } from './drift'
+import { diff, digest, verified, type Drift, type FileDigest } from './drift'
 import { classify, hasDependencySegment } from './origin'
 import { realPath } from './paths'
 import {
@@ -159,8 +160,13 @@ export function buildReport(
 
   // Drift is computed from what actually loaded, never from candidates, so
   // it can never inherit layer two's fallibility: a prediction that changes
-  // between releases is not a change in the user's canon.
-  const drift: Drift | null = previous === null ? null : diff(previous, digest(loaded))
+  // between releases is not a change in the user's canon. `verified()`
+  // narrows `vanished` to files genuinely gone from disk -- see its own
+  // comment for why "not loaded this session" is not the same claim as
+  // "deleted", and why that rule is universal rather than specific to this
+  // caller.
+  const rawDrift: Drift | null = previous === null ? null : diff(previous, digest(loaded))
+  const drift: Drift | null = rawDrift === null ? null : verified(rawDrift, existsSync)
 
   return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift }
 }

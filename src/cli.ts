@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
-import { brief, type BriefBasis, type BriefInput } from './brief'
+import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
-import { diff, digest, SNAPSHOT_VERSION, type Drift } from './drift'
+import { diff, digest, SNAPSHOT_VERSION, verified } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
@@ -195,25 +195,6 @@ function predictedFiles(cwd: string, home: string, root: string): Classified[] {
     }))
 }
 
-/**
- * The drift a brief is allowed to state, given its basis.
- *
- * Under an observed basis everything is a fact. Under a predicted one, only
- * `vanished` needs narrowing: a file still sitting on disk that layer two
- * merely stopped predicting has not left the user's canon, and reporting it
- * would fire on every adjustment to the loader model. A file that is gone
- * from disk is a fact no model is involved in, and it is the actionable
- * case: the rule you rely on was deleted.
- *
- * `appeared` is left alone deliberately. It is a claim from layer two,
- * which is exactly what a predicted brief already is in its entirety, and
- * the header's (predicted) stamp already says so.
- */
-function driftForBasis(drift: Drift | null, basis: BriefBasis): Drift | null {
-  if (drift === null || basis === 'observed') return drift
-  return { ...drift, vanished: drift.vanished.filter((f) => !existsSync(f.path)) }
-}
-
 function briefInput(session: string | undefined, cwd: string): BriefInput {
   const home = claudeHome()
   const root = sessionRoot(cwd)
@@ -222,12 +203,20 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
 
   const predicted = (): BriefInput => {
     const files = predictedFiles(cwd, home, root)
+    // `report.drift` (used below, for the observed basis) already comes
+    // out of buildReport pre-filtered by `verified()`; this is the other
+    // caller verified() exists for, since a predicted brief computes its
+    // own diff() straight from digest(files) rather than going through
+    // buildReport at all. See verified()'s comment in drift.ts for why the
+    // narrowing is the same rule on both bases, not something specific to
+    // "predicted".
+    const raw = previous === null ? null : diff(previous, digest(files))
     return {
       root,
       basis: 'predicted',
       files,
       missing: [],
-      drift: driftForBasis(previous === null ? null : diff(previous, digest(files)), 'predicted'),
+      drift: raw === null ? null : verified(raw, existsSync),
     }
   }
 
@@ -253,12 +242,14 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
   if (report.loaded.length === 0) {
     return predicted()
   }
+  // report.drift is already verified() (buildReport applies it), so it is
+  // forwarded as-is rather than filtered again here.
   return {
     root: report.root,
     basis: 'observed',
     files: report.loaded,
     missing: report.missing,
-    drift: driftForBasis(report.drift, 'observed'),
+    drift: report.drift,
   }
 }
 
@@ -397,14 +388,21 @@ function main(): void {
     // examined -- filter it out so the watermark counts real lines only.
     //
     // This filtered count equals a plain `wc -l` only because the recorder
-    // always ends the file on a trailing newline. A line truncated mid-write
-    // (the recorder killed between the bytes and the newline) would be
-    // dropped by the `.trim().length > 0` check same as a blank one, so the
-    // watermark would fall one short of the file's true line count rather
-    // than overshoot it. That is the safe direction: the next `notice` run
-    // sees the same partial line again and finds it still not parseable, so
-    // the guard keeps invoking Bun every turn instead of ever silently
-    // skipping past a line that could have carried an alarm.
+    // always ends the file on a trailing newline. A line truncated
+    // mid-write (the recorder killed between the bytes and the newline) has
+    // content, so `.trim().length > 0` does NOT drop it -- it is counted
+    // here same as any complete line, and normalise() below turns its
+    // broken JSON into an `unparsed` event that this loop's `e.ev !==
+    // 'loaded'` check simply skips, so it never fires a notice (correctly:
+    // there is nothing readable to report). What actually differs from a
+    // complete line is that it has no trailing newline yet, so turn.sh's
+    // `wc -l` does not count it until a later append completes it, and the
+    // watermark this command writes below runs one ahead of what turn.sh
+    // is comparing against. The two stay mismatched until that later
+    // append lands, and that is the safe direction: the guard keeps
+    // invoking Bun every turn in the meantime rather than ever settling on
+    // a watermark that silently skipped past a line that could have
+    // carried an alarm.
     const lines = readFileSync(sessionFile(session), 'utf8')
       .split('\n')
       .filter((l) => l.trim().length > 0)

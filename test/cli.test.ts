@@ -409,6 +409,61 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
   expect(out).not.toContain('old-still-here.md')
 })
 
+/**
+ * Fix 2 (whole-branch review): the sibling test above only ever drove the
+ * predicted basis, because `driftForBasis` in cli.ts narrowed `vanished`
+ * only there. The observed basis -- a real recorded session, which is what
+ * `report` always uses and what `brief` uses once anything has loaded --
+ * had no gate at all, so a snapshot file this session never touched printed
+ * as "vanished" even sitting untouched on disk. Drives both the `report`
+ * and `brief` commands end to end against the same fixture so a regression
+ * that only fixed one reader of `verified()` would still be caught.
+ */
+test('an observed report and brief both suppress a vanished file still on disk, but report one that is actually gone', async () => {
+  const { home, repo, env } = isolated('kanon-cli-drift-observed-')
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
+
+  const stillOnDisk = join(repo, 'old-still-here.md')
+  writeFileSync(stillOnDisk, '# not loaded this session, but still here\n')
+  const actuallyGone = join(repo, 'deleted-rule.md')
+  // Deliberately never written: this is the file that must be reported.
+
+  writeSnapshot(home, {
+    v: SNAPSHOT_VERSION,
+    root: sessionRoot(repo),
+    ruleset: 'test',
+    session: 'previous-session',
+    t: '2026-08-27T00:00:00Z',
+    files: [
+      { path: stillOnDisk, origin: 'project', sha256: 'x' },
+      { path: actuallyGone, origin: 'project', sha256: 'y' },
+    ],
+  })
+
+  const sessions = join(home, 'sessions')
+  mkdirSync(sessions, { recursive: true })
+  const wrap = JSON.stringify({
+    t: '2026-08-27T00:00:00Z',
+    hook: 'InstructionsLoaded',
+    raw: {
+      session_id: 's',
+      hook_event_name: 'InstructionsLoaded',
+      cwd: repo,
+      file_path: join(repo, 'CLAUDE.md'),
+      load_reason: 'session_start',
+    },
+  })
+  writeFileSync(join(sessions, 's.jsonl'), `${wrap}\n`)
+
+  const report = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(report).toContain('deleted-rule.md')
+  expect(report).not.toContain('old-still-here.md')
+
+  const briefOut = await run(['brief', '--session', 's', '--cwd', repo], env)
+  expect(briefOut).toContain('deleted-rule.md')
+  expect(briefOut).not.toContain('old-still-here.md')
+})
+
 test('alarm names a launch file that was expected and never loaded', async () => {
   const { home, repo } = seeded()
   mkdirSync(join(repo, '.claude', 'rules'), { recursive: true })

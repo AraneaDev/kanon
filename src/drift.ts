@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { tooLarge } from './limits'
+import { realPath } from './paths'
 import type { Classified, Origin } from './types'
 
 /**
@@ -56,9 +57,24 @@ export function hashFile(path: string): string | null {
   }
 }
 
-/** The digest list for a set of classified files, in the order given. */
+/**
+ * The digest list for a set of classified files, in the order given.
+ *
+ * Resolved through realpath before anything else touches the path. The
+ * observed side (report.ts) already hands this realpathed paths, so this
+ * is a no-op there; the predicted side (cli.ts's `predictedFiles`) does
+ * not, since `walkCandidates` only `resolve()`s. Without this, a symlinked
+ * instruction file (a `~/.claude/CLAUDE.md` pointed at a dotfiles repo is
+ * the common case) digests to two different path strings depending on
+ * which side computed it, and `diff()` reports the same never-changed file
+ * as `appeared` every single session -- forever, since neither side's path
+ * ever moves. Doing it once here means neither caller has to remember to.
+ */
 export function digest(files: Classified[]): FileDigest[] {
-  return files.map((f) => ({ path: f.path, origin: f.origin, sha256: hashFile(f.path) }))
+  return files.map((f) => {
+    const path = realPath(f.path)
+    return { path, origin: f.origin, sha256: hashFile(path) }
+  })
 }
 
 /**
@@ -66,9 +82,12 @@ export function digest(files: Classified[]): FileDigest[] {
  *
  * Pure, with no filesystem access, so its tests need no temp directory and
  * so the caller stays responsible for the one rule that *is* a filesystem
- * question: the brief reports a `vanished` file only when it is absent from
- * disk (see cli.ts). A null previous means no baseline, which yields three
- * empty lists rather than a claim that everything appeared.
+ * question: a `vanished` entry is reported only when the file is actually
+ * absent from disk (see `verified()` below). That rule applies to both the
+ * observed and the predicted basis alike -- see `verified()`'s own comment
+ * for why this diff function must not try to apply it itself. A null
+ * previous means no baseline, which yields three empty lists rather than a
+ * claim that everything appeared.
  *
  * `changed` carries the *current* digest, because that is the one a reader
  * would go and look at.
@@ -95,6 +114,33 @@ export function diff(previous: FileDigest[] | null, current: FileDigest[]): Drif
     if (!after.has(f.path)) drift.vanished.push(f)
   }
   return drift
+}
+
+/**
+ * Narrow `vanished` to entries that are actually gone from disk.
+ *
+ * `diff()` only knows "present in the previous digest list, absent from the
+ * current one" -- and "the current one" is never the user's whole canon,
+ * on either basis. Observed, it's "what loaded THIS session": a nested
+ * `subdir/CLAUDE.md` a sibling session visited and this one never entered
+ * is absent from today's set without being gone from the repository.
+ * Predicted, it's "what layer two currently predicts": a file the loader
+ * model stopped expecting has not left the user's canon either. Both are
+ * the same mistake -- reading "not in this run's set" as "deleted" -- so
+ * the fix is the same rule for both, not a basis-specific gate. This used
+ * to live only in cli.ts, scoped to the predicted basis alone, on the
+ * argument that a file still present but no longer predicted is a change
+ * in layer two rather than in the canon; that argument holds identically
+ * for a file merely not loaded this session, so the observed basis needs
+ * it too. "Absent from disk" is the one fact neither a session nor a model
+ * is party to, which is what makes it the honest, universal test -- and
+ * the actionable case: the rule you relied on was actually deleted.
+ *
+ * `diff()` itself stays pure with no filesystem access; the caller injects
+ * `exists`, the same way `brief()` takes an injected excerpt function.
+ */
+export function verified(drift: Drift, exists: (path: string) => boolean): Drift {
+  return { ...drift, vanished: drift.vanished.filter((f) => !exists(f.path)) }
 }
 
 export function driftIsEmpty(d: Drift): boolean {

@@ -318,3 +318,32 @@ test('with no previous digest list the report carries no drift', () => {
   const report = buildReport([], [], '/repo', '/home/.claude', new Map(), [])
   expect(report.drift).toBeNull()
 })
+
+/**
+ * Fix 2 (whole-branch review): the human report had no gate on `vanished`
+ * at all -- render.ts prints report.drift.vanished unconditionally -- so a
+ * launch candidate this session simply never triggered (a nested
+ * subdir/CLAUDE.md a sibling session visited) printed as "vanished" for a
+ * file sitting untouched in the repository. "Vanished" is the word this
+ * tool reserves for a rule that was actually deleted.
+ */
+test('a file absent from this session but still on disk is not reported as vanished', () => {
+  const dir = tmp('kanon-report-drift-')
+  const stillThere = join(dir, 'CLAUDE.md')
+  writeFileSync(stillThere, '# still here, just not loaded this session\n')
+  const previous = [{ path: stillThere, origin: 'project' as const, sha256: 'x' }]
+
+  const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
+
+  expect(report.drift?.vanished).toEqual([])
+})
+
+test('a file genuinely deleted since the last session is reported as vanished', () => {
+  const dir = tmp('kanon-report-drift-')
+  const gone = join(dir, 'CLAUDE.md') // deliberately never created
+  const previous = [{ path: gone, origin: 'project' as const, sha256: 'x' }]
+
+  const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
+
+  expect(report.drift?.vanished.map((f) => f.path)).toEqual([gone])
+})

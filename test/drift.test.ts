@@ -1,8 +1,13 @@
 import { expect, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { diff, driftIsEmpty, hashFile, type FileDigest } from '../src/drift'
+import { diff, digest, driftIsEmpty, hashFile, verified, type FileDigest } from '../src/drift'
+import type { Classified } from '../src/types'
 import { tmp } from './tmp'
+
+function classified(path: string): Classified {
+  return { path, origin: 'project', reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null }
+}
 
 function d(path: string, sha256: string | null = 'a'): FileDigest {
   return { path, origin: 'project', sha256 }
@@ -56,4 +61,39 @@ test('hashFile is stable for the same bytes and differs for different bytes', ()
 
 test('hashFile returns null for a file it cannot read', () => {
   expect(hashFile(join(tmp('kanon-drift-'), 'absent.md'))).toBeNull()
+})
+
+/**
+ * Fix 1 (whole-branch review): the observed side of a snapshot is already
+ * realpathed by the time it reaches digest() (report.ts resolves loaded
+ * paths before classifying them), but the predicted side in cli.ts hands
+ * digest() `c.path` straight from walkCandidates, which only `resolve()`s
+ * and never realpaths. A symlinked `~/.claude/CLAUDE.md` (a dotfiles
+ * checkout is the common case) then digests to two different path strings
+ * depending on which side computed it, so diff() sees the file vanish and
+ * reappear under a new name every single session -- a permanent false
+ * `appeared` for a file that never changed. digest() must resolve for
+ * itself so neither caller has to remember to.
+ */
+test('digest resolves a symlink, so the same file names the same way from either side', () => {
+  const dir = tmp('kanon-drift-symlink-')
+  const target = join(dir, 'CLAUDE.md')
+  writeFileSync(target, '# real file\n')
+  const link = join(dir, 'link.md')
+  symlinkSync(target, link)
+
+  const viaLink = digest([classified(link)])
+  const viaTarget = digest([classified(target)])
+
+  expect(viaLink[0]?.path).toBe(viaTarget[0]?.path)
+})
+
+test('verified drops a vanished entry that is still on disk', () => {
+  const drift = { appeared: [], changed: [], vanished: [d('/repo/still-here.md')] }
+  expect(verified(drift, (p) => p === '/repo/still-here.md')).toEqual({ appeared: [], changed: [], vanished: [] })
+})
+
+test('verified keeps a vanished entry that is actually gone from disk', () => {
+  const drift = { appeared: [], changed: [], vanished: [d('/repo/gone.md')] }
+  expect(verified(drift, () => false)).toEqual(drift)
 })
