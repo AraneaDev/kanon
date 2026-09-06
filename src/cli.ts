@@ -11,6 +11,7 @@ import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
+import { realPath } from './paths'
 import { render } from './render'
 import { buildReport } from './report'
 import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
@@ -394,6 +395,16 @@ function main(): void {
     // make the watermark overshoot by one and, on a file with a single
     // trailing newline and nothing else, advance past a line that was never
     // examined -- filter it out so the watermark counts real lines only.
+    //
+    // This filtered count equals a plain `wc -l` only because the recorder
+    // always ends the file on a trailing newline. A line truncated mid-write
+    // (the recorder killed between the bytes and the newline) would be
+    // dropped by the `.trim().length > 0` check same as a blank one, so the
+    // watermark would fall one short of the file's true line count rather
+    // than overshoot it. That is the safe direction: the next `notice` run
+    // sees the same partial line again and finds it still not parseable, so
+    // the guard keeps invoking Bun every turn instead of ever silently
+    // skipping past a line that could have carried an alarm.
     const lines = readFileSync(sessionFile(session), 'utf8')
       .split('\n')
       .filter((l) => l.trim().length > 0)
@@ -405,7 +416,15 @@ function main(): void {
     for (const e of normalise(lines.slice(seen))) {
       if (e.ev !== 'loaded') continue
       if (BRIEFED_REASONS.has(e.reason)) continue
-      const path = resolve(root, e.path)
+      // Matches report.ts's discipline: realpath before both classifying and
+      // storing. classify() realpaths its own argument internally, so the
+      // FOREIGN verdict would be unaffected either way, but the unresolved
+      // path is what gets stored into Classified.path and handed to
+      // short(), which does a string-only path.relative() with no
+      // filesystem resolution. Against a symlinked dependency path (pnpm's
+      // node_modules layout, or /tmp and /var on macOS) that would print the
+      // full path instead of the short one.
+      const path = realPath(resolve(root, e.path))
       if (classify(path, root, home) !== 'foreign') continue
       if (fresh.some((f) => f.path === path)) continue
       fresh.push({ path, origin: 'foreign', reason: e.reason, viaImport: null, gitIgnored: null, gitTracked: null })

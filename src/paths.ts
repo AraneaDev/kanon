@@ -1,5 +1,27 @@
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { relative } from 'node:path'
+
+/**
+ * realpath, falling back to the path as given when it cannot be resolved.
+ *
+ * Shared rather than duplicated per module: `origin.ts` and `report.ts` each
+ * carried their own copy, and a third private copy was about to be added in
+ * `cli.ts`'s `notice` branch, which is exactly the drift `short()` below
+ * already exists to prevent between the two renderers. Every comparison that
+ * needs both sides resolved -- `sessionRoot` against `classify`'s argument,
+ * a loaded path against the session root before `short()` renders it -- must
+ * use this one function, or a symlinked path (pnpm's `node_modules` layout,
+ * macOS's `/tmp` and `/var`) prints in full instead of relative, or worse,
+ * classifies as `foreign` when it is not.
+ */
+export function realPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
 
 /**
  * Shorten a path for display: under the session root it is shown relative

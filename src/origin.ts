@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import { realPath } from './paths'
 import { DEPENDENCY_SEGMENTS, type Origin } from './types'
 
 const MANAGED = {
@@ -31,15 +32,6 @@ export function sessionRoot(cwd: string): string {
     const up = dirname(dir)
     if (up === dir) return start
     dir = up
-  }
-}
-
-/** realpath, falling back to the path as given when it cannot be resolved. */
-function realPath(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
   }
 }
 

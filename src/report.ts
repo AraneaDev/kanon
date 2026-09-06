@@ -1,8 +1,8 @@
-import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { diff, digest, type Drift, type FileDigest } from './drift'
 import { classify, hasDependencySegment } from './origin'
+import { realPath } from './paths'
 import {
   CLAIMED_ORIGINS,
   RULESET,
@@ -15,15 +15,6 @@ import {
   type Report,
   type Skipped,
 } from './types'
-
-/** realpath, falling back to the path as given when it cannot be resolved. */
-function realPath(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
-  }
-}
 
 /**
  * Run a git plumbing query and turn its exit code into a tri-state answer.
