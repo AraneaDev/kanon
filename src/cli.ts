@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
@@ -131,31 +132,6 @@ function collect(session: string, cwd: string): Report {
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
 
   return buildReport(events, candidates, root, home, importedBy, skipped)
-}
-
-/**
- * Write text to `path` without ever leaving a truncated file behind. A
- * direct writeFileSync can be interrupted mid-write by the process being
- * killed (SessionEnd's declared timeout is exactly this kind of kill), which
- * would replace a good report with a corrupt one. Writing to a sibling
- * temp file and renaming into place is atomic on the same filesystem: the
- * final path is always either the previous report or the complete new one,
- * matching the spec's "leaves the raw event log in place rather than a
- * partial report" requirement.
- */
-function writeAtomic(path: string, text: string): void {
-  const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, text)
-  try {
-    renameSync(tmp, path)
-  } catch (err) {
-    try {
-      unlinkSync(tmp)
-    } catch {
-      // Best effort cleanup; a stray temp file is swept by prune (Task 10).
-    }
-    throw err
-  }
 }
 
 /**
