@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { brief, type BriefInput } from '../src/brief'
+import type { Drift } from '../src/drift'
 import type { Classified } from '../src/types'
 
 // A real home directory, so short() abbreviates it to ~ the way it will in
@@ -18,6 +19,7 @@ function input(over: Partial<BriefInput> = {}): BriefInput {
     basis: 'observed',
     files: [file(USER_RULE, 'user'), file('/repo/CLAUDE.md', 'project')],
     missing: [],
+    drift: null,
     ...over,
   }
 }
@@ -195,4 +197,44 @@ test('a long path in the file list is left on one line', () => {
 
   const row = out.split('\n').find((l) => l.includes('CLAUDE.md'))
   expect(row).toContain('a/very/deeply/nested/directory/tree/that/keeps/going/CLAUDE.md')
+})
+
+function drift(over: Partial<Drift> = {}): Drift {
+  return { appeared: [], vanished: [], changed: [], ...over }
+}
+
+test('the brief names each drifted file', () => {
+  const out = brief(input({
+    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
+  }))
+  expect(out).toContain('changed')
+  expect(out).toContain('CLAUDE.md')
+})
+
+test('no baseline means the brief says nothing about drift', () => {
+  const out = brief(input({ drift: null }))
+  expect(out).not.toContain('changed')
+  expect(out).not.toContain('appeared')
+})
+
+test('an all-empty drift is silent too', () => {
+  expect(brief(input({ drift: drift() }))).not.toContain('appeared')
+})
+
+/**
+ * The brief is prepended to every session, so a large drift must not cost a
+ * screen -- but a foreign file is the reason the brief exists and can never
+ * be the thing that gets collapsed.
+ */
+test('a long drift collapses to a count, and never collapses a foreign file', () => {
+  const many = Array.from({ length: 14 }, (_, i) => ({
+    path: `/repo/r${i}.md`, origin: 'project' as const, sha256: 'x',
+  }))
+  const out = brief(input({
+    drift: drift({
+      appeared: [...many, { path: '/repo/node_modules/foo/CLAUDE.md', origin: 'foreign', sha256: 'y' }],
+    }),
+  }))
+  expect(out).toContain('more, run /kanon')
+  expect(out).toContain('node_modules/foo/CLAUDE.md')
 })

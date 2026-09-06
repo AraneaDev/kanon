@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { writeAtomic } from './atomic'
-import { brief, type BriefInput } from './brief'
+import { brief, type BriefBasis, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
-import { digest, SNAPSHOT_VERSION } from './drift'
+import { diff, digest, SNAPSHOT_VERSION, type Drift } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
 import { classify, sessionRoot } from './origin'
@@ -193,12 +193,43 @@ function predictedFiles(cwd: string, home: string, root: string): Classified[] {
     }))
 }
 
+/**
+ * The drift a brief is allowed to state, given its basis.
+ *
+ * Under an observed basis everything is a fact. Under a predicted one, only
+ * `vanished` needs narrowing: a file still sitting on disk that layer two
+ * merely stopped predicting has not left the user's canon, and reporting it
+ * would fire on every adjustment to the loader model. A file that is gone
+ * from disk is a fact no model is involved in, and it is the actionable
+ * case: the rule you rely on was deleted.
+ *
+ * `appeared` is left alone deliberately. It is a claim from layer two,
+ * which is exactly what a predicted brief already is in its entirety, and
+ * the header's (predicted) stamp already says so.
+ */
+function driftForBasis(drift: Drift | null, basis: BriefBasis): Drift | null {
+  if (drift === null || basis === 'observed') return drift
+  return { ...drift, vanished: drift.vanished.filter((f) => !existsSync(f.path)) }
+}
+
 function briefInput(session: string | undefined, cwd: string): BriefInput {
   const home = claudeHome()
   const root = sessionRoot(cwd)
   const hasEvents = session !== undefined && existsSync(sessionFile(session))
+  const previous = readSnapshot(kanonHome(), root)?.files ?? null
 
-  if (!hasEvents) return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+  const predicted = (): BriefInput => {
+    const files = predictedFiles(cwd, home, root)
+    return {
+      root,
+      basis: 'predicted',
+      files,
+      missing: [],
+      drift: driftForBasis(previous === null ? null : diff(previous, digest(files)), 'predicted'),
+    }
+  }
+
+  if (!hasEvents) return predicted()
 
   let report: Report
   try {
@@ -211,16 +242,22 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
     // going silent. `report` and `alarm` deliberately do not do this: a
     // report that cannot be produced should say so loudly, and an alarm with
     // no evidence behind it should say nothing.
-    return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+    return predicted()
   }
   // An existing but empty log is still an unobserved session: the file can
   // be created by a hook that recorded nothing usable. Reporting "no
   // instruction files govern you" there would be a confident lie, so it
   // falls back to prediction like any other unrecorded session.
   if (report.loaded.length === 0) {
-    return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+    return predicted()
   }
-  return { root: report.root, basis: 'observed', files: report.loaded, missing: report.missing }
+  return {
+    root: report.root,
+    basis: 'observed',
+    files: report.loaded,
+    missing: report.missing,
+    drift: driftForBasis(report.drift, 'observed'),
+  }
 }
 
 /**
