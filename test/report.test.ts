@@ -5,6 +5,7 @@ import { buildReport } from '../src/report'
 import { normalise } from '../src/normalise'
 import type { Candidate, Event } from '../src/types'
 import { tmp } from './tmp'
+import { diff } from '../src/drift'
 
 const HOME = '/home/x/.claude'
 const ROOT = '/repo'
@@ -311,4 +312,9 @@ test('the first claim seen survives a later load claiming something else', () =>
   // reported; the later User claim must not displace it and invent one.
   expect(r.originDisagrees).toEqual([])
   expect(r.loaded[0]?.origin).toBe('project')
+})
+
+test('with no previous digest list the report carries no drift', () => {
+  const report = buildReport([], [], '/repo', '/home/.claude', new Map(), [])
+  expect(report.drift).toBeNull()
 })

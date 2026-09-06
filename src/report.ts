@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { diff, digest, type Drift, type FileDigest } from './drift'
 import { classify, hasDependencySegment } from './origin'
 import {
   CLAIMED_ORIGINS,
@@ -88,6 +89,7 @@ export function buildReport(
   homeConfig: string,
   importedBy: Map<string, string>,
   skipped: Skipped[] = [],
+  previous: FileDigest[] | null = null,
 ): Report {
   const byPath = new Map(candidates.map((c) => [c.path, c]))
 
@@ -164,5 +166,10 @@ export function buildReport(
 
   const config = events.filter((e): e is ConfigEvent => e.ev === 'config')
 
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped }
+  // Drift is computed from what actually loaded, never from candidates, so
+  // it can never inherit layer two's fallibility: a prediction that changes
+  // between releases is not a change in the user's canon.
+  const drift: Drift | null = previous === null ? null : diff(previous, digest(loaded))
+
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift }
 }

@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { render } from '../src/render'
 import type { Report } from '../src/types'
+import type { Drift } from '../src/drift'
 
 function base(): Report {
   return {
@@ -15,6 +16,7 @@ function base(): Report {
     modelDisagrees: [],
     originDisagrees: [],
     skipped: [],
+    drift: null,
   }
 }
 
@@ -126,6 +128,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
     config: [{ t: '2026-08-27T00:52:00Z', ev: 'config', source: 'skills', keys: ['a'] }],
     modelDisagrees: [],
     skipped: [],
+    drift: null,
   }
   const out = render(r)
   expect(out).toContain('  user       ~/.claude/rules/context7.md          session_start')
@@ -315,4 +318,39 @@ test('the too-large tag lands the path in the same column as every other skip', 
   const out = render(r)
   expect(out).toContain('  too large  big.md')
   expect(out).toContain('  unreadable locked.md')
+})
+
+const NO_DRIFT: Drift = { appeared: [], vanished: [], changed: [] }
+
+test('the DRIFT section names each change with a fixed-width tag', () => {
+  const out = render({
+    ...base(),
+    drift: {
+      appeared: [{ path: '/repo/node_modules/foo/CLAUDE.md', origin: 'foreign', sha256: 'a' }],
+      changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'b' }],
+      vanished: [{ path: '/repo/gone.md', origin: 'project', sha256: 'c' }],
+    },
+  })
+  expect(out).toContain('DRIFT')
+  expect(out).toContain('  appeared   node_modules/foo/CLAUDE.md')
+  expect(out).toContain('  changed    CLAUDE.md')
+  expect(out).toContain('  vanished   gone.md')
+})
+
+test('the DRIFT section is omitted when there is no baseline', () => {
+  expect(render({ ...base(), drift: null })).not.toContain('DRIFT')
+})
+
+test('the DRIFT section is omitted when nothing changed', () => {
+  expect(render({ ...base(), drift: NO_DRIFT })).not.toContain('DRIFT')
+})
+
+test('DRIFT sits directly after LOADED and before NOT LOADED', () => {
+  const out = render({
+    ...base(),
+    drift: { appeared: [{ path: '/repo/new.md', origin: 'project', sha256: 'a' }], vanished: [], changed: [] },
+    missing: [{ path: '/repo/missing.md', label: 'launch', rule: 'r' }],
+  })
+  expect(out.indexOf('LOADED')).toBeLessThan(out.indexOf('DRIFT'))
+  expect(out.indexOf('DRIFT')).toBeLessThan(out.indexOf('NOT LOADED'))
 })
