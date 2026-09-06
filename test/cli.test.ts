@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readSnapshot } from '../src/state'
 import { tmp } from './tmp'
 
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts')
@@ -616,4 +617,32 @@ test('brief predicts rather than going silent when the session log cannot be rea
   expect(parsed.systemMessage).toContain('(predicted)')
   expect(parsed.systemMessage).toContain('project  CLAUDE.md')
   expect(parsed.hookSpecificOutput.additionalContext).toBe(parsed.systemMessage)
+})
+
+// --- committing the snapshot: only SessionEnd does this ----------------------
+
+test('report --commit-state writes a snapshot for this root', async () => {
+  const { home, repo } = seeded()
+  await run(['report', '--cwd', repo, '--commit-state'], { KANON_HOME: home })
+  expect(readSnapshot(home, repo)?.files.length).toBeGreaterThan(0)
+})
+
+/**
+ * /kanon runs `report` with no flag, mid-session. If that committed a
+ * snapshot it would erase the baseline the end-of-session report is about
+ * to describe, and every later run would say nothing changed.
+ */
+test('report without the flag never writes a snapshot', async () => {
+  const { home, repo } = seeded()
+  await run(['report', '--cwd', repo], { KANON_HOME: home })
+  expect(readSnapshot(home, repo)).toBeNull()
+})
+
+test('a rewritten file is reported as changed on the next run', async () => {
+  const { home, repo } = seeded()
+  await run(['report', '--cwd', repo, '--commit-state'], { KANON_HOME: home })
+  writeFileSync(join(repo, 'CLAUDE.md'), 'rewritten by something else')
+  const out = await run(['report', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('DRIFT')
+  expect(out).toContain('changed')
 })

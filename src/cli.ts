@@ -6,11 +6,13 @@ import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
+import { digest, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
 import { classify, sessionRoot } from './origin'
 import { render } from './render'
 import { buildReport } from './report'
+import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
 import type { Classified, Report } from './types'
 
 function arg(name: string): string | undefined {
@@ -130,8 +132,9 @@ function collect(session: string, cwd: string): Report {
 
   const home = claudeHome()
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
+  const previous = readSnapshot(kanonHome(), root)
 
-  return buildReport(events, candidates, root, home, importedBy, skipped)
+  return buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null)
 }
 
 /**
@@ -294,6 +297,24 @@ function main(): void {
       // own budget, not a write failure here, is what the spec asks us to
       // survive without corrupting the file that's already there.
     }
+    // Only SessionEnd commits. /kanon runs this same command mid-session,
+    // and a commit there would erase the baseline this very report is
+    // describing, making every subsequent run say "nothing changed".
+    if (flag('commit-state')) {
+      try {
+        writeSnapshot(kanonHome(), {
+          v: SNAPSHOT_VERSION,
+          root: report.root,
+          ruleset: report.ruleset,
+          session,
+          t: new Date().toISOString(),
+          files: digest(report.loaded),
+        })
+      } catch {
+        // Housekeeping, like prune: a snapshot that cannot be written must
+        // never stop a report that has already been printed.
+      }
+    }
     return
   }
 
@@ -327,7 +348,7 @@ function main(): void {
     return
   }
 
-  console.log('usage: kanon [report|brief|alarm] [--session <id>] [--cwd <path>] [--hook]')
+  console.log('usage: kanon [report|brief|alarm|notice] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
 }
 
 try {
