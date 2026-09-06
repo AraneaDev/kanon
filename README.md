@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-303%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-322%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -65,10 +65,12 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   one context with no attribution, so it cannot tell a rule you wrote from one a dependency
   shipped. The brief restores that: every file named against its origin, the directive each
   foreign one carries quoted, and an instruction to raise anything alarming with you.
-- **Says what changed since last time.** Kanon remembers the instruction files that governed the
-  last session in a repository, along with a digest of each. When one appears, vanishes, or is
-  rewritten between sessions, it says so. The case this exists for is a dependency that updates
-  and quietly rewrites its `CLAUDE.md`, where the file list looks identical.
+- **Says what changed.** Kanon remembers every instruction file it has seen govern a repository,
+  along with a digest of each. A file it has never seen before is reported as `appeared`, one
+  whose bytes moved as `changed`, and one that has left the disk as `vanished`, once, when it
+  goes. The case this exists for is a dependency that updates and quietly rewrites its
+  `CLAUDE.md`, where the file list looks identical and only the bytes moved. A rule you already
+  had is never announced as new, however long it has been since a session last loaded it.
 - **Speaks up mid-session.** An instruction file can load hours into a session, long after the
   session-start brief has gone out. When a foreign one does, Kanon names it at the next prompt.
 

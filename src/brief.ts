@@ -154,7 +154,7 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
     const hiddenRows = otherRows.length - shownRows.length
 
     out.push('')
-    out.push('  since your last session here:')
+    out.push('  compared with what has governed this repository before:')
     for (const [tag, f] of [...foreignRows, ...shownRows]) out.push(row(tag, short(f.path, root)))
     // Not `plural(hiddenRows, 'more')`: that helper appends an "s" for any
     // count but one ("4 mores"), which is fine where an existing test only

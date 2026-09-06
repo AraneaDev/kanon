@@ -146,7 +146,11 @@ export function render(report: Report, paint: Paint = PLAIN): string {
   if (report.drift !== null && !driftIsEmpty(report.drift)) {
     out.push('')
     out.push(paint.heading('DRIFT'))
-    out.push(`  ${paint.note('since your last session in this repository')}`)
+    // Not "since your last session": `appeared` now means never seen
+    // governing this repository before, which spans every session Kanon has
+    // recorded, while `changed` and `vanished` are relative to the last one.
+    // Naming the comparison rather than a time window is true of all three.
+    out.push(`  ${paint.note('compared with what has governed this repository before')}`)
     for (const f of report.drift.appeared) out.push(driftLine('appeared', f, root, paint))
     for (const f of report.drift.changed) out.push(driftLine('changed', f, root, paint))
     for (const f of report.drift.vanished) out.push(driftLine('vanished', f, root, paint))
