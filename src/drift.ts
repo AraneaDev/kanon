@@ -149,3 +149,54 @@ export function diff(
 export function driftIsEmpty(d: Drift): boolean {
   return d.appeared.length === 0 && d.vanished.length === 0 && d.changed.length === 0
 }
+
+/**
+ * How long an entry survives after its file leaves the disk.
+ *
+ * Deliberately the same number `prune()` uses in src/limits.ts, so no second
+ * retention horizon is invented. The two mechanisms are otherwise unrelated:
+ * `prune()` deletes whole snapshot *files* by mtime, this expires individual
+ * *entries* by absence.
+ */
+export const SNAPSHOT_MAX_AGE_DAYS = 90
+
+/**
+ * The file list for the next snapshot: this session's observations unioned
+ * with what the repository already knew.
+ *
+ * The union is the point. A snapshot built from one session's loads is a
+ * description of that session, not of the repository, so the session that
+ * visited fewest directories would overwrite a richer record and the next
+ * session would announce long-standing files as new.
+ *
+ * Pure: `exists` and `now` are injected, so this needs no temp directory to
+ * test and no clock to stub.
+ */
+export function merge(
+  previous: SnapshotEntry[] | null,
+  observed: FileDigest[],
+  exists: (path: string) => boolean,
+  now: Date,
+  maxAgeDays: number = SNAPSHOT_MAX_AGE_DAYS,
+): SnapshotEntry[] {
+  const stamp = now.toISOString()
+  const cutoff = now.getTime() - maxAgeDays * 24 * 60 * 60 * 1000
+
+  const out: SnapshotEntry[] = observed.map((f) => ({ ...f, lastSeen: stamp, present: true }))
+  const seen = new Set(observed.map((f) => f.path))
+
+  for (const was of previous ?? []) {
+    if (seen.has(was.path)) continue // this session's observation wins
+    const present = exists(was.path)
+    // lastSeen must not advance while the file is absent: it is what the
+    // expiry below measures from, and refreshing it would keep a deleted
+    // file on the books forever.
+    const lastSeen = present ? stamp : was.lastSeen
+    // A timestamp that cannot be parsed yields NaN, and NaN < cutoff is
+    // false, so a malformed entry is kept rather than silently deleted.
+    if (!present && Date.parse(lastSeen) < cutoff) continue
+    out.push({ ...was, present, lastSeen })
+  }
+
+  return out
+}
