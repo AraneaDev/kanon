@@ -106,6 +106,40 @@ test('calls bun when the log has grown past the watermark', async () => {
 })
 
 /**
+ * Fix 4 (whole-branch review): cli.ts writes the watermark as a count of
+ * non-blank lines (`notice`'s own filtered split), and this script compares
+ * it against a plain `wc -l`. Two languages, two counting methods, one
+ * contract, sitting in the blocking path of every user prompt -- and each
+ * side had its own unit tests but nothing ran them against each other.
+ *
+ * This drives the real `notice` command (the actual writer of the
+ * watermark) and then the real turn.sh (the actual reader of it) against
+ * the same KANON_HOME and session id, and reuses the fake-bun sentinel
+ * above rather than trusting empty stdout: a script that merely errored out
+ * before reaching bun would look "silent" too.
+ */
+test('the watermark cli.ts writes for notice matches what turn.sh counts, so the next turn skips bun', async () => {
+  const home = tmp('kanon-turn-contract-')
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  const sessionFile = join(home, 'sessions', 'abc.jsonl')
+  // Two ordinary recorded lines -- content is irrelevant to this contract,
+  // only the line count is.
+  writeFileSync(sessionFile, '{"t":"","hook":"x","raw":{}}\n{"t":"","hook":"y","raw":{}}\n')
+
+  const cli = join(import.meta.dir, '..', 'src', 'cli.ts')
+  const notice = Bun.spawn(['bun', cli, 'notice', '--session', 'abc', '--cwd', '/repo', '--hook'], {
+    env: { ...process.env, KANON_HOME: home },
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
+  expect(await notice.exited).toBe(0)
+
+  const r = await turnWithFakeBun(JSON.stringify({ session_id: 'abc', cwd: '/repo' }), home)
+  expect(r.code).toBe(0)
+  expect(r.calledBun).toBe(false)
+})
+
+/**
  * A session id is used to build a path, so it can never be allowed to
  * contain a traversal. record.sh applies the same guard for the same reason.
  *

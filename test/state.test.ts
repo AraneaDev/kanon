@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Snapshot } from '../src/drift'
 import { readSnapshot, readWatermark, snapshotPath, writeSnapshot, writeWatermark } from '../src/state'
@@ -62,13 +62,22 @@ test('malformed JSON reads as no baseline', () => {
 /**
  * prune() skips anything that is not a regular file and never recurses, so
  * a subdirectory under state/ would never be swept and would grow forever.
+ *
+ * `expect(name).not.toContain('/')` (the original form of this test) passes
+ * against any implementation -- readdirSync never returns a path separator
+ * -- so it could never fail and proved nothing. lstatSync (never statSync,
+ * so a symlinked entry is judged by what it is, not what it points at) is
+ * what actually exercises the property: a directory or a symlink under
+ * state/ would fail this and stay invisible to prune() forever.
  */
 test('state files are flat regular files directly under state/', () => {
   const home = tmp('kanon-state-')
   writeSnapshot(home, snap())
   writeWatermark(home, 'abc', 12)
-  for (const name of readdirSync(join(home, 'state'))) {
-    expect(name).not.toContain('/')
+  const names = readdirSync(join(home, 'state'))
+  expect(names.length).toBe(2)
+  for (const name of names) {
+    expect(lstatSync(join(home, 'state', name)).isFile()).toBe(true)
   }
 })
 
