@@ -126,7 +126,11 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   const out: string[] = [`KANON  ${plural(files.length, 'instruction file')} ${verb} this session (${basis})`]
 
   for (const f of shown) out.push(row(label(f.origin), short(f.path, root)))
-  if (hidden > 0) out.push(row('', `... and ${plural(hidden, 'more')}, run /kanon for the full list`))
+  // Not `plural(hidden, 'more')`: that helper appends an "s" for any count
+  // but one ("4 mores"), which shipped in 0.0.10 and is real prose the
+  // drift tail below got right from the start -- kept consistent with it
+  // here rather than leaving the file contradict itself.
+  if (hidden > 0) out.push(row('', `... and ${hidden} more, run /kanon for the full list`))
 
   for (const f of foreign) {
     out.push(row('FOREIGN', short(f.path, root), f.gitTracked === false ? '   (untracked)' : ''))
