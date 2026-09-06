@@ -9,7 +9,7 @@ import type { Classified, Origin } from './types'
  * change must degrade to silence rather than announce that every file in the
  * user's canon has moved.
  */
-export const SNAPSHOT_VERSION = 1
+export const SNAPSHOT_VERSION = 2
 
 export interface FileDigest {
   path: string
@@ -18,13 +18,30 @@ export interface FileDigest {
   sha256: string | null
 }
 
+/**
+ * A snapshot entry: a digest plus the two facts that make the snapshot a
+ * record of the repository rather than of one session.
+ *
+ * `present` is what turns `vanished` into a transition instead of a state.
+ * Without it a deleted rule is reported every session forever, and a branch
+ * switch that removes a file reports it gone on the way out and new on the
+ * way back.
+ *
+ * `lastSeen` exists only to expire entries that are gone. A file still on
+ * disk is never expired, because it may govern a future session.
+ */
+export interface SnapshotEntry extends FileDigest {
+  lastSeen: string
+  present: boolean
+}
+
 export interface Snapshot {
   v: number
   root: string
   ruleset: string
   session: string
   t: string
-  files: FileDigest[]
+  files: SnapshotEntry[]
 }
 
 export interface Drift {
@@ -78,26 +95,39 @@ export function digest(files: Classified[]): FileDigest[] {
 }
 
 /**
- * What changed between two digest lists.
+ * What changed between the snapshot and the current set.
  *
- * Pure, with no filesystem access, so its tests need no temp directory and
- * so the caller stays responsible for the one rule that *is* a filesystem
- * question: a `vanished` entry is reported only when the file is actually
- * absent from disk (see `verified()` below). That rule applies to both the
- * observed and the predicted basis alike -- see `verified()`'s own comment
- * for why this diff function must not try to apply it itself. A null
- * previous means no baseline, which yields three empty lists rather than a
- * claim that everything appeared.
+ * `appeared` is "absent from the snapshot entirely", which now means never
+ * seen governing this root before. A path the snapshot already carries is
+ * never new, whether or not this session loaded it and whether or not it is
+ * currently on disk. That single fact is what stops a nested
+ * `subdir/CLAUDE.md` being announced every time a session finally enters
+ * that directory.
+ *
+ * `vanished` does not consult `current` at all. It is the present-to-absent
+ * transition: the snapshot last saw the file on disk and it is gone now.
+ * Reading "not in this run's set" as "deleted" was the older mistake, and it
+ * was wrong on both bases -- observed, because the set is only what loaded
+ * this session; predicted, because the set is only what layer two currently
+ * expects.
+ *
+ * No filesystem access here. The caller injects `exists`, the same way
+ * `brief()` takes an injected excerpt function, so these tests need no temp
+ * directory. A null previous means no baseline, which yields three empty
+ * lists rather than a claim that everything appeared.
  *
  * `changed` carries the *current* digest, because that is the one a reader
  * would go and look at.
  */
-export function diff(previous: FileDigest[] | null, current: FileDigest[]): Drift {
+export function diff(
+  previous: SnapshotEntry[] | null,
+  current: FileDigest[],
+  exists: (path: string) => boolean,
+): Drift {
   const empty: Drift = { appeared: [], vanished: [], changed: [] }
   if (previous === null) return empty
 
   const before = new Map(previous.map((f) => [f.path, f]))
-  const after = new Map(current.map((f) => [f.path, f]))
 
   const drift: Drift = { appeared: [], vanished: [], changed: [] }
   for (const f of current) {
@@ -111,36 +141,9 @@ export function diff(previous: FileDigest[] | null, current: FileDigest[]): Drif
     if (was.sha256 !== null && f.sha256 !== null && was.sha256 !== f.sha256) drift.changed.push(f)
   }
   for (const f of previous) {
-    if (!after.has(f.path)) drift.vanished.push(f)
+    if (f.present && !exists(f.path)) drift.vanished.push(f)
   }
   return drift
-}
-
-/**
- * Narrow `vanished` to entries that are actually gone from disk.
- *
- * `diff()` only knows "present in the previous digest list, absent from the
- * current one" -- and "the current one" is never the user's whole canon,
- * on either basis. Observed, it's "what loaded THIS session": a nested
- * `subdir/CLAUDE.md` a sibling session visited and this one never entered
- * is absent from today's set without being gone from the repository.
- * Predicted, it's "what layer two currently predicts": a file the loader
- * model stopped expecting has not left the user's canon either. Both are
- * the same mistake -- reading "not in this run's set" as "deleted" -- so
- * the fix is the same rule for both, not a basis-specific gate. This used
- * to live only in cli.ts, scoped to the predicted basis alone, on the
- * argument that a file still present but no longer predicted is a change
- * in layer two rather than in the canon; that argument holds identically
- * for a file merely not loaded this session, so the observed basis needs
- * it too. "Absent from disk" is the one fact neither a session nor a model
- * is party to, which is what makes it the honest, universal test -- and
- * the actionable case: the rule you relied on was actually deleted.
- *
- * `diff()` itself stays pure with no filesystem access; the caller injects
- * `exists`, the same way `brief()` takes an injected excerpt function.
- */
-export function verified(drift: Drift, exists: (path: string) => boolean): Drift {
-  return { ...drift, vanished: drift.vanished.filter((f) => !exists(f.path)) }
 }
 
 export function driftIsEmpty(d: Drift): boolean {

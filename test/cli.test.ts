@@ -396,8 +396,8 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
     session: 'previous-session',
     t: '2026-08-27T00:00:00Z',
     files: [
-      { path: stillOnDisk, origin: 'project', sha256: 'x' },
-      { path: actuallyGone, origin: 'project', sha256: 'y' },
+      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
+      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', present: true },
     ],
   })
 
@@ -437,8 +437,8 @@ test('an observed report and brief both suppress a vanished file still on disk, 
     session: 'previous-session',
     t: '2026-08-27T00:00:00Z',
     files: [
-      { path: stillOnDisk, origin: 'project', sha256: 'x' },
-      { path: actuallyGone, origin: 'project', sha256: 'y' },
+      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
+      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', present: true },
     ],
   })
 

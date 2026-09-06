@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { diff, digest, driftIsEmpty, hashFile, verified, type FileDigest } from '../src/drift'
+import { diff, digest, driftIsEmpty, hashFile, type FileDigest, type SnapshotEntry } from '../src/drift'
 import type { Classified } from '../src/types'
 import { tmp } from './tmp'
 
@@ -13,28 +13,43 @@ function d(path: string, sha256: string | null = 'a'): FileDigest {
   return { path, origin: 'project', sha256 }
 }
 
+function entry(path: string, over: Partial<SnapshotEntry> = {}): SnapshotEntry {
+  return {
+    path,
+    origin: 'project',
+    sha256: 'a',
+    lastSeen: '2026-09-06T00:00:00Z',
+    present: true,
+    ...over,
+  }
+}
+
+const GONE = () => false
+const THERE = () => true
+
 test('no baseline yields no drift, never "everything appeared"', () => {
-  const drift = diff(null, [d('/repo/CLAUDE.md')])
+  const drift = diff(null, [d('/repo/CLAUDE.md')], () => false)
   expect(drift).toEqual({ appeared: [], vanished: [], changed: [] })
   expect(driftIsEmpty(drift)).toBe(true)
 })
 
-test('a path only in current appeared, a path only in previous vanished', () => {
-  const drift = diff([d('/repo/old.md')], [d('/repo/new.md')])
+test('a path only in current appeared', () => {
+  const drift = diff([entry('/repo/old.md')], [d('/repo/new.md')], THERE)
   expect(drift.appeared.map((f) => f.path)).toEqual(['/repo/new.md'])
-  expect(drift.vanished.map((f) => f.path)).toEqual(['/repo/old.md'])
   expect(drift.changed).toEqual([])
 })
 
 test('a differing hash on both sides is changed, and reports the current digest', () => {
-  const drift = diff([d('/repo/CLAUDE.md', 'old')], [d('/repo/CLAUDE.md', 'new')])
+  const drift = diff([entry('/repo/CLAUDE.md', { sha256: 'old' })], [d('/repo/CLAUDE.md', 'new')], THERE)
   expect(drift.changed).toEqual([d('/repo/CLAUDE.md', 'new')])
   expect(drift.appeared).toEqual([])
   expect(drift.vanished).toEqual([])
 })
 
 test('an identical hash is not reported at all', () => {
-  expect(driftIsEmpty(diff([d('/repo/CLAUDE.md', 'x')], [d('/repo/CLAUDE.md', 'x')]))).toBe(true)
+  expect(driftIsEmpty(diff([entry('/repo/CLAUDE.md', { sha256: 'x' })], [d('/repo/CLAUDE.md', 'x')], THERE))).toBe(
+    true,
+  )
 })
 
 /**
@@ -43,9 +58,15 @@ test('an identical hash is not reported at all', () => {
  * direction this tool must never fail in.
  */
 test('a null hash on either side is never changed', () => {
-  expect(driftIsEmpty(diff([d('/repo/CLAUDE.md', null)], [d('/repo/CLAUDE.md', 'x')]))).toBe(true)
-  expect(driftIsEmpty(diff([d('/repo/CLAUDE.md', 'x')], [d('/repo/CLAUDE.md', null)]))).toBe(true)
-  expect(driftIsEmpty(diff([d('/repo/CLAUDE.md', null)], [d('/repo/CLAUDE.md', null)]))).toBe(true)
+  expect(
+    driftIsEmpty(diff([entry('/repo/CLAUDE.md', { sha256: null })], [d('/repo/CLAUDE.md', 'x')], THERE)),
+  ).toBe(true)
+  expect(
+    driftIsEmpty(diff([entry('/repo/CLAUDE.md', { sha256: 'x' })], [d('/repo/CLAUDE.md', null)], THERE)),
+  ).toBe(true)
+  expect(
+    driftIsEmpty(diff([entry('/repo/CLAUDE.md', { sha256: null })], [d('/repo/CLAUDE.md', null)], THERE)),
+  ).toBe(true)
 })
 
 test('hashFile is stable for the same bytes and differs for different bytes', () => {
@@ -88,12 +109,50 @@ test('digest resolves a symlink, so the same file names the same way from either
   expect(viaLink[0]?.path).toBe(viaTarget[0]?.path)
 })
 
-test('verified drops a vanished entry that is still on disk', () => {
-  const drift = { appeared: [], changed: [], vanished: [d('/repo/still-here.md')] }
-  expect(verified(drift, (p) => p === '/repo/still-here.md')).toEqual({ appeared: [], changed: [], vanished: [] })
+/**
+ * The whole point of the repository snapshot. A file Kanon already knows
+ * about is never new, whether or not this session happened to load it.
+ */
+test('a path already in the snapshot is never appeared, even when absent from the current set', () => {
+  const drift = diff([entry('/repo/subdir/CLAUDE.md')], [], THERE)
+  expect(drift.appeared).toEqual([])
 })
 
-test('verified keeps a vanished entry that is actually gone from disk', () => {
-  const drift = { appeared: [], changed: [], vanished: [d('/repo/gone.md')] }
-  expect(verified(drift, () => false)).toEqual(drift)
+test('a path already in the snapshot is never appeared when it loads again', () => {
+  const drift = diff([entry('/repo/subdir/CLAUDE.md')], [d('/repo/subdir/CLAUDE.md')], THERE)
+  expect(drift.appeared).toEqual([])
+})
+
+/**
+ * `vanished` is a transition, not a state: it fires when a file Kanon last
+ * saw on disk is gone. It must not consult the current set at all, or a
+ * session that simply never entered a subdirectory would report that
+ * subdirectory's rule as deleted.
+ */
+test('vanished fires for a previously present file now absent from disk', () => {
+  const drift = diff([entry('/repo/gone.md', { present: true })], [], GONE)
+  expect(drift.vanished.map((f) => f.path)).toEqual(['/repo/gone.md'])
+})
+
+test('vanished does not fire for a file that is still on disk', () => {
+  expect(driftIsEmpty(diff([entry('/repo/quiet.md', { present: true })], [], THERE))).toBe(true)
+})
+
+/**
+ * The second half of the transition. Once an absent file has been reported
+ * its entry carries present: false, so it must never be reported again.
+ */
+test('vanished does not fire twice for a file already known to be absent', () => {
+  expect(driftIsEmpty(diff([entry('/repo/gone.md', { present: false })], [], GONE))).toBe(true)
+})
+
+test('a file restored after being recorded absent is not appeared', () => {
+  const drift = diff([entry('/repo/back.md', { present: false })], [d('/repo/back.md')], THERE)
+  expect(drift.appeared).toEqual([])
+  expect(drift.vanished).toEqual([])
+})
+
+test('diff performs no filesystem access, so a fabricated path is fine', () => {
+  const drift = diff([entry('/nowhere/at/all.md')], [], GONE)
+  expect(drift.vanished.map((f) => f.path)).toEqual(['/nowhere/at/all.md'])
 })

@@ -23,10 +23,9 @@ export interface BriefInput {
   missing: Candidate[]
   /**
    * What changed since the last session in this root, or null when there is
-   * no baseline. Already filtered by the caller so that `vanished` only
-   * ever names a file genuinely absent from disk -- see `verified()` in
-   * drift.ts for why that rule holds on both bases alike, not just the
-   * predicted one.
+   * no baseline. `vanished` only ever names a file genuinely absent from
+   * disk -- see `diff()`'s own comment in drift.ts for why that rule holds
+   * on both bases alike, not just the predicted one.
    */
   drift: Drift | null
 }

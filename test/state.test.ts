@@ -1,18 +1,26 @@
 import { expect, test } from 'bun:test'
 import { lstatSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Snapshot } from '../src/drift'
+import { SNAPSHOT_VERSION, type Snapshot } from '../src/drift'
 import { readSnapshot, readWatermark, snapshotPath, writeSnapshot, writeWatermark } from '../src/state'
 import { tmp } from './tmp'
 
 function snap(over: Partial<Snapshot> = {}): Snapshot {
   return {
-    v: 1,
+    v: SNAPSHOT_VERSION,
     root: '/repo',
     ruleset: '2026-08',
     session: 'abc',
     t: '2026-09-06T00:00:00Z',
-    files: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }],
+    files: [
+      {
+        path: '/repo/CLAUDE.md',
+        origin: 'project',
+        sha256: 'x',
+        lastSeen: '2026-09-06T00:00:00Z',
+        present: true,
+      },
+    ],
     ...over,
   }
 }
@@ -49,6 +57,18 @@ test('an unrecognised version reads as no baseline, not as drift', () => {
   const home = tmp('kanon-state-')
   writeSnapshot(home, snap())
   writeFileSync(snapshotPath(home, '/repo'), JSON.stringify(snap({ v: 99 })))
+  expect(readSnapshot(home, '/repo')).toBeNull()
+})
+
+/**
+ * The previous schema. Drift shipped nothing to users at v1, but a
+ * development machine may hold one, and it must read as "no baseline"
+ * rather than as a repository whose entire canon moved.
+ */
+test('a v1 snapshot reads as no baseline', () => {
+  const home = tmp('kanon-state-')
+  mkdirSync(join(home, 'state'), { recursive: true })
+  writeFileSync(snapshotPath(home, '/repo'), JSON.stringify({ ...snap(), v: 1 }))
   expect(readSnapshot(home, '/repo')).toBeNull()
 })
 

@@ -331,7 +331,9 @@ test('a file absent from this session but still on disk is not reported as vanis
   const dir = tmp('kanon-report-drift-')
   const stillThere = join(dir, 'CLAUDE.md')
   writeFileSync(stillThere, '# still here, just not loaded this session\n')
-  const previous = [{ path: stillThere, origin: 'project' as const, sha256: 'x' }]
+  const previous = [
+    { path: stillThere, origin: 'project' as const, sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
+  ]
 
   const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
 
@@ -341,7 +343,9 @@ test('a file absent from this session but still on disk is not reported as vanis
 test('a file genuinely deleted since the last session is reported as vanished', () => {
   const dir = tmp('kanon-report-drift-')
   const gone = join(dir, 'CLAUDE.md') // deliberately never created
-  const previous = [{ path: gone, origin: 'project' as const, sha256: 'x' }]
+  const previous = [
+    { path: gone, origin: 'project' as const, sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
+  ]
 
   const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
 

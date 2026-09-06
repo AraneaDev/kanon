@@ -6,7 +6,7 @@ import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
-import { diff, digest, SNAPSHOT_VERSION, verified } from './drift'
+import { diff, digest, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
@@ -203,20 +203,13 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
 
   const predicted = (): BriefInput => {
     const files = predictedFiles(cwd, home, root)
-    // `report.drift` (used below, for the observed basis) already comes
-    // out of buildReport pre-filtered by `verified()`; this is the other
-    // caller verified() exists for, since a predicted brief computes its
-    // own diff() straight from digest(files) rather than going through
-    // buildReport at all. See verified()'s comment in drift.ts for why the
-    // narrowing is the same rule on both bases, not something specific to
-    // "predicted".
-    const raw = previous === null ? null : diff(previous, digest(files))
+    const drift = previous === null ? null : diff(previous, digest(files), existsSync)
     return {
       root,
       basis: 'predicted',
       files,
       missing: [],
-      drift: raw === null ? null : verified(raw, existsSync),
+      drift,
     }
   }
 
@@ -242,8 +235,8 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
   if (report.loaded.length === 0) {
     return predicted()
   }
-  // report.drift is already verified() (buildReport applies it), so it is
-  // forwarded as-is rather than filtered again here.
+  // report.drift already came out of buildReport's own diff() call, so it is
+  // forwarded as-is rather than recomputed here.
   return {
     root: report.root,
     basis: 'observed',
@@ -332,13 +325,16 @@ function main(): void {
     // describing, making every subsequent run say "nothing changed".
     if (flag('commit-state')) {
       try {
+        const stamp = new Date().toISOString()
         writeSnapshot(kanonHome(), {
           v: SNAPSHOT_VERSION,
           root: report.root,
           ruleset: report.ruleset,
           session,
-          t: new Date().toISOString(),
-          files: digest(report.loaded),
+          t: stamp,
+          // Union with the previous snapshot arrives in the next task; this
+          // commit still records only what this session observed.
+          files: digest(report.loaded).map((d) => ({ ...d, lastSeen: stamp, present: true })),
         })
       } catch {
         // Housekeeping, like prune: a snapshot that cannot be written must
