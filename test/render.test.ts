@@ -335,6 +335,12 @@ test('the DRIFT section names each change with a fixed-width tag', () => {
   expect(out).toContain('  appeared   node_modules/foo/CLAUDE.md')
   expect(out).toContain('  changed    CLAUDE.md')
   expect(out).toContain('  vanished   gone.md')
+  // Pins the section's explanatory note, which is the one line that states
+  // what `appeared` means now: never seen governing this repository before,
+  // not merely absent from the last session. A silent reversion to a
+  // "since your last session" framing would describe behaviour the code no
+  // longer has, and nothing else in this section would catch that.
+  expect(out).toContain('compared with what has governed this repository before')
 })
 
 test('the DRIFT section is omitted when there is no baseline', () => {

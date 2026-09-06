@@ -228,6 +228,18 @@ test('the brief names each drifted file', () => {
   expect(out).toContain('CLAUDE.md')
 })
 
+test('the drift block names the comparison it is making', () => {
+  const out = brief(input({
+    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
+  }))
+  // Pins the line that states what `appeared` means: never seen governing
+  // this repository before, not merely absent from the last session. A
+  // silent reversion to a "since your last session" framing would describe
+  // behaviour the code no longer has, and no other assertion here would
+  // notice.
+  expect(out).toContain('compared with what has governed this repository before')
+})
+
 /**
  * Fix 7 (whole-branch review): task 5 amended the "nothing foreign, nothing
  * missing" early return so a session with drift but no foreign and no
