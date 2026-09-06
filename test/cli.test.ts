@@ -369,14 +369,14 @@ test('brief treats an existing but empty event log as unobserved and predicts in
 })
 
 /**
- * Task 5 fix round 1: the per-basis drift filter (`driftForBasis` in
- * cli.ts) had no end-to-end coverage. `test/brief.test.ts` only injects an
- * already-filtered `Drift` into `brief()` directly, so it can prove the
- * rendering is right but can never exercise the filter itself. This test
- * drives the filter by planting a snapshot with two files that are absent
- * from the *predicted* set -- one still on disk, one not -- and running the
- * real `brief` CLI command with no session recorded, which is the only way
- * `briefInput` takes the `predicted` branch.
+ * The vanished filter (`verified()` in drift.ts) had no end-to-end
+ * coverage. `test/brief.test.ts` only injects an already-filtered `Drift`
+ * into `brief()` directly, so it can prove the rendering is right but can
+ * never exercise the filter itself. This test drives it by planting a
+ * snapshot with two files that are absent from the *predicted* set -- one
+ * still on disk, one not -- and running the real `brief` CLI command with
+ * no session recorded, which is the only way `briefInput` takes the
+ * `predicted` branch. The sibling test below covers the observed basis.
  */
 test('a predicted brief suppresses a vanished file still on disk, but reports one that is actually gone', async () => {
   const { home, repo, env } = isolated('kanon-cli-drift-')
@@ -402,7 +402,8 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
   })
 
   // No session file planted, so `briefInput` has no events and takes the
-  // predicted path -- the only path `driftForBasis` narrows.
+  // predicted path. `verified()` narrows `vanished` on both bases; this is
+  // the predicted half of that.
   const out = await run(['brief', '--cwd', repo], env)
   expect(out).toContain('(predicted)')
   expect(out).toContain('deleted-rule.md')
@@ -410,9 +411,10 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
 })
 
 /**
- * Fix 2 (whole-branch review): the sibling test above only ever drove the
- * predicted basis, because `driftForBasis` in cli.ts narrowed `vanished`
- * only there. The observed basis -- a real recorded session, which is what
+ * The sibling test above only ever drove the predicted basis, because the
+ * narrowing used to live in a `driftForBasis` helper in cli.ts (since
+ * removed) that applied it only there. The observed basis -- a real
+ * recorded session, which is what
  * `report` always uses and what `brief` uses once anything has loaded --
  * had no gate at all, so a snapshot file this session never touched printed
  * as "vanished" even sitting untouched on disk. Drives both the `report`
