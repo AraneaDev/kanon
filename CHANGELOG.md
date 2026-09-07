@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.11](https://github.com/AraneaDev/kanon/compare/v0.0.10...v0.0.11) (2026-09-07)
+
+
+### Features
+
+* add whose and audit, two answers about where a directive came from ([#26](https://github.com/AraneaDev/kanon/issues/26)) ([56eebde](https://github.com/AraneaDev/kanon/commit/56eebdec39d9fecebfc9b6677ee3f4b6908bd729))
+* report instruction-set drift, and foreign files that load mid-session ([#23](https://github.com/AraneaDev/kanon/issues/23)) ([8bac164](https://github.com/AraneaDev/kanon/commit/8bac16412ba89739a621eb57bf722065003c0039))
+
+
+### Fixes
+
+* report the right instruction files in a worktree and a resumed session ([#24](https://github.com/AraneaDev/kanon/issues/24)) ([85a4276](https://github.com/AraneaDev/kanon/commit/85a42763bd513d09c796565891ca9fd79d6a4b56))
+
 ## [0.0.10](https://github.com/AraneaDev/kanon/compare/v0.0.9...v0.0.10) (2026-09-01)
 
 
