@@ -18,7 +18,8 @@ If the output says no file contains the phrase, do not go looking for it
 yourself and do not guess where it came from. That answer is informative on its
 own: either the directive reached this session from a surface Kanon does not
 see yet, such as a skill, an MCP server or another plugin's hook, or it was
-never in an instruction file at all. Say which files were searched and leave
+never in an instruction file at all. The output gives a count of files
+searched, not their names, so do not list them: print it as it came and leave
 the conclusion to the user.
 
 The basis is stamped on the first line. `observed` means the search ran over
