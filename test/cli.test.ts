@@ -978,3 +978,31 @@ test('a resumed session ignores the previous run\'s loads', async () => {
   expect(out).not.toContain('FOREIGN')
   expect(out).not.toContain('elsewhere')
 })
+
+// --- whose: where did a directive come from ----------------------------------
+
+test('whose finds a phrase in a file governing the session', async () => {
+  const { home, repo } = seeded()
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n\nAlways run the full suite\nbefore committing.\n')
+  const out = await run(['whose', 'run the full suite before', '--session', 's', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('WHOSE')
+  expect(out).toContain('CLAUDE.md')
+  expect(out).toContain('line 3')
+})
+
+/**
+ * The answer that teaches something: the phrase is in no instruction file,
+ * so it came from a surface Kanon cannot see, or from nowhere.
+ */
+test('whose reports a phrase that governs nothing, and names the blind spot', async () => {
+  const { home, repo } = seeded()
+  const out = await run(['whose', 'a phrase that appears nowhere at all', '--session', 's', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('no file governing this session contains that phrase')
+  expect(out).toContain('searched')
+})
+
+test('whose with no phrase prints usage rather than matching everything', async () => {
+  const { home, repo } = seeded()
+  const out = await run(['whose', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('usage: kanon')
+})

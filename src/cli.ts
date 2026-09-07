@@ -13,6 +13,7 @@ import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
 import { render } from './render'
+import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
 import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
 import type { Classified, Report } from './types'
@@ -20,6 +21,16 @@ import type { Classified, Report } from './types'
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
   return i === -1 ? undefined : process.argv[i + 1]
+}
+
+/**
+ * The phrase `whose` searches for: the first argument after the command,
+ * when it is not a flag. Taken positionally so a phrase can be typed as it
+ * is remembered, rather than behind a flag name nobody would recall.
+ */
+function phraseArg(): string | undefined {
+  const first = process.argv[3]
+  return first !== undefined && !first.startsWith('--') ? first : undefined
 }
 
 function flag(name: string): boolean {
@@ -373,6 +384,41 @@ function main(): void {
     return
   }
 
+  if (command === 'whose') {
+    const phrase = phraseArg()
+    // No phrase falls through to the usage line rather than searching for
+    // the empty string, which would otherwise match every file at offset 0.
+    if (phrase !== undefined) {
+      const home = claudeHome()
+      let report: Report | undefined
+      if (session && existsSync(sessionFile(session))) {
+        try {
+          report = collect(session, cwd)
+        } catch {
+          // An unreadable log is no evidence about this session, so fall
+          // back to prediction rather than reporting against half a file.
+        }
+      }
+      const observed = report !== undefined && report.loaded.length > 0
+      const root = observed && report ? report.root : sessionRoot(cwd)
+      const files = observed && report ? report.loaded : predictedFiles(cwd, home, root)
+
+      // The same size ceiling the rest of the codebase applies, so a file
+      // Claude Code would skip is never searched either.
+      const read = (path: string): string | null => {
+        if (tooLarge(path)) return null
+        try {
+          return readFileSync(path, 'utf8')
+        } catch {
+          return null
+        }
+      }
+
+      console.log(renderWhose(phrase, matches(files, phrase, read), observed ? 'observed' : 'predicted', root, files.length))
+      return
+    }
+  }
+
   if (command === 'alarm') {
     // Silence isn't just "nothing to report", it's also "no evidence to
     // report from". A session with no recorded events at all is almost
@@ -468,7 +514,7 @@ function main(): void {
     return
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
 }
 
 try {
