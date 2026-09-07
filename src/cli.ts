@@ -1,15 +1,20 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
+import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
 import { normalise } from './normalise'
+import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
+import { realPath } from './paths'
 import { render } from './render'
 import { buildReport } from './report'
+import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
 import type { Classified, Report } from './types'
 
 function arg(name: string): string | undefined {
@@ -129,33 +134,9 @@ function collect(session: string, cwd: string): Report {
 
   const home = claudeHome()
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
+  const previous = readSnapshot(kanonHome(), root)
 
-  return buildReport(events, candidates, root, home, importedBy, skipped)
-}
-
-/**
- * Write text to `path` without ever leaving a truncated file behind. A
- * direct writeFileSync can be interrupted mid-write by the process being
- * killed (SessionEnd's declared timeout is exactly this kind of kill), which
- * would replace a good report with a corrupt one. Writing to a sibling
- * temp file and renaming into place is atomic on the same filesystem: the
- * final path is always either the previous report or the complete new one,
- * matching the spec's "leaves the raw event log in place rather than a
- * partial report" requirement.
- */
-function writeAtomic(path: string, text: string): void {
-  const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, text)
-  try {
-    renameSync(tmp, path)
-  } catch (err) {
-    try {
-      unlinkSync(tmp)
-    } catch {
-      // Best effort cleanup; a stray temp file is swept by prune (Task 10).
-    }
-    throw err
-  }
+  return buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null)
 }
 
 /**
@@ -218,8 +199,21 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
   const home = claudeHome()
   const root = sessionRoot(cwd)
   const hasEvents = session !== undefined && existsSync(sessionFile(session))
+  const previous = readSnapshot(kanonHome(), root)?.files ?? null
 
-  if (!hasEvents) return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+  const predicted = (): BriefInput => {
+    const files = predictedFiles(cwd, home, root)
+    const drift = previous === null ? null : diff(previous, digest(files), existsSync)
+    return {
+      root,
+      basis: 'predicted',
+      files,
+      missing: [],
+      drift,
+    }
+  }
+
+  if (!hasEvents) return predicted()
 
   let report: Report
   try {
@@ -232,16 +226,24 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
     // going silent. `report` and `alarm` deliberately do not do this: a
     // report that cannot be produced should say so loudly, and an alarm with
     // no evidence behind it should say nothing.
-    return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+    return predicted()
   }
   // An existing but empty log is still an unobserved session: the file can
   // be created by a hook that recorded nothing usable. Reporting "no
   // instruction files govern you" there would be a confident lie, so it
   // falls back to prediction like any other unrecorded session.
   if (report.loaded.length === 0) {
-    return { root, basis: 'predicted', files: predictedFiles(cwd, home, root), missing: [] }
+    return predicted()
   }
-  return { root: report.root, basis: 'observed', files: report.loaded, missing: report.missing }
+  // report.drift already came out of buildReport's own diff() call, so it is
+  // forwarded as-is rather than recomputed here.
+  return {
+    root: report.root,
+    basis: 'observed',
+    files: report.loaded,
+    missing: report.missing,
+    drift: report.drift,
+  }
 }
 
 /**
@@ -318,6 +320,44 @@ function main(): void {
       // own budget, not a write failure here, is what the spec asks us to
       // survive without corrupting the file that's already there.
     }
+    // Only SessionEnd commits. /kanon runs this same command mid-session,
+    // and a commit there would erase the baseline this very report is
+    // describing, making every subsequent run say "nothing changed".
+    // An unobserved session (nothing recorded, or a log that recorded
+    // nothing usable) is not evidence about the repository. merge() unions
+    // rather than replacing, so it never returns an empty list once a
+    // baseline exists -- writeSnapshot's own empty-files guard, which used
+    // to be what stopped an empty session from overwriting a real baseline,
+    // is dead code against that union. Left in place anyway: it still
+    // catches the first-ever session in a root, which has no baseline for
+    // merge() to union against. Without this guard, a `git checkout` or a
+    // `bun install` racing SessionEnd would be read as this session's
+    // filesystem truth and move files to absent-unreported and back for no
+    // reason connected to anything Kanon actually watched load.
+    if (flag('commit-state') && report.loaded.length > 0) {
+      try {
+        const stamp = new Date().toISOString()
+        // Read the previous snapshot again rather than threading it out of
+        // collect(): it is a small JSON file, and the alternative is another
+        // parameter on a function that already has enough.
+        const previous = readSnapshot(kanonHome(), report.root)
+        writeSnapshot(kanonHome(), {
+          v: SNAPSHOT_VERSION,
+          root: report.root,
+          ruleset: report.ruleset,
+          session,
+          t: stamp,
+          // The union is what makes this a record of the repository rather
+          // than of this session. Without it the session that visited fewest
+          // directories overwrites a richer snapshot, and the next session
+          // announces long-standing files as new.
+          files: merge(previous?.files ?? null, digest(report.loaded), existsSync, new Date(stamp)),
+        })
+      } catch {
+        // Housekeeping, like prune: a snapshot that cannot be written must
+        // never stop a report that has already been printed.
+      }
+    }
     return
   }
 
@@ -351,7 +391,82 @@ function main(): void {
     return
   }
 
-  console.log('usage: kanon [report|brief|alarm] [--session <id>] [--cwd <path>] [--hook]')
+  if (command === 'notice') {
+    // Nothing recorded means nothing to say, exactly as with `alarm`.
+    if (!session || !existsSync(sessionFile(session))) return
+    // Every recorded line ends in its own newline, so a plain split leaves a
+    // trailing empty string that is not a line at all. Counting it would
+    // make the watermark overshoot by one and, on a file with a single
+    // trailing newline and nothing else, advance past a line that was never
+    // examined -- filter it out so the watermark counts real lines only.
+    //
+    // This filtered count equals a plain `wc -l` only because the recorder
+    // always ends the file on a trailing newline. A line truncated
+    // mid-write (the recorder killed between the bytes and the newline) has
+    // content, so `.trim().length > 0` does NOT drop it -- it is counted
+    // here same as any complete line, and normalise() below turns its
+    // broken JSON into an `unparsed` event that this loop's `e.ev !==
+    // 'loaded'` check simply skips, so it never fires a notice (correctly:
+    // there is nothing readable to report). What actually differs from a
+    // complete line is that it has no trailing newline yet, so turn.sh's
+    // `wc -l` does not count it until a later append completes it, and the
+    // watermark this command writes below runs one ahead of what turn.sh
+    // is comparing against. The two stay mismatched until that later
+    // append lands, and that is the safe direction: the guard keeps
+    // invoking Bun every turn in the meantime rather than ever settling on
+    // a watermark that silently skipped past a line that could have
+    // carried an alarm.
+    const lines = readFileSync(sessionFile(session), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+    const seen = readWatermark(kanonHome(), session)
+    const home = claudeHome()
+    const root = sessionRoot(cwd)
+
+    const fresh: Classified[] = []
+    for (const e of normalise(lines.slice(seen))) {
+      if (e.ev !== 'loaded') continue
+      if (BRIEFED_REASONS.has(e.reason)) continue
+      // Matches report.ts's discipline: realpath before both classifying and
+      // storing. classify() realpaths its own argument internally, so the
+      // FOREIGN verdict would be unaffected either way, but the unresolved
+      // path is what gets stored into Classified.path and handed to
+      // short(), which does a string-only path.relative() with no
+      // filesystem resolution. Against a symlinked dependency path (pnpm's
+      // node_modules layout, or /tmp and /var on macOS) that would print the
+      // full path instead of the short one.
+      const path = realPath(resolve(root, e.path))
+      if (classify(path, root, home) !== 'foreign') continue
+      if (fresh.some((f) => f.path === path)) continue
+      fresh.push({ path, origin: 'foreign', reason: e.reason, viaImport: null, gitIgnored: null, gitTracked: null })
+    }
+
+    const text = notice({ root, files: fresh }, firstDirective)
+    // Printed BEFORE the watermark advances. A crash between the two repeats
+    // an alarm on the next turn; the reverse order would lose one, and for
+    // an alarm a duplicate is the safe failure and silence is not.
+    if (text.length > 0) {
+      console.log(
+        flag('hook')
+          ? JSON.stringify({
+              systemMessage: text,
+              hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text },
+            })
+          : text,
+      )
+    }
+    // Advanced whether or not there was anything to say, so a turn that
+    // merely reloaded a known file does not make the guard spawn Bun again.
+    try {
+      writeWatermark(kanonHome(), session, lines.length)
+    } catch {
+      // A watermark that cannot be written costs a repeated notice, never a
+      // lost one. Never worth failing the command over.
+    }
+    return
+  }
+
+  console.log('usage: kanon [report|brief|alarm|notice] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
 }
 
 try {

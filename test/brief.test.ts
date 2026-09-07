@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { brief, type BriefInput } from '../src/brief'
+import type { Drift } from '../src/drift'
 import type { Classified } from '../src/types'
 
 // A real home directory, so short() abbreviates it to ~ the way it will in
@@ -18,6 +19,7 @@ function input(over: Partial<BriefInput> = {}): BriefInput {
     basis: 'observed',
     files: [file(USER_RULE, 'user'), file('/repo/CLAUDE.md', 'project')],
     missing: [],
+    drift: null,
     ...over,
   }
 }
@@ -66,6 +68,23 @@ test('a long list collapses its tail but never a foreign file', () => {
 
   expect(out).toContain('4 more')
   expect(out).toContain('vendor/p/CLAUDE.md')
+})
+
+/**
+ * Fix 6 (whole-branch review): `plural()` appends an "s" for any count but
+ * one, so this tail printed "4 mores" -- a bug that shipped in 0.0.10, not
+ * introduced by this branch, but now visibly inconsistent with the drift
+ * tail 30 lines below, which has always read "N more". The existing test
+ * above only checks the loose substring `'4 more'`, which stayed true of
+ * the buggy wording too ("4 mores" contains "4 more"), so it never caught
+ * this. Assert the exact string instead.
+ */
+test('the file-list tail reads "N more", not "N mores"', () => {
+  const many = Array.from({ length: 14 }, (_, i) => file(`/repo/r${i}.md`, 'project'))
+  const out = brief(input({ files: many }))
+
+  expect(out).toContain('... and 4 more, run /kanon for the full list')
+  expect(out).not.toContain('4 mores')
 })
 
 /** Trust calibration: the point is that Claude knows the directive is not
@@ -195,4 +214,70 @@ test('a long path in the file list is left on one line', () => {
 
   const row = out.split('\n').find((l) => l.includes('CLAUDE.md'))
   expect(row).toContain('a/very/deeply/nested/directory/tree/that/keeps/going/CLAUDE.md')
+})
+
+function drift(over: Partial<Drift> = {}): Drift {
+  return { appeared: [], vanished: [], changed: [], ...over }
+}
+
+test('the brief names each drifted file', () => {
+  const out = brief(input({
+    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
+  }))
+  expect(out).toContain('changed')
+  expect(out).toContain('CLAUDE.md')
+})
+
+test('the drift block names the comparison it is making', () => {
+  const out = brief(input({
+    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
+  }))
+  // Pins the line that states what `appeared` means: never seen governing
+  // this repository before, not merely absent from the last session. A
+  // silent reversion to a "since your last session" framing would describe
+  // behaviour the code no longer has, and no other assertion here would
+  // notice.
+  expect(out).toContain('compared with what has governed this repository before')
+})
+
+/**
+ * Fix 7 (whole-branch review): task 5 amended the "nothing foreign, nothing
+ * missing" early return so a session with drift but no foreign and no
+ * missing files does not print that line -- there IS something to report,
+ * it's just not foreign or missing. Only the positive case (drift empty,
+ * line present) was ever asserted; this is the negative half.
+ */
+test('drift with nothing foreign or missing does not claim there is nothing to report', () => {
+  const out = brief(input({
+    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
+  }))
+  expect(out).not.toContain('nothing foreign, nothing missing')
+})
+
+test('no baseline means the brief says nothing about drift', () => {
+  const out = brief(input({ drift: null }))
+  expect(out).not.toContain('changed')
+  expect(out).not.toContain('appeared')
+})
+
+test('an all-empty drift is silent too', () => {
+  expect(brief(input({ drift: drift() }))).not.toContain('appeared')
+})
+
+/**
+ * The brief is prepended to every session, so a large drift must not cost a
+ * screen -- but a foreign file is the reason the brief exists and can never
+ * be the thing that gets collapsed.
+ */
+test('a long drift collapses to a count, and never collapses a foreign file', () => {
+  const many = Array.from({ length: 14 }, (_, i) => ({
+    path: `/repo/r${i}.md`, origin: 'project' as const, sha256: 'x',
+  }))
+  const out = brief(input({
+    drift: drift({
+      appeared: [...many, { path: '/repo/node_modules/foo/CLAUDE.md', origin: 'foreign', sha256: 'y' }],
+    }),
+  }))
+  expect(out).toContain('more, run /kanon')
+  expect(out).toContain('node_modules/foo/CLAUDE.md')
 })

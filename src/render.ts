@@ -1,4 +1,5 @@
 import { PLAIN, type Paint } from './colour'
+import { driftIsEmpty, type FileDigest } from './drift'
 import { short } from './paths'
 import type { Classified, Report, Skipped } from './types'
 
@@ -50,6 +51,15 @@ function loadedLine(c: Classified, root: string, paint: Paint): string {
   }
 
   return notes.length > 0 ? `${main}\n${' '.repeat(2 + TAG_WIDTH)}${paint.note(notes.join(', '))}` : main
+}
+
+/**
+ * One drift row. The tag is padded to the same TAG_WIDTH as every other
+ * section so the path column lands where the reader's eye already is, and
+ * the padding is computed on the unstyled string before paint is applied.
+ */
+function driftLine(tag: string, f: FileDigest, root: string, paint: Paint): string {
+  return `  ${paint.tag(pad(tag, TAG_WIDTH), 'drift')}${paint.path(pad(short(f.path, root), PATH_WIDTH))}${paint.reason(f.origin === 'foreign' ? 'FOREIGN' : f.origin)}`
 }
 
 /**
@@ -129,6 +139,22 @@ export function render(report: Report, paint: Paint = PLAIN): string {
   out.push(paint.heading('LOADED'))
   if (report.loaded.length === 0) out.push(`  ${paint.note('nothing recorded')}`)
   for (const c of report.loaded) out.push(loadedLine(c, root, paint))
+
+  // Directly after LOADED, because it annotates the same set. Omitted
+  // entirely when there is no baseline: silence, rather than a claim that
+  // nothing changed.
+  if (report.drift !== null && !driftIsEmpty(report.drift)) {
+    out.push('')
+    out.push(paint.heading('DRIFT'))
+    // Not "since your last session": `appeared` now means never seen
+    // governing this repository before, which spans every session Kanon has
+    // recorded, while `changed` and `vanished` are relative to the last one.
+    // Naming the comparison rather than a time window is true of all three.
+    out.push(`  ${paint.note('compared with what has governed this repository before')}`)
+    for (const f of report.drift.appeared) out.push(driftLine('appeared', f, root, paint))
+    for (const f of report.drift.changed) out.push(driftLine('changed', f, root, paint))
+    for (const f of report.drift.vanished) out.push(driftLine('vanished', f, root, paint))
+  }
 
   if (report.missing.length > 0 || report.quiet.length > 0) {
     out.push('')

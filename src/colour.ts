@@ -73,8 +73,8 @@ export function colourEnabled(
 export interface Paint {
   heading(s: string): string
   origin(s: string, origin: Origin): string
-  /** A NOT LOADED or COULD NOT READ tag, coloured by how much it matters. */
-  tag(s: string, kind: 'missing' | 'quiet' | 'skip'): string
+  /** A NOT LOADED, COULD NOT READ or DRIFT tag, coloured by how much it matters. */
+  tag(s: string, kind: 'missing' | 'quiet' | 'skip' | 'drift'): string
   path(s: string): string
   reason(s: string): string
   /** A secondary line hanging under a row: an import, a git status, a skip detail. */
@@ -112,6 +112,9 @@ const ORIGIN_COLOUR: Record<Origin, (s: string) => string> = {
 export const COLOUR: Paint = {
   heading: bold,
   origin: (s, origin) => ORIGIN_COLOUR[origin](s),
+  // 'drift' shares yellow with 'missing': both say the canon is not what you
+  // last saw. Only FOREIGN stays bold red, because only FOREIGN is worth
+  // interrupting a reader for.
   tag: (s, kind) => (kind === 'quiet' ? dim(s) : yellow(s)),
   path: (s) => s,
   reason: dim,

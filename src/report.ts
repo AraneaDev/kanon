@@ -1,7 +1,9 @@
-import { realpathSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { diff, digest, type Drift, type SnapshotEntry } from './drift'
 import { classify, hasDependencySegment } from './origin'
+import { realPath } from './paths'
 import {
   CLAIMED_ORIGINS,
   RULESET,
@@ -14,15 +16,6 @@ import {
   type Report,
   type Skipped,
 } from './types'
-
-/** realpath, falling back to the path as given when it cannot be resolved. */
-function realPath(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
-  }
-}
 
 /**
  * Run a git plumbing query and turn its exit code into a tri-state answer.
@@ -88,6 +81,7 @@ export function buildReport(
   homeConfig: string,
   importedBy: Map<string, string>,
   skipped: Skipped[] = [],
+  previous: SnapshotEntry[] | null = null,
 ): Report {
   const byPath = new Map(candidates.map((c) => [c.path, c]))
 
@@ -164,5 +158,10 @@ export function buildReport(
 
   const config = events.filter((e): e is ConfigEvent => e.ev === 'config')
 
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped }
+  // Drift is computed from what actually loaded, never from candidates, so
+  // it can never inherit layer two's fallibility. `existsSync` is injected
+  // rather than called inside diff() so that diff stays pure.
+  const drift: Drift | null = previous === null ? null : diff(previous, digest(loaded), existsSync)
+
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift }
 }

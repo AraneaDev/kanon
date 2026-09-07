@@ -13,5 +13,9 @@ sid=$(printf '%s' "$payload" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*
 cwd=$(printf '%s' "$payload" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 [ -z "$sid" ] && exit 0
 command -v bun >/dev/null 2>&1 || exit 0
-bun "$root/src/cli.ts" report --session "$sid" --cwd "${cwd:-$PWD}" >/dev/null 2>&1
+# --commit-state is passed here and nowhere else. This is the only moment at
+# which the session's observed load set becomes the baseline the next
+# session's drift is measured against; /kanon runs the same command without
+# it, so asking for a report mid-session never destroys that baseline.
+bun "$root/src/cli.ts" report --session "$sid" --cwd "${cwd:-$PWD}" --commit-state >/dev/null 2>&1
 exit 0

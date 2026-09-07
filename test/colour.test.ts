@@ -14,6 +14,7 @@ function base(): Report {
     modelDisagrees: [],
     originDisagrees: [],
     skipped: [],
+    drift: null,
   }
 }
 

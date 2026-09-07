@@ -1,3 +1,4 @@
+import { driftIsEmpty, type Drift, type FileDigest } from './drift'
 import { short } from './paths'
 import type { Candidate, Classified, Origin } from './types'
 
@@ -20,6 +21,13 @@ export interface BriefInput {
   files: Classified[]
   /** Launch candidates that never loaded. Only meaningful when observed. */
   missing: Candidate[]
+  /**
+   * What changed since the last session in this root, or null when there is
+   * no baseline. `vanished` only ever names a file genuinely absent from
+   * disk -- see `diff()`'s own comment in drift.ts for why that rule holds
+   * on both bases alike, not just the predicted one.
+   */
+  drift: Drift | null
 }
 
 /** Reads the first directive-looking line of a file, or null. */
@@ -62,8 +70,11 @@ const WRAP_WIDTH = 76
  * will split a word in half to do it (`directives with` / `out asking`), and
  * a model reading an unwrapped paragraph gets no line structure to scan at
  * all. Wrapping here means neither one has to.
+ *
+ * Exported because the mid-session notice (`src/notice.ts`) shares this
+ * prose problem and this wrapper, not because it has any use outside a brief.
  */
-function wrap(text: string, width = WRAP_WIDTH): string[] {
+export function wrap(text: string, width = WRAP_WIDTH): string[] {
   const lines: string[] = []
   let line = ''
   for (const word of text.split(' ')) {
@@ -114,7 +125,11 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   const out: string[] = [`KANON  ${plural(files.length, 'instruction file')} ${verb} this session (${basis})`]
 
   for (const f of shown) out.push(row(label(f.origin), short(f.path, root)))
-  if (hidden > 0) out.push(row('', `... and ${plural(hidden, 'more')}, run /kanon for the full list`))
+  // Not `plural(hidden, 'more')`: that helper appends an "s" for any count
+  // but one ("4 mores"), which shipped in 0.0.10 and is real prose the
+  // drift tail below got right from the start -- kept consistent with it
+  // here rather than leaving the file contradict itself.
+  if (hidden > 0) out.push(row('', `... and ${hidden} more, run /kanon for the full list`))
 
   for (const f of foreign) {
     out.push(row('FOREIGN', short(f.path, root), f.gitTracked === false ? '   (untracked)' : ''))
@@ -124,8 +139,32 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
 
   for (const c of missing) out.push(row('missing', short(c.path, root), '   (expected, did not load)'))
 
+  const drift = input.drift
+  if (drift !== null && !driftIsEmpty(drift)) {
+    const rows: Array<[string, FileDigest]> = [
+      ...drift.appeared.map((f) => ['appeared', f] as [string, FileDigest]),
+      ...drift.changed.map((f) => ['changed', f] as [string, FileDigest]),
+      ...drift.vanished.map((f) => ['vanished', f] as [string, FileDigest]),
+    ]
+    // Foreign first, and never collapsed: a dependency's file arriving or
+    // being rewritten is the single most valuable thing this block can say.
+    const foreignRows = rows.filter(([, f]) => f.origin === 'foreign')
+    const otherRows = rows.filter(([, f]) => f.origin !== 'foreign')
+    const shownRows = otherRows.slice(0, LIST_LIMIT)
+    const hiddenRows = otherRows.length - shownRows.length
+
+    out.push('')
+    out.push('  compared with what has governed this repository before:')
+    for (const [tag, f] of [...foreignRows, ...shownRows]) out.push(row(tag, short(f.path, root)))
+    // Not `plural(hiddenRows, 'more')`: that helper appends an "s" for any
+    // count but one ("4 mores"), which is fine where an existing test only
+    // checks a loose substring but is wrong prose on its own -- "more" does
+    // not pluralize.
+    if (hiddenRows > 0) out.push(row('', `... and ${hiddenRows} more, run /kanon for the full list`))
+  }
+
   if (foreign.length === 0 && missing.length === 0) {
-    out.push(row('', 'nothing foreign, nothing missing'))
+    if (drift === null || driftIsEmpty(drift)) out.push(row('', 'nothing foreign, nothing missing'))
     return out.join('\n')
   }
 

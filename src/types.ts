@@ -1,3 +1,5 @@
+import type { Drift } from './drift'
+
 export type Origin = 'managed' | 'user' | 'foreign' | 'local' | 'project'
 
 export type Label = 'launch' | 'on-demand' | 'path-scoped' | 'excluded' | 'unreachable'
@@ -79,6 +81,12 @@ export interface Report {
   modelDisagrees: string[]
   originDisagrees: OriginDisagreement[]
   skipped: Skipped[]
+  /**
+   * What changed since the last committed snapshot for this root, or null
+   * when there is no baseline. Null and an all-empty Drift are different
+   * statements: the first is "I cannot say", the second is "nothing moved".
+   */
+  drift: Drift | null
 }
 
 /**
