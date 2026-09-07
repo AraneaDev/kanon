@@ -260,20 +260,73 @@ def loaded_session(repo):
 
 # --- the shots ---------------------------------------------------------------
 
+def drifted(home, repo, claude):
+    """Lay down a real baseline, then change the repository under it.
+
+    Drift is never planted by hand: the snapshot is written by the CLI's own
+    --commit-state, and the rows in the final shot come out of a genuine diff
+    against it.
+
+    Three runs rather than two, because `vanished` is deliberately a two-step
+    transition. The commit that first notices a file is gone only records the
+    absence; the alarm is raised by the next session, so that it reaches a
+    reader who can see it. A shot that skipped the middle run would show a
+    report the tool cannot actually produce.
+
+    The retired rule is its own file rather than one of the fixture's
+    existing ones, so that its removal shows up as drift and nothing else. A
+    file that is still in the recorded log, or that something @imports, would
+    also trip the reachability NOTE and the COULD NOT READ section, and this
+    shot is about drift.
+    """
+    base = loaded_session(repo) + [wrap_config(str(repo), "skills", ["a"])]
+    retired = repo / ".claude" / "rules" / "legacy.md"
+    write(retired, "# Legacy\n\nSuperseded by the style rules.\n")
+
+    record(home, base + [wrap(str(repo), str(retired), "session_start", "Project")])
+    run_cli(["report", "--session", "demo", "--cwd", str(repo), "--commit-state"], home, claude, False)
+
+    retired.unlink()
+    record(home, base)
+    run_cli(["report", "--session", "demo", "--cwd", str(repo), "--commit-state"], home, claude, False)
+
+    # Rewritten after the baseline captured its digest, which is the case
+    # drift exists for: a dependency that updates and changes what it says.
+    write(repo / "vendor" / "phpstan" / "CLAUDE.md",
+          "# phpstan\n\nAlways run phpstan, and never edit vendor/ directly.\n")
+    # Newly present and newly loading, so it has never governed this root.
+    write(repo / ".claude" / "rules" / "security.md", "# Security\n\nNever log a token.\n")
+    record(home, base + [wrap(str(repo), str(repo / ".claude" / "rules" / "security.md"),
+                              "session_start", "Project")])
+
+
 def shot_report():
-    """The report a human reads: what loaded, from where, and what did not."""
+    """The report a human reads: what loaded, from where, what changed, what did not."""
     home, repo, claude = plant("report")
-    record(home, loaded_session(repo) + [wrap_config(str(repo), "skills", ["a"])])
+    drifted(home, repo, claude)
     render(run_cli(["report", "--session", "demo", "--cwd", str(repo)], home, claude, True),
-           ASSETS / "report.webp")
+           ASSETS / "report.webp", rows=28)
 
 
 def shot_brief():
     """What Claude is told at session start. Never coloured: its reader is a model."""
     home, repo, claude = plant("brief")
-    record(home, loaded_session(repo))
+    drifted(home, repo, claude)
     render(run_cli(["brief", "--session", "demo", "--cwd", str(repo)], home, claude, False),
-           ASSETS / "brief.webp", rows=20)
+           ASSETS / "brief.webp", rows=24)
+
+
+def shot_audit():
+    """What could govern a session here, asked of a checkout with no session.
+
+    The report can only describe files that actually loaded, so a dependency's
+    CLAUDE.md stays invisible until the day it speaks. This is the command
+    that asks first, and the shot is taken with no session log at all, which
+    is the state a freshly cloned repository is in.
+    """
+    home, repo, claude = plant("audit")
+    render(run_cli(["audit", "--cwd", str(repo)], home, claude, True),
+           ASSETS / "audit.webp", rows=20)
 
 
 def shot_admits():
@@ -321,7 +374,7 @@ def shot_admits():
            ASSETS / "admits.webp", cols=136)
 
 
-SHOTS = {"report": shot_report, "brief": shot_brief, "admits": shot_admits}
+SHOTS = {"report": shot_report, "brief": shot_brief, "admits": shot_admits, "audit": shot_audit}
 
 
 def main():

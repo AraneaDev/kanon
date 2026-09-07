@@ -7,16 +7,16 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-364%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-366%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![Status](https://img.shields.io/badge/status-pre--release-orange)](#install)
 
-<img src="assets/report.webp" alt="A Kanon report: four instruction files loaded with their origins, a vendored CLAUDE.md flagged FOREIGN, and a rule that was expected and never arrived" width="840">
+<img src="assets/report.webp" alt="A Kanon report: five instruction files loaded with their origins, a vendored CLAUDE.md flagged FOREIGN, a DRIFT section naming one file that appeared, one whose bytes changed and one that vanished, and a rule that was expected and never arrived" width="840">
 
-<sub>Origins are coloured by how much they should worry you: FOREIGN is the only one in red, <code>missing</code> is a fault in amber, <code>quiet</code> is a fact about the session and stays dim. A real run of the CLI against a planted repository, captured by <code>tools/screenshots/</code>.</sub>
+<sub>Origins are coloured by how much they should worry you: FOREIGN is the only one in red, <code>missing</code> and the drift tags are amber, <code>quiet</code> is a fact about the session and stays dim. A real run of the CLI against a planted repository, captured by <code>tools/screenshots/</code>. The drift rows come from a genuine diff against a snapshot the CLI wrote itself, not from a planted one.</sub>
 
 </div>
 
@@ -86,6 +86,13 @@ LOADED
   project    .claude/rules/style.md               session_start
   FOREIGN    vendor/phpstan/CLAUDE.md             nested_traversal
              untracked in this repo
+  project    .claude/rules/security.md            session_start
+
+DRIFT
+  compared with what has governed this repository before
+  appeared   .claude/rules/security.md            project
+  changed    vendor/phpstan/CLAUDE.md             FOREIGN
+  vanished   .claude/rules/legacy.md              project
 
 NOT LOADED
   missing    .claude/rules/testing.md             expected at launch
@@ -270,6 +277,10 @@ AUDIT  /home/you/project                            ruleset 2026-08
 That is a real run against this repository. The report cannot tell you about that file, because the
 report only ever describes what actually loaded, and a dependency's `CLAUDE.md` stays invisible
 until the day it speaks. This is the command that asks first.
+
+<p align="center">
+  <img src="assets/audit.webp" alt="A Kanon audit of a planted repository: a vendored CLAUDE.md flagged FOREIGN with its first directive quoted, then seven of the project's own instruction files with their origins and how each would load, and a closing tally of one foreign out of eight" width="760">
+</p>
 
 The second column is how a file *would* load, never a claim that it did. An `on-demand` file inside
 a dependency fires only when Claude reads something in that directory.
