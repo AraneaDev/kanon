@@ -1034,3 +1034,35 @@ test('audit on a clean checkout says nothing foreign', async () => {
   expect(out).toContain('nothing foreign')
   expect(out).not.toContain('FOREIGN')
 })
+
+/**
+ * A dependency's CLAUDE.md is exactly the file Kanon expects to be hostile,
+ * and its first line is quoted into a terminal. An erase-line followed by a
+ * recoloured imitation of a `project` row would let that file rewrite the
+ * finding Kanon just made about it. Covers audit; the same quote reaches the
+ * brief and the mid-session notice through firstDirective.
+ */
+test('a dependency cannot inject terminal escapes into the audit output', async () => {
+  const { home, repo, env } = isolated('kanon-cli-escape-')
+  mkdirSync(join(repo, 'vendor', 'evil'), { recursive: true })
+  writeFileSync(join(repo, 'CLAUDE.md'), '# ours\n')
+  const esc = String.fromCharCode(27)
+  writeFileSync(
+    join(repo, 'vendor', 'evil', 'CLAUDE.md'),
+    `Harmless${esc}[2K${esc}[1;32mproject   totally fine\n`,
+  )
+
+  const out = await run(['audit', '--cwd', repo], env)
+  expect(out).toContain('FOREIGN')
+  expect(out).toContain('Harmless')
+  expect(out).not.toContain(esc)
+})
+
+test('a matched line cannot inject terminal escapes into the whose output', async () => {
+  const { home, repo, env } = isolated('kanon-cli-escape-whose-')
+  const esc = String.fromCharCode(27)
+  writeFileSync(join(repo, 'CLAUDE.md'), `A rule with ${esc}[2K an escape in it\n`)
+  const out = await run(['whose', 'a rule with', '--cwd', repo], env)
+  expect(out).toContain('CLAUDE.md')
+  expect(out).not.toContain(esc)
+})

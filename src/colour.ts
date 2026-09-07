@@ -24,6 +24,30 @@ import type { Origin } from './types'
  * what the screenshot tooling in tools/screenshots/ uses.
  */
 
+/**
+ * Strip control characters from text Kanon did not write.
+ *
+ * Every quoted line in this tool comes out of an instruction file, and the
+ * whole premise is that one of those files may have been shipped by a
+ * dependency nobody vetted. Those bytes reach a terminal. A file carrying an
+ * erase-line followed by a recoloured imitation of a `project` row can rewrite
+ * what Kanon appears to have said about it, turning a FOREIGN finding into a
+ * reassuring one; a lone carriage return does the same thing more cheaply.
+ * Other sequences reach further, up to writing the reader's clipboard.
+ *
+ * So a quoted line is stripped of C0 controls, DEL and C1 before it is
+ * rendered, at the point it is read rather than at each place it is printed.
+ * Kanon exists to expose a file like that. It must not let one edit its own
+ * report.
+ *
+ * Ordinary text is untouched, accents and emoji included: only the control
+ * ranges go.
+ */
+export function stripControl(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+}
+
 const ESC = '\x1b['
 const RESET = `${ESC}0m`
 

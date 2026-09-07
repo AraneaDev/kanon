@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
-import { COLOUR, PLAIN, colourEnabled } from './colour'
+import { COLOUR, PLAIN, colourEnabled, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
@@ -181,7 +181,10 @@ function firstDirective(path: string): string | null {
       continue
     }
     if (inFrontMatter || line.startsWith('#')) continue
-    return line.length > 120 ? `${line.slice(0, 117)}...` : line
+    // Stripped here, where a file Kanon did not write is first read, so
+    // every reader of this quote is covered rather than each render site.
+    const clean = stripControl(line)
+    return clean.length > 120 ? `${clean.slice(0, 117)}...` : clean
   }
   return null
 }

@@ -1,4 +1,4 @@
-import { PLAIN, type Paint } from './colour'
+import { PLAIN, stripControl, type Paint } from './colour'
 import { short } from './paths'
 import type { Classified, Origin } from './types'
 
@@ -48,7 +48,9 @@ export function matches(files: Classified[], phrase: string, read: Reader): Matc
     if (at === -1) continue
 
     const line = lineOfCollapsedOffset(text, at)
-    out.push({ path: f.path, origin: f.origin, line, text: (text.split('\n')[line - 1] ?? '').trim() })
+    // The matched line comes out of a file Kanon did not write, and it is
+    // printed to a terminal, so it is stripped of control characters here.
+    out.push({ path: f.path, origin: f.origin, line, text: stripControl((text.split('\n')[line - 1] ?? '').trim()) })
   }
   return out
 }

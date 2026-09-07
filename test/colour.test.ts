@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { COLOUR, PLAIN, colourEnabled, paintFor } from '../src/colour'
+import { COLOUR, PLAIN, colourEnabled, paintFor, stripControl } from '../src/colour'
 import { render } from '../src/render'
 import type { Report } from '../src/types'
 
@@ -151,4 +151,31 @@ test('the reachability note is rendered as a warning', () => {
   const r = base()
   r.modelDisagrees = ['/odd/CLAUDE.md']
   expect(render(r, COLOUR)).toContain(`${ESC}[33mNOTE  the reachability model disagrees`)
+})
+
+/**
+ * Kanon quotes lines out of instruction files it did not write, including a
+ * dependency's. Those bytes reach a terminal, so a file can carry escape
+ * sequences that rewrite what Kanon appears to have said: an erase-line
+ * followed by a recoloured imitation of a `project` row turns a FOREIGN
+ * finding into a reassuring one. The tool exists to expose such a file, so it
+ * must not let one edit its own report.
+ */
+test('stripControl removes escape sequences a quoted file could carry', () => {
+  const attack = `Harmless${ESC}[2K${ESC}[1;32mproject   totally fine`
+  const safe = stripControl(attack)
+  expect(safe).not.toContain(ESC)
+  expect(safe).toContain('Harmless')
+})
+
+test('stripControl removes carriage returns, which can rewrite a printed line', () => {
+  expect(stripControl('real\rfake')).toBe('realfake')
+})
+
+test('stripControl removes DEL and other C0 controls', () => {
+  expect(stripControl(`a${String.fromCharCode(127)}b${String.fromCharCode(7)}c`)).toBe('abc')
+})
+
+test('stripControl leaves ordinary text, including accents and emoji, alone', () => {
+  expect(stripControl('Gebruik een komma — of niet 🙂')).toBe('Gebruik een komma — of niet 🙂')
 })
