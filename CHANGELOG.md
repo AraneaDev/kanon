@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.12](https://github.com/AraneaDev/kanon/compare/v0.0.11...v0.0.12) (2026-09-07)
+
+
+### Refactoring
+
+* resolve paths through the shared helper in classify too ([#27](https://github.com/AraneaDev/kanon/issues/27)) ([b10d68c](https://github.com/AraneaDev/kanon/commit/b10d68c2109dbb1fd9a9a235436c0d55e007af9d))
+
 ## [0.0.11](https://github.com/AraneaDev/kanon/compare/v0.0.10...v0.0.11) (2026-09-07)
 
 
