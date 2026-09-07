@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test'
 import { renderAudit, type AuditEntry } from '../src/audit'
+import { COLOUR, PLAIN } from '../src/colour'
+
+/** The CSI escape a Paint emits, built rather than typed, to keep this file plain text. */
+const ESC = String.fromCharCode(27)
+const stripAnsi = (s: string): string => s.split(ESC).map((p, i) => (i === 0 ? p : p.replace(/^\[[0-9;]*m/, ''))).join('')
 
 function entry(path: string, origin: AuditEntry['origin'], label: AuditEntry['label'] = 'launch'): AuditEntry {
   return { path, origin, label }
@@ -68,4 +73,31 @@ test('an on-demand file is labelled as such rather than as loaded', () => {
 test('an empty checkout says so rather than printing an empty list', () => {
   const out = renderAudit('/repo', [], () => null)
   expect(out).toContain('no instruction files')
+})
+
+const painted = () => [entry('/repo/node_modules/p/CLAUDE.md', 'foreign', 'on-demand'), entry('/repo/CLAUDE.md', 'project')]
+
+/**
+ * Colour is a property of the terminal, never of the output. The default has
+ * to stay the identity so a piped audit is byte-for-byte what it has always
+ * been, and so nothing a model reads ever carries an escape code.
+ */
+test('the default rendering is unstyled and identical to PLAIN', () => {
+  const bare = renderAudit('/repo', painted(), () => null)
+  expect(bare).toBe(renderAudit('/repo', painted(), () => null, PLAIN))
+  expect(bare).not.toContain(ESC)
+})
+
+/**
+ * FOREIGN is the one row worth interrupting a reader for, and the report
+ * already paints it bold red. An audit leaving it grey would contradict the
+ * promise the report's own colour makes.
+ */
+test('COLOUR paints the rows and leaves the pinned columns intact', () => {
+  const out = renderAudit('/repo', painted(), () => null, COLOUR)
+  expect(out).toContain(ESC)
+  // Padding is computed on the unstyled string, so stripping the escapes has
+  // to give back exactly the plain rendering. If it does not, the columns
+  // were padded after painting and the alignment is already broken.
+  expect(stripAnsi(out)).toBe(renderAudit('/repo', painted(), () => null))
 })

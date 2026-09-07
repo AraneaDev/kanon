@@ -1,3 +1,4 @@
+import { PLAIN, type Paint } from './colour'
 import { short } from './paths'
 import { RULESET, type Label, type Origin } from './types'
 
@@ -39,28 +40,35 @@ const ORIGIN_ORDER: Origin[] = ['foreign', 'managed', 'user', 'project', 'local'
  * fires only if Claude reads something in that directory, and overstating
  * that would be the kind of confident-sounding guess this tool exists not to
  * make.
+ *
+ * `paint` defaults to the identity, so a piped audit stays byte-for-byte what
+ * it has always been and nothing a model reads ever carries an escape code.
+ * Only an interactive stdout is painted, matching the report. Padding is
+ * computed on the unstyled string and painted afterwards; invert that order
+ * and the pinned columns collapse.
  */
-export function renderAudit(root: string, entries: AuditEntry[], excerpt: Excerpt): string {
+export function renderAudit(root: string, entries: AuditEntry[], excerpt: Excerpt, paint: Paint = PLAIN): string {
   const gap = Math.max(1, 27 - root.length)
-  const out: string[] = [`AUDIT  ${root}${' '.repeat(gap)}ruleset ${RULESET}`, '']
+  const out: string[] = [`${paint.heading('AUDIT')}  ${paint.path(root)}${' '.repeat(gap)}${paint.note(`ruleset ${RULESET}`)}`, '']
 
   if (entries.length === 0) {
-    out.push('  no instruction files found in this checkout')
+    out.push(`  ${paint.note('no instruction files found in this checkout')}`)
     return out.join('\n')
   }
 
   const ordered = ORIGIN_ORDER.flatMap((o) => entries.filter((e) => e.origin === o))
   for (const e of ordered) {
     const tag = e.origin === 'foreign' ? 'FOREIGN' : e.origin
-    out.push(`  ${pad(tag, TAG_WIDTH)}${pad(short(e.path, root), PATH_WIDTH)}${e.label}`)
+    out.push(`  ${paint.origin(pad(tag, TAG_WIDTH), e.origin)}${paint.path(pad(short(e.path, root), PATH_WIDTH))}${paint.reason(e.label)}`)
     if (e.origin === 'foreign') {
       const quote = excerpt(e.path)
-      if (quote) out.push(`${' '.repeat(2 + TAG_WIDTH)}"${quote}"`)
+      if (quote) out.push(`${' '.repeat(2 + TAG_WIDTH)}${paint.note(`"${quote}"`)}`)
     }
   }
 
   const foreign = entries.filter((e) => e.origin === 'foreign').length
   out.push('')
-  out.push(foreign === 0 ? `  nothing foreign, ${entries.length} in total` : `  ${foreign} foreign, ${entries.length} in total`)
+  const tally = foreign === 0 ? `nothing foreign, ${entries.length} in total` : `${foreign} foreign, ${entries.length} in total`
+  out.push(`  ${foreign === 0 ? paint.note(tally) : paint.warning(tally)}`)
   return out.join('\n')
 }

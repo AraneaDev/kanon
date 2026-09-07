@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
-import { COLOUR, colourEnabled } from './colour'
+import { COLOUR, PLAIN, colourEnabled } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
@@ -402,7 +402,9 @@ function main(): void {
       label: c.label,
     }))
 
-    console.log(renderAudit(root, entries, firstDirective))
+    // Colour only for a person looking at a terminal, exactly as `report`
+    // does. A piped or captured audit stays plain.
+    console.log(renderAudit(root, entries, firstDirective, colourEnabled() ? COLOUR : PLAIN))
     return
   }
 
@@ -436,7 +438,8 @@ function main(): void {
         }
       }
 
-      console.log(renderWhose(phrase, matches(files, phrase, read), observed ? 'observed' : 'predicted', root, files.length))
+      const painted = colourEnabled() ? COLOUR : PLAIN
+      console.log(renderWhose(phrase, matches(files, phrase, read), observed ? 'observed' : 'predicted', root, files.length, painted))
       return
     }
   }

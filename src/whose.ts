@@ -1,3 +1,4 @@
+import { PLAIN, type Paint } from './colour'
 import { short } from './paths'
 import type { Classified, Origin } from './types'
 
@@ -72,6 +73,10 @@ function pad(value: string, width: number): string {
  * nowhere in the instruction set either arrived from a skill, an MCP server
  * or another plugin's hook, or was never in an instruction file at all, and
  * the reader needs to be able to tell those apart from a broken search.
+ *
+ * `paint` defaults to the identity, so piped output stays byte-for-byte what
+ * it has always been. Padding is computed on the unstyled string and painted
+ * afterwards; invert that order and the pinned columns collapse.
  */
 export function renderWhose(
   phrase: string,
@@ -79,20 +84,23 @@ export function renderWhose(
   basis: 'observed' | 'predicted',
   root: string,
   searched: number,
+  paint: Paint = PLAIN,
 ): string {
-  const out: string[] = [`WHOSE  "${phrase}"${' '.repeat(Math.max(1, 44 - phrase.length))}${basis}`]
+  const out: string[] = [
+    `${paint.heading('WHOSE')}  "${phrase}"${' '.repeat(Math.max(1, 44 - phrase.length))}${paint.note(basis)}`,
+  ]
 
   if (found.length === 0) {
-    out.push('  no file governing this session contains that phrase')
-    out.push(`  ${searched} file${searched === 1 ? '' : 's'} searched. A directive can also reach you from a skill, an MCP`)
-    out.push('  server, or another plugin\'s hook, none of which Kanon sees yet.')
+    out.push(`  ${paint.note('no file governing this session contains that phrase')}`)
+    out.push(paint.note(`  ${searched} file${searched === 1 ? '' : 's'} searched. A directive can also reach you from a skill, an MCP`))
+    out.push(paint.note('  server, or another plugin\'s hook, none of which Kanon sees yet.'))
     return out.join('\n')
   }
 
   for (const m of found) {
     const tag = m.origin === 'foreign' ? 'FOREIGN' : m.origin
-    out.push(`  ${pad(tag, TAG_WIDTH)}${pad(short(m.path, root), PATH_WIDTH)}line ${m.line}`)
-    out.push(`${' '.repeat(2 + TAG_WIDTH)}"${m.text}"`)
+    out.push(`  ${paint.origin(pad(tag, TAG_WIDTH), m.origin)}${paint.path(pad(short(m.path, root), PATH_WIDTH))}${paint.reason(`line ${m.line}`)}`)
+    out.push(`${' '.repeat(2 + TAG_WIDTH)}${paint.note(`"${m.text}"`)}`)
   }
   return out.join('\n')
 }
