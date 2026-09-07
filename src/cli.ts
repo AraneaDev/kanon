@@ -4,8 +4,8 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
-import { COLOUR, colourEnabled } from './colour'
-import { discover } from './discover'
+import { COLOUR, PLAIN, colourEnabled, stripControl } from './colour'
+import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
 import { currentRun, normalise } from './normalise'
@@ -13,6 +13,8 @@ import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
 import { render } from './render'
+import { renderAudit, type AuditEntry } from './audit'
+import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
 import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
 import type { Classified, Report } from './types'
@@ -20,6 +22,16 @@ import type { Classified, Report } from './types'
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
   return i === -1 ? undefined : process.argv[i + 1]
+}
+
+/**
+ * The phrase `whose` searches for: the first argument after the command,
+ * when it is not a flag. Taken positionally so a phrase can be typed as it
+ * is remembered, rather than behind a flag name nobody would recall.
+ */
+function phraseArg(): string | undefined {
+  const first = process.argv[3]
+  return first !== undefined && !first.startsWith('--') ? first : undefined
 }
 
 function flag(name: string): boolean {
@@ -169,7 +181,10 @@ function firstDirective(path: string): string | null {
       continue
     }
     if (inFrontMatter || line.startsWith('#')) continue
-    return line.length > 120 ? `${line.slice(0, 117)}...` : line
+    // Stripped here, where a file Kanon did not write is first read, so
+    // every reader of this quote is covered rather than each render site.
+    const clean = stripControl(line)
+    return clean.length > 120 ? `${clean.slice(0, 117)}...` : clean
   }
   return null
 }
@@ -373,6 +388,65 @@ function main(): void {
     return
   }
 
+  if (command === 'audit') {
+    const home = claudeHome()
+    const root = sessionRoot(cwd)
+    // The predicted set, plus the directories discovery normally refuses to
+    // enter. Both are needed: the first covers what launches and what the
+    // rules directories hold, the second is the dependency tree, which is
+    // where the file nobody chose to install usually sits.
+    const { candidates } = discover(cwd, home)
+    const seen = new Set(candidates.map((c) => c.path))
+    const swept = subdirCandidates(root, true).filter((c) => !seen.has(c.path))
+
+    const entries: AuditEntry[] = [...candidates, ...swept].map((c) => ({
+      path: c.path,
+      origin: classify(c.path, root, home),
+      label: c.label,
+    }))
+
+    // Colour only for a person looking at a terminal, exactly as `report`
+    // does. A piped or captured audit stays plain.
+    console.log(renderAudit(root, entries, firstDirective, colourEnabled() ? COLOUR : PLAIN))
+    return
+  }
+
+  if (command === 'whose') {
+    const phrase = phraseArg()
+    // No phrase falls through to the usage line rather than searching for
+    // the empty string, which would otherwise match every file at offset 0.
+    if (phrase !== undefined) {
+      const home = claudeHome()
+      let report: Report | undefined
+      if (session && existsSync(sessionFile(session))) {
+        try {
+          report = collect(session, cwd)
+        } catch {
+          // An unreadable log is no evidence about this session, so fall
+          // back to prediction rather than reporting against half a file.
+        }
+      }
+      const observed = report !== undefined && report.loaded.length > 0
+      const root = observed && report ? report.root : sessionRoot(cwd)
+      const files = observed && report ? report.loaded : predictedFiles(cwd, home, root)
+
+      // The same size ceiling the rest of the codebase applies, so a file
+      // Claude Code would skip is never searched either.
+      const read = (path: string): string | null => {
+        if (tooLarge(path)) return null
+        try {
+          return readFileSync(path, 'utf8')
+        } catch {
+          return null
+        }
+      }
+
+      const painted = colourEnabled() ? COLOUR : PLAIN
+      console.log(renderWhose(phrase, matches(files, phrase, read), observed ? 'observed' : 'predicted', root, files.length, painted))
+      return
+    }
+  }
+
   if (command === 'alarm') {
     // Silence isn't just "nothing to report", it's also "no evidence to
     // report from". A session with no recorded events at all is almost
@@ -468,7 +542,7 @@ function main(): void {
     return
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
 }
 
 try {

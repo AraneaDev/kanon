@@ -2,21 +2,21 @@
 
 # Kanon
 
-**Every rule governing this session, named.**
+**Every instruction file governing this session, named.**
 **Including the ones you thought loaded and didn't.**
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-336%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-374%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![Status](https://img.shields.io/badge/status-pre--release-orange)](#install)
 
-<img src="assets/report.webp" alt="A Kanon report: four instruction files loaded with their origins, a vendored CLAUDE.md flagged FOREIGN, and a rule that was expected and never arrived" width="840">
+<img src="assets/report.webp" alt="A Kanon report: five instruction files loaded with their origins, a vendored CLAUDE.md flagged FOREIGN, a DRIFT section naming one file that appeared, one whose bytes changed and one that vanished, and a rule that was expected and never arrived" width="840">
 
-<sub>Origins are coloured by how much they should worry you: FOREIGN is the only one in red, <code>missing</code> is a fault in amber, <code>quiet</code> is a fact about the session and stays dim. A real run of the CLI against a planted repository, captured by <code>tools/screenshots/</code>.</sub>
+<sub>Origins are coloured by how much they should worry you: FOREIGN is the only one in red, <code>missing</code> and the drift tags are amber, <code>quiet</code> is a fact about the session and stays dim. A real run of the CLI against a planted repository, captured by <code>tools/screenshots/</code>. The drift rows come from a genuine diff against a snapshot the CLI wrote itself, not from a planted one.</sub>
 
 </div>
 
@@ -86,6 +86,13 @@ LOADED
   project    .claude/rules/style.md               session_start
   FOREIGN    vendor/phpstan/CLAUDE.md             nested_traversal
              untracked in this repo
+  project    .claude/rules/security.md            session_start
+
+DRIFT
+  compared with what has governed this repository before
+  appeared   .claude/rules/security.md            project
+  changed    vendor/phpstan/CLAUDE.md             FOREIGN
+  vanished   .claude/rules/legacy.md              project
 
 NOT LOADED
   missing    .claude/rules/testing.md             expected at launch
@@ -228,6 +235,60 @@ will not fall back to a session from a different repository, because reporting o
 loads against another's expectations invents alarms that are not real. If nothing was recorded
 for the directory you are in, it says so plainly.
 
+## The `/kanon:whose` command
+
+`/kanon:whose <phrase>` answers "where did that rule come from". Claude holds every instruction
+file merged into one context with no attribution, so when it does something you did not expect,
+there is no way to ask which file told it to. This is that question.
+
+```
+WHOSE  "geen em dashes"                                   observed
+  user       ~/.claude/rules/schrijfstijl.md         line 24
+             "- **Geen em dashes (—).** Gebruik een komma of twee korte zinnen."
+```
+
+Matching is case-insensitive and runs over the file with whitespace collapsed, so a phrase that
+straddles a line break still matches. Instruction files are hard-wrapped, and the phrases you
+remember are usually the ones a line break splits.
+
+The answer worth having is often the empty one. If no governing file contains the phrase, it says
+so and names how many it searched, because that means the directive reached the session from a
+surface Kanon does not see yet, a skill, an MCP server or another plugin's hook, or it was never
+in an instruction file at all.
+
+## The `/kanon:audit` command
+
+`/kanon:audit` lists every instruction file that could govern a session in this checkout. It needs
+no session, so it works on a repository nothing has run in yet, which is the point: you have just
+cloned something, or an install added packages, and you want to know what got a voice before it
+uses one.
+
+```text
+AUDIT  /home/you/project                            ruleset 2026-08
+
+  FOREIGN    node_modules/bun-types/CLAUDE.md     on-demand
+             "Default to using Bun instead of Node.js."
+  user       ~/.claude/rules/style.md             launch
+  project    CLAUDE.md                            launch
+
+  1 foreign, 3 in total
+```
+
+That is a real run against this repository. The report cannot tell you about that file, because the
+report only ever describes what actually loaded, and a dependency's `CLAUDE.md` stays invisible
+until the day it speaks. This is the command that asks first.
+
+<p align="center">
+  <img src="assets/audit.webp" alt="A Kanon audit of a planted repository: a vendored CLAUDE.md flagged FOREIGN with its first directive quoted, then seven of the project's own instruction files with their origins and how each would load, and a closing tally of one foreign out of eight" width="760">
+</p>
+
+The second column is how a file *would* load, never a claim that it did. An `on-demand` file inside
+a dependency fires only when Claude reads something in that directory.
+
+The sweep deliberately enters dependency and dot directories, which the rest of Kanon refuses to
+do. That refusal is justified by there being a session to observe a load; an audit runs where
+nothing has run, so the justification does not hold. `.git` is never entered.
+
 ## The hooks Kanon installs
 
 | Event | What it does |
@@ -278,6 +339,20 @@ It reports which files reached your context and where they came from. It does no
 meaning, score them, rank them, or scan them for prompt injection. Deciding whether a dependency's
 instructions belong in your session is your call. Kanon's job is making sure you know they are
 there.
+
+`/kanon:whose` searches those files for a literal string and quotes the line it sits on. That is
+provenance, the same category as the digest and the quoted first directive: it locates text without
+forming any view of what the text means. Matches come back in origin order, never scored or ranked,
+and Kanon does not tell you whether a rule is a good one.
+
+A directive can also reach a session from a skill, an MCP server, an output style, or another
+plugin's hook. Kanon does not model any of those, and the reason is structural rather than a matter
+of effort: Claude Code fires a hook when an instruction file loads, and fires nothing when a
+skill's text or a server's instructions reach the context. Everything Kanon reports about
+instruction files is either observed, or labelled as prediction it can be caught getting wrong.
+It has no such footing on those other surfaces, so it would be guessing with no way to learn it had
+guessed badly. `/kanon:whose` says so when a phrase turns up in no instruction file, which is the
+moment it matters.
 
 It never blocks. `ConfigChange` can block a configuration change and Kanon declines to.
 
