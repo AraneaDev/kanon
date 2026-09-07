@@ -323,7 +323,18 @@ function main(): void {
     // Only SessionEnd commits. /kanon runs this same command mid-session,
     // and a commit there would erase the baseline this very report is
     // describing, making every subsequent run say "nothing changed".
-    if (flag('commit-state')) {
+    // An unobserved session (nothing recorded, or a log that recorded
+    // nothing usable) is not evidence about the repository. merge() unions
+    // rather than replacing, so it never returns an empty list once a
+    // baseline exists -- writeSnapshot's own empty-files guard, which used
+    // to be what stopped an empty session from overwriting a real baseline,
+    // is dead code against that union. Left in place anyway: it still
+    // catches the first-ever session in a root, which has no baseline for
+    // merge() to union against. Without this guard, a `git checkout` or a
+    // `bun install` racing SessionEnd would be read as this session's
+    // filesystem truth and move files to absent-unreported and back for no
+    // reason connected to anything Kanon actually watched load.
+    if (flag('commit-state') && report.loaded.length > 0) {
       try {
         const stamp = new Date().toISOString()
         // Read the previous snapshot again rather than threading it out of
