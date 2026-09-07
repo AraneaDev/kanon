@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled } from './colour'
-import { discover } from './discover'
+import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
 import { currentRun, normalise } from './normalise'
@@ -13,6 +13,7 @@ import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
 import { render } from './render'
+import { renderAudit, type AuditEntry } from './audit'
 import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
 import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
@@ -384,6 +385,27 @@ function main(): void {
     return
   }
 
+  if (command === 'audit') {
+    const home = claudeHome()
+    const root = sessionRoot(cwd)
+    // The predicted set, plus the directories discovery normally refuses to
+    // enter. Both are needed: the first covers what launches and what the
+    // rules directories hold, the second is the dependency tree, which is
+    // where the file nobody chose to install usually sits.
+    const { candidates } = discover(cwd, home)
+    const seen = new Set(candidates.map((c) => c.path))
+    const swept = subdirCandidates(root, true).filter((c) => !seen.has(c.path))
+
+    const entries: AuditEntry[] = [...candidates, ...swept].map((c) => ({
+      path: c.path,
+      origin: classify(c.path, root, home),
+      label: c.label,
+    }))
+
+    console.log(renderAudit(root, entries, firstDirective))
+    return
+  }
+
   if (command === 'whose') {
     const phrase = phraseArg()
     // No phrase falls through to the usage line rather than searching for
@@ -514,7 +536,7 @@ function main(): void {
     return
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
 }
 
 try {

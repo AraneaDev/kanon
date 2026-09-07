@@ -206,3 +206,45 @@ test('the subdirectory walk excludes cwd own CLAUDE.md', () => {
   writeFileSync(join(dir, 'CLAUDE.md'), '# Here\n')
   expect(subdirCandidates(dir)).toEqual([])
 })
+
+/**
+ * The audit sweep. subdirCandidates skips dependency and dot directories on
+ * the stated grounds that a load observed inside one is still classified and
+ * reported, so skipping costs no visibility. That justification collapses
+ * when there is no session to observe anything, which is exactly the case
+ * `kanon audit` runs in, so it is the one caller that opts back in.
+ */
+test('the audit sweep finds a dependency-shipped CLAUDE.md that the default walk skips', () => {
+  const dir = tmp('kanon-audit-')
+  mkdirSync(join(dir, 'node_modules', 'pkg'), { recursive: true })
+  mkdirSync(join(dir, 'src'), { recursive: true })
+  writeFileSync(join(dir, 'node_modules', 'pkg', 'CLAUDE.md'), '# from a dependency\n')
+  writeFileSync(join(dir, 'src', 'CLAUDE.md'), '# ours\n')
+
+  const dep = join(dir, 'node_modules', 'pkg', 'CLAUDE.md')
+  expect(subdirCandidates(dir).map((c) => c.path)).not.toContain(dep)
+  expect(subdirCandidates(dir, true).map((c) => c.path)).toContain(dep)
+  expect(subdirCandidates(dir, true).map((c) => c.path)).toContain(join(dir, 'src', 'CLAUDE.md'))
+})
+
+/**
+ * .git holds no instruction file worth reporting and is large, so the sweep
+ * never enters it however wide it is asked to go.
+ */
+test('the audit sweep never enters .git', () => {
+  const dir = tmp('kanon-audit-git-')
+  mkdirSync(join(dir, '.git', 'hooks'), { recursive: true })
+  writeFileSync(join(dir, '.git', 'hooks', 'CLAUDE.md'), '# not an instruction file\n')
+  expect(subdirCandidates(dir, true).map((c) => c.path)).not.toContain(join(dir, '.git', 'hooks', 'CLAUDE.md'))
+})
+
+/**
+ * Other dot-directories are in scope for an audit: one can hold a CLAUDE.md
+ * that a session would load on demand.
+ */
+test('the audit sweep enters dot-directories other than .git', () => {
+  const dir = tmp('kanon-audit-dot-')
+  mkdirSync(join(dir, '.config'), { recursive: true })
+  writeFileSync(join(dir, '.config', 'CLAUDE.md'), '# hidden but real\n')
+  expect(subdirCandidates(dir, true).map((c) => c.path)).toContain(join(dir, '.config', 'CLAUDE.md'))
+})

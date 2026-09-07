@@ -21,8 +21,16 @@ const SUBDIR_FILES = ['CLAUDE.md', 'CLAUDE.local.md']
  * observed inside one is still classified and reported, so skipping them
  * costs no visibility. Directory cycles reachable through symlinks are
  * guarded by device and inode, mirroring rules.ts.
+ *
+ * `includeDependencies` opts back in, and `audit` is its only caller. The
+ * skip above is justified by there being a session to observe the load, and
+ * an audit runs on a checkout where nothing has run at all, so that
+ * justification does not hold: a dependency's CLAUDE.md would be invisible
+ * until the day it speaks, which is the day it is too late to be told. Only
+ * `.git` stays excluded either way -- it is large and holds nothing that
+ * governs a session.
  */
-export function subdirCandidates(cwd: string): Candidate[] {
+export function subdirCandidates(cwd: string, includeDependencies = false): Candidate[] {
   const out: Candidate[] = []
   const seenDirs = new Set<string>()
 
@@ -46,8 +54,9 @@ export function subdirCandidates(cwd: string): Candidate[] {
     }
 
     for (const name of entries) {
-      if (DEPENDENCY_SEGMENTS.includes(name)) continue
-      if (name.startsWith('.')) continue
+      if (name === '.git') continue
+      if (!includeDependencies && DEPENDENCY_SEGMENTS.includes(name)) continue
+      if (!includeDependencies && name.startsWith('.')) continue
       const full = join(dir, name)
       let est
       try {
