@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-336%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-351%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -228,6 +228,27 @@ will not fall back to a session from a different repository, because reporting o
 loads against another's expectations invents alarms that are not real. If nothing was recorded
 for the directory you are in, it says so plainly.
 
+## The `/kanon:whose` command
+
+`/kanon:whose <phrase>` answers "where did that rule come from". Claude holds every instruction
+file merged into one context with no attribution, so when it does something you did not expect,
+there is no way to ask which file told it to. This is that question.
+
+```
+WHOSE  "geen em dashes"                                   observed
+  user       ~/.claude/rules/schrijfstijl.md         line 24
+             "- **Geen em dashes (—).** Gebruik een komma of twee korte zinnen."
+```
+
+Matching is case-insensitive and runs over the file with whitespace collapsed, so a phrase that
+straddles a line break still matches. Instruction files are hard-wrapped, and the phrases you
+remember are usually the ones a line break splits.
+
+The answer worth having is often the empty one. If no governing file contains the phrase, it says
+so and names how many it searched, because that means the directive reached the session from a
+surface Kanon does not see yet, a skill, an MCP server or another plugin's hook, or it was never
+in an instruction file at all.
+
 ## The hooks Kanon installs
 
 | Event | What it does |
@@ -278,6 +299,11 @@ It reports which files reached your context and where they came from. It does no
 meaning, score them, rank them, or scan them for prompt injection. Deciding whether a dependency's
 instructions belong in your session is your call. Kanon's job is making sure you know they are
 there.
+
+`/kanon:whose` searches those files for a literal string and quotes the line it sits on. That is
+provenance, the same category as the digest and the quoted first directive: it locates text without
+forming any view of what the text means. Matches come back in origin order, never scored or ranked,
+and Kanon does not tell you whether a rule is a good one.
 
 It never blocks. `ConfigChange` can block a configuration change and Kanon declines to.
 
