@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-351%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-364%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -248,6 +248,35 @@ The answer worth having is often the empty one. If no governing file contains th
 so and names how many it searched, because that means the directive reached the session from a
 surface Kanon does not see yet, a skill, an MCP server or another plugin's hook, or it was never
 in an instruction file at all.
+
+## The `/kanon:audit` command
+
+`/kanon:audit` lists every instruction file that could govern a session in this checkout. It needs
+no session, so it works on a repository nothing has run in yet, which is the point: you have just
+cloned something, or an install added packages, and you want to know what got a voice before it
+uses one.
+
+```text
+AUDIT  /home/you/project                            ruleset 2026-08
+
+  FOREIGN    node_modules/bun-types/CLAUDE.md     on-demand
+             "Default to using Bun instead of Node.js."
+  user       ~/.claude/rules/style.md             launch
+  project    CLAUDE.md                            launch
+
+  1 foreign, 3 in total
+```
+
+That is a real run against this repository. The report cannot tell you about that file, because the
+report only ever describes what actually loaded, and a dependency's `CLAUDE.md` stays invisible
+until the day it speaks. This is the command that asks first.
+
+The second column is how a file *would* load, never a claim that it did. An `on-demand` file inside
+a dependency fires only when Claude reads something in that directory.
+
+The sweep deliberately enters dependency and dot directories, which the rest of Kanon refuses to
+do. That refusal is justified by there being a session to observe a load; an audit runs where
+nothing has run, so the justification does not hold. `.git` is never entered.
 
 ## The hooks Kanon installs
 
