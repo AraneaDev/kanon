@@ -5,7 +5,6 @@ import { buildReport } from '../src/report'
 import { normalise } from '../src/normalise'
 import type { Candidate, Event } from '../src/types'
 import { tmp } from './tmp'
-import { diff } from '../src/drift'
 
 const HOME = '/home/x/.claude'
 const ROOT = '/repo'

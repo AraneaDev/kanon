@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { realPath } from './paths'
 import { DEPENDENCY_SEGMENTS, type Origin } from './types'
@@ -58,12 +58,11 @@ export function hasDependencySegment(path: string, root: string): boolean {
  * import is not an origin; it is recorded separately as viaImport.
  */
 export function classify(path: string, root: string, homeConfig: string): Origin {
-  let p = resolve(path)
-  try {
-    p = realpathSync(p)
-  } catch {
-    // A file can be reported loaded and then removed. Classify the path as given.
-  }
+  // The shared resolver, not a local one: every path comparison in this
+  // codebase has to resolve both sides the same way, and a second copy is how
+  // two of them drift apart. It falls back to the path as given, which is what
+  // a file reported loaded and then removed needs.
+  const p = realPath(resolve(path))
 
   if (p === managedPath()) return 'managed'
   if (isUnder(p, homeConfig)) return 'user'
