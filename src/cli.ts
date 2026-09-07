@@ -8,7 +8,7 @@ import { COLOUR, colourEnabled } from './colour'
 import { discover } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
-import { normalise } from './normalise'
+import { currentRun, normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
@@ -130,7 +130,9 @@ function latestSessionFor(cwd: string): string | undefined {
 function collect(session: string, cwd: string): Report {
   const file = sessionFile(session)
   const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : []
-  const events = normalise(lines)
+  // Only this run's lines: a resumed session reuses its id, so the file can
+  // also hold an earlier run's loads, recorded in another directory.
+  const events = normalise(currentRun(lines))
 
   const home = claudeHome()
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
