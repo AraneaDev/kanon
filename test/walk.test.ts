@@ -101,3 +101,31 @@ test('deduplicates when cwd is under home, keeping user-scope rule', () => {
   const userScopeCandidate = candidates.find((c) => c.path === userScopeFile)
   expect(userScopeCandidate?.rule).toBe('user-scope')
 })
+
+/**
+ * A linked worktree carries a `.git` FILE rather than a directory, which is
+ * what `sessionRoot` stops at, so the worktree is the session root. The
+ * ancestor walk used to keep climbing past it and predict the enclosing
+ * checkout's CLAUDE.md, which Claude Code does not load from inside a
+ * worktree. Confirmed against a live log: a worktree run loaded only its own
+ * CLAUDE.md as Project. Predicting the outer one made it `missing` in every
+ * clean worktree session, and reported it FOREIGN if it ever did load, since
+ * it sits outside the root.
+ */
+test('does not climb above the session root', () => {
+  const dir = tmp('kanon-w-wt-')
+  const outer = join(dir, 'checkout')
+  const inner = join(outer, '.claude', 'worktrees', 'feature')
+  mkdirSync(join(outer, '.git'), { recursive: true })
+  mkdirSync(inner, { recursive: true })
+  writeFileSync(join(outer, 'CLAUDE.md'), '# the enclosing checkout\n')
+  writeFileSync(join(inner, 'CLAUDE.md'), '# the worktree\n')
+  // Exactly what `git worktree add` writes: a file, not a directory.
+  writeFileSync(join(inner, '.git'), `gitdir: ${join(outer, '.git', 'worktrees', 'feature')}\n`)
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+
+  const got = walkCandidates(inner, home, inner).map((c) => c.path)
+  expect(got).toContain(join(inner, 'CLAUDE.md'))
+  expect(got).not.toContain(join(outer, 'CLAUDE.md'))
+})

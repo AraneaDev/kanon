@@ -939,3 +939,42 @@ test('a file removed and restored moves through present -> absent-unreported -> 
   const back = await run(['report', '--session', 'five', '--cwd', repo], env)
   expect(back).not.toContain('appeared')
 })
+
+/**
+ * A session log is keyed by the session id, and a resumed session reuses
+ * that id. So one file can hold several runs, and a resume into a different
+ * directory (entering a worktree does exactly this) leaves the earlier run's
+ * loads in the same file, recorded against a different cwd.
+ *
+ * Attributing those to the current run classifies them against the wrong
+ * root, which is how a project's own CLAUDE.md came to be reported FOREIGN.
+ * record.sh already writes a SessionStart line per run, so the current run
+ * is everything at or after the last one.
+ */
+test('a resumed session ignores the previous run\'s loads', async () => {
+  const { home, repo, env } = isolated('kanon-cli-runs-')
+  const older = join(home, 'elsewhere')
+  mkdirSync(older, { recursive: true })
+  writeFileSync(join(older, 'CLAUDE.md'), '# a different directory\n')
+  writeFileSync(join(repo, 'CLAUDE.md'), '# this run\n')
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+
+  const start = (cwd: string) =>
+    JSON.stringify({ t: '2026-09-07T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd } })
+  const load = (cwd: string, file: string) =>
+    JSON.stringify({ t: '2026-09-07T00:00:01Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd, file_path: file, load_reason: 'session_start' } })
+
+  // Run one in a different directory, then run two here, one file.
+  writeFileSync(
+    join(home, 'sessions', 's.jsonl'),
+    [
+      start(older), load(older, join(older, 'CLAUDE.md')),
+      start(repo), load(repo, join(repo, 'CLAUDE.md')),
+    ].join('\n') + '\n',
+  )
+
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain('CLAUDE.md')
+  expect(out).not.toContain('FOREIGN')
+  expect(out).not.toContain('elsewhere')
+})

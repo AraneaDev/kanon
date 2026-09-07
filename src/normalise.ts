@@ -8,6 +8,40 @@ interface Wrapped {
 }
 
 /**
+ * The lines belonging to the most recent run in a session log.
+ *
+ * A log is named for the session id, and a resumed session reuses that id, so
+ * one file can hold several runs. Worse, a resume can happen in a different
+ * directory: entering a worktree does exactly that, and then the earlier run's
+ * loads sit in the same file recorded against a different cwd. Reading the
+ * whole file attributes those to the current run and classifies them against
+ * the wrong root, which is how a project's own CLAUDE.md was once reported
+ * FOREIGN (2026-09-07).
+ *
+ * `record.sh` already runs on SessionStart, so every run opens with one of
+ * those lines and the current run is everything from the last one onward. It
+ * is ordered before the brief's own hook, so at brief time the marker is
+ * present and no loads follow it yet -- which is what makes the brief fall
+ * back to prediction instead of claiming to have observed a previous run.
+ *
+ * A log with no marker at all yields every line, which is the behaviour that
+ * predates this function. No session gets worse than it was.
+ */
+export function currentRun(lines: string[]): string[] {
+  let start = 0
+  for (const [i, line] of lines.entries()) {
+    const text = line.trim()
+    if (!text) continue
+    try {
+      if ((JSON.parse(text) as { hook?: string }).hook === 'SessionStart') start = i
+    } catch {
+      // A line that will not parse cannot be trusted to mark a boundary.
+    }
+  }
+  return lines.slice(start)
+}
+
+/**
  * Turn recorder lines into events.
  *
  * `file_path`, `load_reason` and `memory_type` are the InstructionsLoaded

@@ -81,7 +81,7 @@ export function discover(
     if (!skippedByPath.has(path)) skippedByPath.set(path, importer ? { path, reason, importer } : { path, reason })
   }
 
-  const base = walkCandidates(cwd, homeConfig)
+  const base = walkCandidates(cwd, homeConfig, root)
   const rules = ruleCandidates([join(homeConfig, 'rules'), join(root, '.claude', 'rules')], onSkip)
   const subs = subdirCandidates(cwd)
 
