@@ -326,13 +326,24 @@ test('with no previous digest list the report carries no drift', () => {
  * subdir/CLAUDE.md a sibling session visited) printed as "vanished" for a
  * file sitting untouched in the repository. "Vanished" is the word this
  * tool reserves for a rule that was actually deleted.
+ *
+ * Final review, fix 1: an entry only reaches `absent-unreported` after a
+ * commit has already noticed its file is gone, so this now doubles as the
+ * "restored between the commit and this read" case -- the exists() recheck
+ * that state alone cannot cover, see diff()'s doc comment.
  */
-test('a file absent from this session but still on disk is not reported as vanished', () => {
+test('a file already recorded absent, but back on disk by the time of this read, is not reported as vanished', () => {
   const dir = tmp('kanon-report-drift-')
   const stillThere = join(dir, 'CLAUDE.md')
   writeFileSync(stillThere, '# still here, just not loaded this session\n')
   const previous = [
-    { path: stillThere, origin: 'project' as const, sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
+    {
+      path: stillThere,
+      origin: 'project' as const,
+      sha256: 'x',
+      lastSeen: '2026-08-27T00:00:00Z',
+      state: 'absent-unreported' as const,
+    },
   ]
 
   const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
@@ -340,14 +351,40 @@ test('a file absent from this session but still on disk is not reported as vanis
   expect(report.drift?.vanished).toEqual([])
 })
 
-test('a file genuinely deleted since the last session is reported as vanished', () => {
+test('a file recorded absent and still absent is reported as vanished', () => {
   const dir = tmp('kanon-report-drift-')
   const gone = join(dir, 'CLAUDE.md') // deliberately never created
   const previous = [
-    { path: gone, origin: 'project' as const, sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
+    {
+      path: gone,
+      origin: 'project' as const,
+      sha256: 'x',
+      lastSeen: '2026-08-27T00:00:00Z',
+      state: 'absent-unreported' as const,
+    },
   ]
 
   const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
 
   expect(report.drift?.vanished.map((f) => f.path)).toEqual([gone])
+})
+
+/**
+ * Final review, fix 1 again, and the whole point of the three-state field: a
+ * file gone from disk whose entry is still `present` -- meaning no commit has
+ * noticed the absence yet -- must not be reported as vanished on this read.
+ * Reporting it here would be exactly the old bug's shape at the report layer:
+ * `merge()` hasn't had the chance to move it to `absent-unreported` yet, so
+ * nothing has "recorded" the absence for a reader to have missed.
+ */
+test('a file gone from disk whose entry is still present is not yet reported as vanished', () => {
+  const dir = tmp('kanon-report-drift-')
+  const gone = join(dir, 'CLAUDE.md') // deliberately never created
+  const previous = [
+    { path: gone, origin: 'project' as const, sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', state: 'present' as const },
+  ]
+
+  const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
+
+  expect(report.drift?.vanished).toEqual([])
 })

@@ -369,14 +369,15 @@ test('brief treats an existing but empty event log as unobserved and predicts in
 })
 
 /**
- * The vanished filter (`verified()` in drift.ts) had no end-to-end
- * coverage. `test/brief.test.ts` only injects an already-filtered `Drift`
- * into `brief()` directly, so it can prove the rendering is right but can
- * never exercise the filter itself. This test drives it by planting a
- * snapshot with two files that are absent from the *predicted* set -- one
- * still on disk, one not -- and running the real `brief` CLI command with
- * no session recorded, which is the only way `briefInput` takes the
- * `predicted` branch. The sibling test below covers the observed basis.
+ * The vanished gate inside `diff()` (state must be `absent-unreported`, and
+ * `exists()` must also say the file is gone) had no end-to-end coverage.
+ * `test/brief.test.ts` only injects an already-filtered `Drift` into
+ * `brief()` directly, so it can prove the rendering is right but can never
+ * exercise the gate itself. This test drives it by planting a snapshot with
+ * two files that are absent from the *predicted* set -- one still on disk,
+ * one not -- and running the real `brief` CLI command with no session
+ * recorded, which is the only way `briefInput` takes the `predicted` branch.
+ * The sibling test below covers the observed basis.
  */
 test('a predicted brief suppresses a vanished file still on disk, but reports one that is actually gone', async () => {
   const { home, repo, env } = isolated('kanon-cli-drift-')
@@ -387,7 +388,7 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
   const stillOnDisk = join(repo, 'old-still-here.md')
   writeFileSync(stillOnDisk, '# not a candidate, just present\n')
   const actuallyGone = join(repo, 'deleted-rule.md')
-  // Deliberately never written: this is the file the filter must report.
+  // Deliberately never written: this is the file the gate must report.
 
   writeSnapshot(home, {
     v: SNAPSHOT_VERSION,
@@ -396,13 +397,13 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
     session: 'previous-session',
     t: '2026-08-27T00:00:00Z',
     files: [
-      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
-      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', present: true },
+      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' },
+      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' },
     ],
   })
 
   // No session file planted, so `briefInput` has no events and takes the
-  // predicted path. `verified()` narrows `vanished` on both bases; this is
+  // predicted path. diff()'s vanished gate applies on both bases; this is
   // the predicted half of that.
   const out = await run(['brief', '--cwd', repo], env)
   expect(out).toContain('(predicted)')
@@ -419,7 +420,7 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
  * had no gate at all, so a snapshot file this session never touched printed
  * as "vanished" even sitting untouched on disk. Drives both the `report`
  * and `brief` commands end to end against the same fixture so a regression
- * that only fixed one reader of `verified()` would still be caught.
+ * that only fixed one reader of the vanished gate would still be caught.
  */
 test('an observed report and brief both suppress a vanished file still on disk, but report one that is actually gone', async () => {
   const { home, repo, env } = isolated('kanon-cli-drift-observed-')
@@ -437,8 +438,8 @@ test('an observed report and brief both suppress a vanished file still on disk, 
     session: 'previous-session',
     t: '2026-08-27T00:00:00Z',
     files: [
-      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', present: true },
-      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', present: true },
+      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' },
+      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' },
     ],
   })
 
@@ -738,6 +739,34 @@ test('report without the flag never writes a snapshot', async () => {
   expect(readSnapshot(home, repo)).toBeNull()
 })
 
+/**
+ * Fix 2 (whole-branch review): merge() unions rather than replaces, so it
+ * never returns an empty list once a baseline exists -- the empty-snapshot
+ * guard in writeSnapshot() that used to stop an unobserved session from
+ * overwriting a real baseline is dead code against that union. Without a
+ * gate in cli.ts, a `--commit-state` run with no recorded events (a session
+ * Kanon never observed, standing in here for a `git checkout` or `bun
+ * install` racing SessionEnd) would still re-derive every entry's state from
+ * this arbitrary filesystem instant -- moving a file that merely raced the
+ * check to `absent-unreported` and back, unconnected to anything the session
+ * actually watched load.
+ */
+test('report --commit-state with no recorded events leaves an existing snapshot untouched', async () => {
+  const { home, repo } = seeded()
+  await run(['report', '--cwd', repo, '--commit-state'], { KANON_HOME: home })
+  const before = readSnapshot(home, repo)
+  expect(before?.files.some((f) => f.state === 'present')).toBe(true)
+
+  // Delete a file the baseline recorded present, then run --commit-state
+  // for a session with no log at all. If the empty-session guard is
+  // missing, this commit would still notice the deletion and move that
+  // entry to absent-unreported even though this "session" observed nothing.
+  rmSync(join(repo, 'vendor', 'p', 'CLAUDE.md'))
+  await run(['report', '--session', 'never-recorded', '--cwd', repo, '--commit-state'], { KANON_HOME: home })
+
+  expect(readSnapshot(home, repo)).toEqual(before)
+})
+
 test('a rewritten file is reported as changed on the next run', async () => {
   const { home, repo } = seeded()
   await run(['report', '--cwd', repo, '--commit-state'], { KANON_HOME: home })
@@ -833,10 +862,35 @@ test('a nested rule loaded by one session is not appeared when a later session r
 })
 
 /**
- * The branch-switch cycle. A file removed and restored must produce exactly
- * one `vanished` and never an `appeared`.
+ * The branch-switch cycle, reworked for the three-state lifecycle (whole-
+ * branch review, fix 1). Pre-fix, `present` flipped straight to `false` at
+ * the commit that first noticed a deletion, so a stage checking "not
+ * reported a second time" was true from the moment the file vanished --
+ * there was no window in which it could have been reported even once. Under
+ * the three states each stage now exercises a distinct transition, and each
+ * one fails on its own if that transition regresses:
+ *
+ *   session one   (commit): RULE.md observed loading -> recorded `present`.
+ *   session two   (commit): RULE.md deleted, never loaded. Its own diff()
+ *                  still sees the pre-commit `present` entry, so it must say
+ *                  nothing -- catches a regression that reports `vanished`
+ *                  the instant a file leaves disk, which is the exact shape
+ *                  of the silent-retirement bug (this run's own commit is
+ *                  the SessionEnd whose output nobody reads).
+ *                  Its commit then moves the entry to `absent-unreported`.
+ *   session three (commit): still absent. This run's diff() sees the
+ *                  `absent-unreported` entry session two's commit produced,
+ *                  so it must report `vanished` -- catches a regression
+ *                  where merge() skips straight from `present` to
+ *                  `absent-reported`, which would make every stage silent.
+ *                  Its commit then moves the entry to `absent-reported`.
+ *   session four  (commit): still absent, already reported once, so it must
+ *                  stay quiet -- catches a regression where merge() never
+ *                  advances past `absent-unreported`, which would repeat the
+ *                  same deletion forever.
+ *   session five  (no commit): restored. Known to Kanon, so never `appeared`.
  */
-test('a file removed and restored reports vanished once and is never appeared', async () => {
+test('a file removed and restored moves through present -> absent-unreported -> absent-reported -> present, reporting vanished exactly once', async () => {
   const { home, repo, env } = isolated('kanon-cli-cycle-')
   writeFileSync(join(repo, 'CLAUDE.md'), '# root\n')
   const rule = join(repo, 'RULE.md')
@@ -860,20 +914,28 @@ test('a file removed and restored reports vanished once and is never appeared', 
   log('one', [join(repo, 'CLAUDE.md'), rule])
   await run(['report', '--session', 'one', '--cwd', repo, '--commit-state'], env)
 
+  // Session two: deleted, never loaded, never yet recorded absent. Nobody
+  // could have seen this deletion, so it must be silent.
   rmSync(rule)
   log('two', [join(repo, 'CLAUDE.md')])
-  const gone = await run(['report', '--session', 'two', '--cwd', repo, '--commit-state'], env)
-  expect(gone).toContain('vanished')
-  expect(gone).toContain('RULE.md')
+  const silent = await run(['report', '--session', 'two', '--cwd', repo, '--commit-state'], env)
+  expect(silent).not.toContain('vanished')
 
-  // Still absent: the transition already fired, so it must not fire again.
+  // Session three: now recorded absent-unreported by session two's commit,
+  // and this session's own diff() is the first chance to report it.
   log('three', [join(repo, 'CLAUDE.md')])
-  const quiet = await run(['report', '--session', 'three', '--cwd', repo, '--commit-state'], env)
+  const seen = await run(['report', '--session', 'three', '--cwd', repo, '--commit-state'], env)
+  expect(seen).toContain('vanished')
+  expect(seen).toContain('RULE.md')
+
+  // Session four: already reported once, so it must not fire again.
+  log('four', [join(repo, 'CLAUDE.md')])
+  const quiet = await run(['report', '--session', 'four', '--cwd', repo, '--commit-state'], env)
   expect(quiet).not.toContain('vanished')
 
-  // Restored: known to Kanon, so not new.
+  // Session five: restored. Known to Kanon, so not new.
   writeFileSync(rule, '# rule\n')
-  log('four', [join(repo, 'CLAUDE.md'), rule])
-  const back = await run(['report', '--session', 'four', '--cwd', repo], env)
+  log('five', [join(repo, 'CLAUDE.md'), rule])
+  const back = await run(['report', '--session', 'five', '--cwd', repo], env)
   expect(back).not.toContain('appeared')
 })

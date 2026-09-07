@@ -18,7 +18,7 @@ function snap(over: Partial<Snapshot> = {}): Snapshot {
         origin: 'project',
         sha256: 'x',
         lastSeen: '2026-09-06T00:00:00Z',
-        present: true,
+        state: 'present',
       },
     ],
     ...over,
@@ -69,6 +69,23 @@ test('a v1 snapshot reads as no baseline', () => {
   const home = tmp('kanon-state-')
   mkdirSync(join(home, 'state'), { recursive: true })
   writeFileSync(snapshotPath(home, '/repo'), JSON.stringify({ ...snap(), v: 1 }))
+  expect(readSnapshot(home, '/repo')).toBeNull()
+})
+
+/**
+ * v2 predates the `present: boolean` -> `state: EntryState` change (whole-
+ * branch review, fix 1). Its entries carry `present` rather than `state`, so
+ * reading one in as v3 would leave every entry with `state: undefined`,
+ * which is neither a recognised EntryState nor caught by any guard downstream
+ * -- diff()'s `f.state === 'absent-unreported'` check would simply, silently,
+ * never match. The version bump is what turns that into an honest "no
+ * baseline" instead.
+ */
+test('a v2 snapshot reads as no baseline', () => {
+  const home = tmp('kanon-state-')
+  mkdirSync(join(home, 'state'), { recursive: true })
+  const v2 = { ...snap(), v: 2, files: [{ ...snap().files[0], present: true }] }
+  writeFileSync(snapshotPath(home, '/repo'), JSON.stringify(v2))
   expect(readSnapshot(home, '/repo')).toBeNull()
 })
 
