@@ -2,7 +2,7 @@
 
 # Kanon
 
-**Every rule governing this session, named.**
+**Every instruction file governing this session, named.**
 **Including the ones you thought loaded and didn't.**
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
@@ -333,6 +333,15 @@ there.
 provenance, the same category as the digest and the quoted first directive: it locates text without
 forming any view of what the text means. Matches come back in origin order, never scored or ranked,
 and Kanon does not tell you whether a rule is a good one.
+
+A directive can also reach a session from a skill, an MCP server, an output style, or another
+plugin's hook. Kanon does not model any of those, and the reason is structural rather than a matter
+of effort: Claude Code fires a hook when an instruction file loads, and fires nothing when a
+skill's text or a server's instructions reach the context. Everything Kanon reports about
+instruction files is either observed, or labelled as prediction it can be caught getting wrong.
+It has no such footing on those other surfaces, so it would be guessing with no way to learn it had
+guessed badly. `/kanon:whose` says so when a phrase turns up in no instruction file, which is the
+moment it matters.
 
 It never blocks. `ConfigChange` can block a configuration change and Kanon declines to.
 
