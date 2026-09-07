@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs'
+import { lstatSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { sessionRoot } from '../origin'
 import { DEPENDENCY_SEGMENTS, type Candidate, type SkipReason, type Skipped } from '../types'
@@ -20,7 +20,14 @@ const SUBDIR_FILES = ['CLAUDE.md', 'CLAUDE.local.md']
  * directories and dot-directories are skipped to bound the walk; a load
  * observed inside one is still classified and reported, so skipping them
  * costs no visibility. Directory cycles reachable through symlinks are
- * guarded by device and inode, mirroring rules.ts.
+ * guarded by device and inode, mirroring rules.ts, and a symlinked entry is
+ * skipped outright: a link can point anywhere, so following one would let the
+ * walk leave the checkout and report another tree's files as though they sat
+ * here. That became reachable in practice once the audit sweep began entering
+ * node_modules, which pnpm and bun fill with symlinks. The cost is a linked
+ * workspace package's own CLAUDE.md going unlisted, which is the safe
+ * direction: an audit describes this checkout, and a path outside it is not an
+ * answer to the question being asked.
  *
  * `includeDependencies` opts back in, and `audit` is its only caller. The
  * skip above is justified by there being a session to observe the load, and
@@ -60,10 +67,13 @@ export function subdirCandidates(cwd: string, includeDependencies = false): Cand
       const full = join(dir, name)
       let est
       try {
-        est = statSync(full)
+        // lstat, never stat: a symlink has to be recognised as itself before
+        // anything decides whether to walk into it.
+        est = lstatSync(full)
       } catch {
         continue
       }
+      if (est.isSymbolicLink()) continue
       if (est.isDirectory()) {
         visit(full, depth + 1)
       } else if (depth > 0 && SUBDIR_FILES.includes(name)) {

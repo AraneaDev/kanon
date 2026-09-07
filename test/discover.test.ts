@@ -248,3 +248,37 @@ test('the audit sweep enters dot-directories other than .git', () => {
   writeFileSync(join(dir, '.config', 'CLAUDE.md'), '# hidden but real\n')
   expect(subdirCandidates(dir, true).map((c) => c.path)).toContain(join(dir, '.config', 'CLAUDE.md'))
 })
+
+/**
+ * A symlink can point anywhere, so following one lets the walk leave the
+ * checkout entirely and report another tree's files as though they sat here.
+ * The audit sweep makes that reachable in practice: pnpm and bun fill
+ * node_modules with symlinks, and the sweep is the one caller that enters it.
+ * An audit describes this checkout, so a path that is not in it is not an
+ * answer to the question being asked.
+ */
+test('the walk does not follow a symlink out of the tree', () => {
+  const dir = tmp('kanon-escape-')
+  const outside = join(dir, 'elsewhere')
+  mkdirSync(outside, { recursive: true })
+  writeFileSync(join(outside, 'CLAUDE.md'), '# not part of the checkout\n')
+
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, 'node_modules'), { recursive: true })
+  symlinkSync(outside, join(repo, 'node_modules', 'linked'))
+
+  expect(subdirCandidates(repo, true)).toEqual([])
+})
+
+test('a symlinked subdirectory is not followed by the ordinary walk either', () => {
+  const dir = tmp('kanon-escape-plain-')
+  const outside = join(dir, 'elsewhere')
+  mkdirSync(outside, { recursive: true })
+  writeFileSync(join(outside, 'CLAUDE.md'), '# not part of the checkout\n')
+
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, 'docs'), { recursive: true })
+  symlinkSync(outside, join(repo, 'linked'))
+
+  expect(subdirCandidates(repo)).toEqual([])
+})
