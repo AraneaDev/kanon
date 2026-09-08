@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.14](https://github.com/AraneaDev/kanon/compare/v0.0.13...v0.0.14) (2026-09-08)
+
+
+### Continuous integration
+
+* scope the concurrency group to the pull request, not the base branch ([#31](https://github.com/AraneaDev/kanon/issues/31)) ([6dbf579](https://github.com/AraneaDev/kanon/commit/6dbf579c60b3cf96a5d127e39f78a62093fdafca))
+
 ## [0.0.13](https://github.com/AraneaDev/kanon/compare/v0.0.12...v0.0.13) (2026-09-08)
 
 
