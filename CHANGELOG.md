@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.13](https://github.com/AraneaDev/kanon/compare/v0.0.12...v0.0.13) (2026-09-08)
+
+
+### Continuous integration
+
+* cancel superseded runs and give every job a timeout ([#29](https://github.com/AraneaDev/kanon/issues/29)) ([dbc529e](https://github.com/AraneaDev/kanon/commit/dbc529e409e8fe20b1995249274c2a078f30ccc0))
+
 ## [0.0.12](https://github.com/AraneaDev/kanon/compare/v0.0.11...v0.0.12) (2026-09-07)
 
 
