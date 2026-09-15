@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.15](https://github.com/AraneaDev/kanon/compare/v0.0.14...v0.0.15) (2026-09-15)
+
+
+### Documentation
+
+* **readme:** credit the author and link the write-up ([#33](https://github.com/AraneaDev/kanon/issues/33)) ([f8535e8](https://github.com/AraneaDev/kanon/commit/f8535e83f37180bbf58267f217b045410d0b9d44))
+
 ## [0.0.14](https://github.com/AraneaDev/kanon/compare/v0.0.13...v0.0.14) (2026-09-08)
 
 
