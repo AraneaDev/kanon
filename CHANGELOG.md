@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.19](https://github.com/AraneaDev/kanon/compare/v0.0.18...v0.0.19) (2026-09-16)
+
+
+### Continuous integration
+
+* **release:** allow Release Please to be run by hand ([#41](https://github.com/AraneaDev/kanon/issues/41)) ([0830fb8](https://github.com/AraneaDev/kanon/commit/0830fb82c88f6397b074d9782207072296340c71))
+
 ## [0.0.18](https://github.com/AraneaDev/kanon/compare/v0.0.17...v0.0.18) (2026-09-16)
 
 
