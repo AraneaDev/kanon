@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.20](https://github.com/AraneaDev/kanon/compare/v0.0.19...v0.0.20) (2026-09-16)
+
+
+### Fixes
+
+* handle non-repository roots ([#43](https://github.com/AraneaDev/kanon/issues/43)) ([529e658](https://github.com/AraneaDev/kanon/commit/529e65834ae38b696cf59d4e0324827a2283f045))
+* ignore release configuration changes ([#45](https://github.com/AraneaDev/kanon/issues/45)) ([3d735a4](https://github.com/AraneaDev/kanon/commit/3d735a4a9c5a86b090b46247211220875ba88d76))
+
 ## [0.0.19](https://github.com/AraneaDev/kanon/compare/v0.0.18...v0.0.19) (2026-09-16)
 
 
