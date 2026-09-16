@@ -30,9 +30,10 @@ export function sessionRoot(cwd: string): string {
   for (;;) {
     if (existsSync(join(dir, '.git'))) return dir
     const up = dirname(dir)
-    if (up === dir) return start
+    if (up === dir) break
     dir = up
   }
+  return start
 }
 
 function isUnder(path: string, parent: string): boolean {
