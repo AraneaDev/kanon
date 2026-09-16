@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.18](https://github.com/AraneaDev/kanon/compare/v0.0.17...v0.0.18) (2026-09-16)
+
+
+### Continuous integration
+
+* **pr-title:** check out the base branch, not the pull request's pinned base commit ([#39](https://github.com/AraneaDev/kanon/issues/39)) ([6a5857e](https://github.com/AraneaDev/kanon/commit/6a5857ec4d37f4b79124f1dc4fbba51166fb597e))
+
 ## [0.0.17](https://github.com/AraneaDev/kanon/compare/v0.0.16...v0.0.17) (2026-09-16)
 
 
