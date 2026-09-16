@@ -27,8 +27,9 @@
 > bound by. This tool does the smaller version. It tells you which texts your session is actually
 > bound by, rather than which ones you believe it is.
 
-A Claude Code plugin. It records every instruction file that loads into a session, says where
-each one came from, and names the ones you expected that never arrived.
+**TL;DR:** Kanon records every instruction file that governs a Claude Code session and names its
+origin. It compares hook events with a reachability model of Claude Code's loader, then reports
+loaded, missing, quiet, foreign, and changed instructions with the evidence it has.
 
 A `CLAUDE.md` can reach your context from a lot of places: the project you are in, your own
 `~/.claude` setup, a directory above you, a subdirectory Claude wandered into, an `@path` import
@@ -244,7 +245,7 @@ there is no way to ask which file told it to. This is that question.
 ```
 WHOSE  "geen em dashes"                                   observed
   user       ~/.claude/rules/schrijfstijl.md         line 24
-             "- **Geen em dashes (—).** Gebruik een komma of twee korte zinnen."
+             "- **Geen em dashes.** Gebruik een komma of twee korte zinnen."
 ```
 
 Matching is case-insensitive and runs over the file with whitespace collapsed, so a phrase that
