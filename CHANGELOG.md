@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.16](https://github.com/AraneaDev/kanon/compare/v0.0.15...v0.0.16) (2026-09-15)
+
+
+### Continuous integration
+
+* **pr-title:** refuse a pull request title that is not a Conventional Commit ([#35](https://github.com/AraneaDev/kanon/issues/35)) ([660c755](https://github.com/AraneaDev/kanon/commit/660c755f66a78293e415d11a14c3d044aae64365))
+
 ## [0.0.15](https://github.com/AraneaDev/kanon/compare/v0.0.14...v0.0.15) (2026-09-15)
 
 
