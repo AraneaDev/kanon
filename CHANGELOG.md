@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.17](https://github.com/AraneaDev/kanon/compare/v0.0.16...v0.0.17) (2026-09-16)
+
+
+### Continuous integration
+
+* **pr-title:** share one commit-style rule between CI and the hook ([#37](https://github.com/AraneaDev/kanon/issues/37)) ([00b3207](https://github.com/AraneaDev/kanon/commit/00b32078e83115071c74696d3c391f7444d4a122))
+
 ## [0.0.16](https://github.com/AraneaDev/kanon/compare/v0.0.15...v0.0.16) (2026-09-15)
 
 
