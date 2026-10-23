@@ -195,3 +195,16 @@ test('NULs inside a truncated line leave it unparsed, never thrown', () => {
   expect(events).toHaveLength(1)
   expect(events[0]!.ev).toBe('unparsed')
 })
+
+/**
+ * A zero-fill overwrites bytes rather than inserting them. NULs inside a
+ * line may stand where characters were, so removing them could turn
+ * "/repo/CLAUDE.md" into "/reCLAUDE.md": a path outside the root, read as
+ * FOREIGN. Only the padding at the edges of a line is stripped.
+ */
+test('NULs that replaced characters inside a line leave it unparsed', () => {
+  const line = JSON.stringify({ t: 'x', hook: 'InstructionsLoaded', raw: { file_path: '/repo/CLAUDE.md', load_reason: 'session_start' } })
+    .replace('po/', '\u0000\u0000\u0000')
+
+  expect(normalise([line]).map((e) => e.ev)).toEqual(['unparsed'])
+})

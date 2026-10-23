@@ -42,16 +42,22 @@ export function currentRun(lines: string[]): string[] {
 }
 
 /**
- * A log line as it can be parsed: NUL bytes removed, then trimmed.
+ * A log line as it can be parsed: NUL padding at either edge removed, then
+ * trimmed.
  *
  * An unclean shutdown (seen under WSL, 2026-09-02) can zero-fill the tail of
  * an appended block, so a line arrives prefixed with NULs that record.sh
  * never wrote. `trim()` leaves `\0` alone, so such a line read as unparsed
- * and a damaged SessionStart stopped marking where its run began. A NUL is
- * never valid inside JSON text, so removing every one loses nothing.
+ * and a damaged SessionStart stopped marking where its run began.
+ *
+ * NULs inside a line are left in place on purpose. A zero-fill overwrites
+ * bytes rather than inserting them, so a NUL mid-line may stand where a
+ * character was: removing it could turn "/repo/CLAUDE.md" into
+ * "/reCLAUDE.md", a path outside the root read as FOREIGN. Left in, it keeps
+ * the line unparseable, which is the safe answer.
  */
 export function cleanLine(line: string): string {
-  return line.replaceAll('\u0000', '').trim()
+  return line.trim().replace(/^\u0000+|\u0000+$/g, '').trim()
 }
 
 /**
