@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeAtomic } from './atomic'
 import { SNAPSHOT_VERSION, type Snapshot } from './drift'
+import type { Ack, Steered } from './steering'
 
 /**
  * Everything here is a flat regular file directly under `state/`.
@@ -88,4 +89,91 @@ export function readWatermark(kanonHome: string, session: string): number {
 export function writeWatermark(kanonHome: string, session: string, lines: number): void {
   mkdirSync(stateDir(kanonHome), { recursive: true })
   writeAtomic(watermarkPath(kanonHome, session), `${lines}\n`)
+}
+
+export function steeringPath(kanonHome: string, root: string): string {
+  return join(stateDir(kanonHome), `${rootKey(root)}.steer.json`)
+}
+
+export function ackPath(kanonHome: string, root: string): string {
+  return join(stateDir(kanonHome), `${rootKey(root)}.ack.json`)
+}
+
+export function warnedPath(kanonHome: string, session: string): string {
+  return join(stateDir(kanonHome), `${session}.warned`)
+}
+
+const STEERING_VERSION = 1
+const ACK_VERSION = 1
+const WARNED_VERSION = 1
+
+/** A JSON object from a state file, or null for absent, unreadable or malformed. */
+function readObject(path: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function write(kanonHome: string, path: string, value: unknown): void {
+  mkdirSync(stateDir(kanonHome), { recursive: true })
+  writeAtomic(path, `${JSON.stringify(value)}\n`)
+}
+
+/**
+ * The steering model the session-start hook computed for a root, or null
+ * when there is none to trust. The hot-path hooks only ever read this, so a
+ * bad cache must read as "not computed", never as "nothing steers you".
+ * The stored root guards against a digest collision handing one checkout
+ * another's verdicts.
+ */
+export function readSteering(kanonHome: string, root: string): Steered[] | null {
+  const o = readObject(steeringPath(kanonHome, root))
+  if (!o || o.v !== STEERING_VERSION || o.root !== root || !Array.isArray(o.items)) return null
+  return o.items as Steered[]
+}
+
+export function writeSteering(kanonHome: string, root: string, items: Steered[]): void {
+  write(kanonHome, steeringPath(kanonHome, root), { v: STEERING_VERSION, root, t: new Date().toISOString(), items })
+}
+
+/**
+ * Acknowledgements for a root; none when the file is absent or unreadable.
+ * Losing them makes waved-off flags speak again, which is the safe failure.
+ */
+export function readAcks(kanonHome: string, root: string): Ack[] {
+  const o = readObject(ackPath(kanonHome, root))
+  if (!o || o.v !== ACK_VERSION || o.root !== root || !Array.isArray(o.acks)) return []
+  return o.acks as Ack[]
+}
+
+export function writeAcks(kanonHome: string, root: string, acks: Ack[]): void {
+  write(kanonHome, ackPath(kanonHome, root), { v: ACK_VERSION, root, acks })
+}
+
+export interface Warned {
+  /** The compaction epoch the paths were warned in. */
+  epoch: number
+  paths: string[]
+}
+
+/**
+ * What this session has already been warned about, and in which epoch.
+ * Unreadable reads as epoch 0 with nothing warned: a repeated warning is
+ * the safe failure, a lost one is not.
+ */
+export function readWarned(kanonHome: string, session: string): Warned {
+  const o = readObject(warnedPath(kanonHome, session))
+  const empty: Warned = { epoch: 0, paths: [] }
+  if (!o || o.v !== WARNED_VERSION) return empty
+  const { epoch, paths } = o
+  if (typeof epoch !== 'number' || !Number.isInteger(epoch) || epoch < 0) return empty
+  if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) return empty
+  return { epoch, paths }
+}
+
+export function writeWarned(kanonHome: string, session: string, warned: Warned): void {
+  write(kanonHome, warnedPath(kanonHome, session), { v: WARNED_VERSION, ...warned })
 }

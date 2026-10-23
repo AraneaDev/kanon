@@ -1,8 +1,24 @@
 import { expect, test } from 'bun:test'
-import { lstatSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SNAPSHOT_VERSION, type Snapshot } from '../src/drift'
-import { readSnapshot, readWatermark, snapshotPath, writeSnapshot, writeWatermark } from '../src/state'
+import {
+  ackPath,
+  readAcks,
+  readSnapshot,
+  readSteering,
+  readWarned,
+  readWatermark,
+  snapshotPath,
+  steeringPath,
+  warnedPath,
+  writeAcks,
+  writeSnapshot,
+  writeSteering,
+  writeWarned,
+  writeWatermark,
+} from '../src/state'
+import type { Ack, Steered } from '../src/steering'
 import { tmp } from './tmp'
 
 function snap(over: Partial<Snapshot> = {}): Snapshot {
@@ -111,8 +127,11 @@ test('state files are flat regular files directly under state/', () => {
   const home = tmp('kanon-state-')
   writeSnapshot(home, snap())
   writeWatermark(home, 'abc', 12)
+  writeSteering(home, '/repo', [steered])
+  writeAcks(home, '/repo', [ack])
+  writeWarned(home, 'abc', { epoch: 1, paths: ['/repo/CLAUDE.md'] })
   const names = readdirSync(join(home, 'state'))
-  expect(names.length).toBe(2)
+  expect(names.length).toBe(5)
   for (const name of names) {
     expect(lstatSync(join(home, 'state', name)).isFile()).toBe(true)
   }
@@ -138,4 +157,61 @@ test('a corrupt watermark reads as zero rather than NaN', () => {
   mkdirSync(join(home, 'state'), { recursive: true })
   writeFileSync(join(home, 'state', 'abc.turn'), 'garbage')
   expect(readWatermark(home, 'abc')).toBe(0)
+})
+
+const steered: Steered = {
+  path: '/repo/CLAUDE.md',
+  kind: 'instruction',
+  origin: 'project',
+  digest: 'd1',
+  verdict: { level: 'gone', evidence: 'names `src/x.ts`, which no longer exists' },
+  acknowledged: false,
+}
+const ack: Ack = { path: '/repo/CLAUDE.md', digest: 'd1', named: { 'src/x.ts': null }, t: '2026-10-24T00:00:00.000Z' }
+
+function corrupt(path: string, text: string): void {
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, text)
+}
+
+test('the steering cache round trips, per root', () => {
+  const home = tmp('kanon-state-')
+  expect(readSteering(home, '/repo')).toBeNull()
+  writeSteering(home, '/repo', [steered])
+  expect(readSteering(home, '/repo')).toEqual([steered])
+  expect(readSteering(home, '/other')).toBeNull()
+  const file = JSON.parse(readFileSync(steeringPath(home, '/repo'), 'utf8'))
+  expect(file.v).toBe(1)
+  expect(file.root).toBe('/repo')
+  expect(typeof file.t).toBe('string')
+})
+
+test('a malformed or wrong-version steering cache reads as absent', () => {
+  const home = tmp('kanon-state-')
+  for (const text of ['{ not json', 'null', '[]', JSON.stringify({ v: 2, root: '/repo', t: 'x', items: [] }), JSON.stringify({ v: 1, root: '/repo', t: 'x', items: 'no' })]) {
+    corrupt(steeringPath(home, '/repo'), text)
+    expect(readSteering(home, '/repo')).toBeNull()
+  }
+})
+
+test('acknowledgements round trip, and anything unreadable is none', () => {
+  const home = tmp('kanon-state-')
+  expect(readAcks(home, '/repo')).toEqual([])
+  writeAcks(home, '/repo', [ack])
+  expect(readAcks(home, '/repo')).toEqual([ack])
+  for (const text of ['{ not json', JSON.stringify({ v: 9, root: '/repo', acks: [ack] }), JSON.stringify({ v: 1, root: '/repo', acks: {} })]) {
+    corrupt(ackPath(home, '/repo'), text)
+    expect(readAcks(home, '/repo')).toEqual([])
+  }
+})
+
+test('the warned record round trips, and anything unreadable is epoch 0 with nothing warned', () => {
+  const home = tmp('kanon-state-')
+  expect(readWarned(home, 'abc')).toEqual({ epoch: 0, paths: [] })
+  writeWarned(home, 'abc', { epoch: 2, paths: ['/repo/CLAUDE.md'] })
+  expect(readWarned(home, 'abc')).toEqual({ epoch: 2, paths: ['/repo/CLAUDE.md'] })
+  for (const text of ['garbage', JSON.stringify({ v: 1, epoch: 'x', paths: [] }), JSON.stringify({ v: 1, epoch: 1, paths: [3] })]) {
+    corrupt(warnedPath(home, 'abc'), text)
+    expect(readWarned(home, 'abc')).toEqual({ epoch: 0, paths: [] })
+  }
 })

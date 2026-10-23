@@ -112,6 +112,8 @@ export const CLAIMED_ORIGINS: Record<string, Origin[]> = {
   Enterprise: ['managed'],
   Local: ['local', 'foreign'],
   Project: ['project', 'local', 'foreign'],
+  // Memory lives under the Claude config dir, so `user` is the only origin it can have.
+  AutoMem: ['user'],
 }
 
 /**
