@@ -74,9 +74,17 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   `CLAUDE.md`, where the file list looks identical and only the bytes moved. A rule Kanon has
   watched load before is never announced as new again, however long it has been since a session
   last loaded it. Drift is the report's to tell: the session-start brief leaves it out.
-- **Shows what else steered the session.** The report names each stale rule or memory, the
-  project's memories, the text every hook injected and which plugin it came from, the skills
-  invoked and each compaction.
+- **Shows what else steered the session.** Instruction files are only part of it. The report also
+  names the project's memories, an `AGENTS.md` that Claude Code fell back to, the text every hook
+  injected and which plugin it came from, the skills invoked and each compaction.
+- **Flags what has gone stale.** A rule or memory that names a file that no longer exists is
+  `gone`. One that names a function, flag or script found nowhere in the code, or a file with
+  commits since the note was written, is `may-be-stale`. Only a missing path counts as `gone`.
+  Claude Code's own config locations (`~/.claude/CLAUDE.md`, `.claude/rules/`, settings files),
+  slash commands, URLs, globs and placeholders are never judged, and if `git` or `grep` fails the
+  item gets no verdict rather than a false `gone`. Files under `~/.claude` get path checks only,
+  project files and this project's memories get the full checks, and managed or foreign files are
+  not checked.
 - **Speaks up mid-session.** An instruction file can load hours into a session, long after the
   session-start brief has gone out. When a foreign one does, Kanon names it at the next prompt.
 
@@ -139,7 +147,8 @@ is exactly these bytes; on a terminal it arrives coloured, as in the screenshot 
 Between LOADED and DRIFT sits everything else that steered the session, each section left out when
 it is empty. `STALE` lists every rule or memory with a verdict: `gone` when a path it names no
 longer exists, `may-stale` when a function, flag or script it names occurs nowhere any more or a
-file it names has commits since it was written, and `ok` once you have acknowledged it with
+file it names has commits since it was written (names come from inline code spans, `@imports` and
+bare path-shaped words, never from fenced code blocks), and `ok` once you have acknowledged it with
 `kanon ack`. `MEMORY` lists the project's memories. `INJECTED` totals the text each hook added to
 the context, per plugin and hook event, attributed through the installed plugins' `hooks.json`;
 Kanon's own injections are listed like any other. `SKILLS` and `COMPACTION` name the skills invoked
@@ -182,7 +191,8 @@ warning does not return. Do not raise gone items before you need them.
 A FOREIGN file is raised in Claude's first response. A `gone` item is raised only when Claude is
 about to rely on it, since most of them never matter to the session at hand. An item that only
 *may* be stale, because a file it names has commits since it was written, stays out of the brief.
-Computing the brief also writes the steering cache the mid-session hooks read.
+When the brief has to be cut to a size cap, a FOREIGN file outranks a `gone` item, which outranks a
+`missing` one. Computing the brief also writes the steering cache the mid-session hooks read.
 
 The brief is never coloured. Its reader is a model, and a model reads tokens: an escape code costs
 one and renders as nothing.
@@ -328,7 +338,7 @@ nothing has run, so the justification does not hold. `.git` is never entered.
 | `UserPromptSubmit` | Delivers a notice when a foreign file loaded since the last prompt. |
 | `PreToolUse` (`Read`) | Warns when Claude reads a memory that names something gone, once per compaction. |
 
-The last one runs on **every prompt**, which deserves saying plainly for a tool whose whole pitch
+`UserPromptSubmit` runs on **every prompt**, which deserves saying plainly for a tool whose whole pitch
 is that it stays out of the way. It exists because `InstructionsLoaded` has no decision control:
 Claude Code discards that event's output, so the hook that detects a mid-session load cannot tell
 anyone about it. Delivery has to happen somewhere that can speak.
@@ -373,7 +383,7 @@ want the data to live elsewhere.
 
 ## The ruleset
 
-Every report carries a `ruleset` stamp, currently `2026-08`. Kanon has to model how Claude Code
+Every report carries a `ruleset` stamp, currently `2026-10`. Kanon has to model how Claude Code
 resolves instruction files in order to say what it expected, and that behaviour belongs to
 Anthropic and can change. The stamp is there so a stale model is visible rather than silent.
 
@@ -394,7 +404,8 @@ forming any view of what the text means. Matches come back in origin order, neve
 and Kanon does not tell you whether a rule is a good one.
 
 A directive can also reach a session from a skill, an MCP server, an output style, or another
-plugin's hook. Kanon does not model any of those, and the reason is structural rather than a matter
+plugin's hook. The report lists the hook text, skills and compactions it can read back from the
+transcript, as facts. Kanon does not model any of those as instruction files, and the reason is structural rather than a matter
 of effort: Claude Code fires a hook when an instruction file loads, and fires nothing when a
 skill's text or a server's instructions reach the context. Everything Kanon reports about
 instruction files is either observed, or labelled as prediction it can be caught getting wrong.
