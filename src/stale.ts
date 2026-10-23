@@ -160,7 +160,7 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
       if (!n.text.includes('/') && inCode.has(n.text)) continue
       // A relative name is usually written from somewhere inside the tree,
       // not from the root or the item's directory: `normalise.ts` for
-      // `src/normalise.ts`, `discover/walk.ts`, or `rules/` for every rules
+      // `src/normalise.ts`, `discover/walk.ts`, or `specs/` for every specs
       // directory. Judging those against two directories alone produced a
       // new false gone each time a note named a file another way, so it is
       // gone only when no tracked path matches it at all. An unknown
@@ -224,10 +224,26 @@ function locate(text: string, root: string, home: string): string {
   return abs.length > 1 ? abs.replace(/\/+$/, '') : abs
 }
 
+/**
+ * `rules/` written for both rules directories, `settings.json` for any of
+ * the settings layers: a bare relative name equal to the trailing segments
+ * of a well-known location is shorthand for it, and `rules/` in a project's
+ * CLAUDE.md was reported gone. Whole segments only, and never a name
+ * anchored with `./`, `../`, `~` or `/`, which says where it is.
+ */
+function isShorthand(text: string): boolean {
+  if (/^(?:\.{1,2}\/|~|\/)/.test(text)) return false
+  const t = text.replace(/\/+$/, '')
+  return WELL_KNOWN_LOCATIONS.some((w) => {
+    const full = w.replace(/^~\//, '').replace(/\/+$/, '')
+    return full === t || full.endsWith(`/${t}`)
+  })
+}
+
 function isWellKnown(text: string, root: string, home: string): boolean {
   const at = locate(text, root, home)
   if (MANAGED_POLICY_DIRS.some((d) => at === d.slice(0, -1) || at.startsWith(d))) return true
-  return WELL_KNOWN_LOCATIONS.some((w) => locate(w, root, home) === at)
+  return isShorthand(text) || WELL_KNOWN_LOCATIONS.some((w) => locate(w, root, home) === at)
 }
 
 /**

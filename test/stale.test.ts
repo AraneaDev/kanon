@@ -181,19 +181,19 @@ describe('judge', () => {
     })
   })
 
-  /** `rules/` names every `rules/` directory in the tree, wherever it sits. */
+  /** `specs/` names every `specs/` directory in the tree, wherever it sits. */
   test('a directory name contained in a tracked path gives no verdict', () => {
-    const root = fake({ tracked: ['rules/a.md'] })
-    expect(judge(item('under `rules/`'), ROOT, HOME, root.probe)).toBeNull()
-    const deep = fake({ tracked: ['.claude/rules/sub/a.md'] })
-    expect(judge(item('under `rules/` and `rules/sub/`'), ROOT, HOME, deep.probe)).toBeNull()
+    const root = fake({ tracked: ['specs/a.md'] })
+    expect(judge(item('under `specs/`'), ROOT, HOME, root.probe)).toBeNull()
+    const deep = fake({ tracked: ['.claude/specs/sub/a.md'] })
+    expect(judge(item('under `specs/` and `specs/sub/`'), ROOT, HOME, deep.probe)).toBeNull()
   })
 
   test('a directory name matches tracked paths by whole segments only', () => {
-    const { probe } = fake({ tracked: ['src/myrules/a.md', 'rules.md', 'x/rulesets/b.md'] })
-    expect(judge(item('under `rules/`'), ROOT, HOME, probe)).toEqual({
+    const { probe } = fake({ tracked: ['src/myspecs/a.md', 'specs.md', 'x/specsets/b.md'] })
+    expect(judge(item('under `specs/`'), ROOT, HOME, probe)).toEqual({
       level: 'gone',
-      evidence: 'names `rules/`, which no longer exists',
+      evidence: 'names `specs/`, which no longer exists',
     })
   })
 
@@ -368,6 +368,20 @@ describe('well-known configuration locations', () => {
     const { probe } = fake({})
     expect(judge(item('`/etc/claude-code/managed-settings.json`'), ROOT, HOME, probe)).toBeNull()
     expect(judge(user('`/etc/claude-code/managed-settings.json`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  /** `rules/` for both rules directories, `settings.json` for any settings layer. */
+  test('the trailing segments of a well-known location, missing, give no verdict', () => {
+    const { probe } = fake({})
+    expect(judge(item('`rules/` `projects/` `settings.json` `CLAUDE.md` `.claude/rules/`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('a shorthand exempts whole trailing segments only, and never an anchored name', () => {
+    const { probe } = fake({})
+    expect(judge(item('see `les/`'), ROOT, HOME, probe)?.evidence).toBe('names `les/`, which no longer exists')
+    expect(judge(item('see `claude/rules/`'), ROOT, HOME, probe)?.evidence).toBe('names `claude/rules/`, which no longer exists')
+    expect(judge(item('see `rules/x.md`'), ROOT, HOME, probe)?.evidence).toBe('names `rules/x.md`, which no longer exists')
+    expect(judge(item('see `./rules/`'), ROOT, HOME, probe)?.evidence).toBe('names `./rules/`, which no longer exists')
   })
 
   test('a well-known location does not hide another gone name in the same item', () => {
