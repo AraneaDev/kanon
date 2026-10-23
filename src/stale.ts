@@ -152,6 +152,12 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
     : []
   const ignored = dirs.length ? probe.ignored(dirs) : new Set<string>()
 
+  // Only a path can be `gone`. A function, flag or script that no longer
+  // occurs may have been renamed after the note, or live somewhere grep does
+  // not look; asking the user mid-task over that was a reason to switch the
+  // tool off (user decision). So the first one missing gives may-be-stale,
+  // and only when no named path is gone.
+  let missing: Verdict | null = null
   for (const n of checkable) {
     if (n.kind === 'path') {
       if (found.get(n.text) !== null) continue
@@ -168,12 +174,15 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
       if (tracked === null || tracked.some((p) => tracks(p, n.text))) continue
       if (!underTrackedDir(n.text, tracked) || ignored.has(n.text)) continue
       return gone(n.text)
+    } else if (missing) {
+      continue
     } else if (n.kind === 'script') {
-      if (scripts && !scripts.has(n.text)) return gone(n.text)
+      if (scripts && !scripts.has(n.text)) missing = { level: 'may-be-stale', evidence: `names script \`${n.text}\`, which package.json no longer defines` }
     } else if (!inCode.has(n.text)) {
-      return gone(n.text)
+      missing = { level: 'may-be-stale', evidence: `names \`${n.text}\`, which no longer occurs in the code` }
     }
   }
+  if (missing) return missing
 
   const rel: string[] = []
   for (const hit of found.values()) {
@@ -247,9 +256,10 @@ function isWellKnown(text: string, root: string, home: string): boolean {
 }
 
 /**
- * Judge one item from the names it mentions. `gone` means a named thing is
- * absent where it should be; `may-be-stale` means a named file has commits
- * after the item was written. An item naming nothing checkable gets null.
+ * Judge one item from the names it mentions. `gone` means a named path is
+ * absent where it should be; `may-be-stale` means a named function, flag or
+ * script no longer occurs, or a named file has commits after the item was
+ * written. An item naming nothing checkable gets null.
  */
 export function judge(item: Item, root: string, home: string, probe: Probe): Verdict | null {
   const scope = scopeOf(item)

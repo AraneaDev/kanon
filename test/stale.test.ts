@@ -99,22 +99,26 @@ describe('judge', () => {
     expect(judge(item('`src/a.ts`'), ROOT, HOME, probe)).toBeNull()
   })
 
-  test('flag and symbol absent from code are gone; present are fine', () => {
-    const gone = fake({})
-    expect(judge(item('`--frobnicate`'), ROOT, HOME, gone.probe)).toEqual({
-      level: 'gone',
-      evidence: 'names `--frobnicate`, which no longer exists',
+  /** A missing function or flag may be a rename the note predates; it is never `gone`. */
+  test('flag and symbol absent from code are may-be-stale; present are fine', () => {
+    const flag = fake({})
+    expect(judge(item('`--frobnicate`'), ROOT, HOME, flag.probe)).toEqual({
+      level: 'may-be-stale',
+      evidence: 'names `--frobnicate`, which no longer occurs in the code',
     })
     const sym = fake({})
-    expect(judge(item('`parseThing()`'), ROOT, HOME, sym.probe)?.level).toBe('gone')
+    expect(judge(item('`parseThing()`'), ROOT, HOME, sym.probe)).toEqual({
+      level: 'may-be-stale',
+      evidence: 'names `parseThing`, which no longer occurs in the code',
+    })
     const ok = fake({ code: ['--frobnicate', 'parseThing'] })
     expect(judge(item('`--frobnicate` `parseThing()`'), ROOT, HOME, ok.probe)).toBeNull()
   })
 
-  test('script: missing is gone, present is fine, no package.json is ignored', () => {
+  test('script: missing is may-be-stale, present is fine, no package.json is ignored', () => {
     expect(judge(item('`bun run build`'), ROOT, HOME, fake({ scripts: ['test'] }).probe)).toEqual({
-      level: 'gone',
-      evidence: 'names `build`, which no longer exists',
+      level: 'may-be-stale',
+      evidence: 'names script `build`, which package.json no longer defines',
     })
     expect(judge(item('`bun run build`'), ROOT, HOME, fake({ scripts: ['build'] }).probe)).toBeNull()
     expect(judge(item('`bun run build`'), ROOT, HOME, fake({ scripts: null }).probe)).toBeNull()
@@ -127,10 +131,22 @@ describe('judge', () => {
     expect(calls.code[0]).toEqual(['--one', '--two', 'parseThing'])
   })
 
-  test('the first gone name in extraction order wins', () => {
+  test('a gone path wins over an earlier missing flag', () => {
     const { probe } = fake({})
     const v = judge(item('`--first` and `src/second.ts`'), ROOT, HOME, probe)
-    expect(v?.evidence).toBe('names `--first`, which no longer exists')
+    expect(v).toEqual({ level: 'gone', evidence: 'names `src/second.ts`, which no longer exists' })
+  })
+
+  test('the first missing symbol, flag or script in extraction order gives may-be-stale', () => {
+    const { probe } = fake({ scripts: ['test'] })
+    const v = judge(item('`bun run build` then `--first` and `parseThing()`'), ROOT, HOME, probe)
+    expect(v?.evidence).toBe('names script `build`, which package.json no longer defines')
+  })
+
+  test('a missing symbol wins over a changed file', () => {
+    const { probe } = fake({ exist: [`${ROOT}/src/a.ts`], changed: ['src/a.ts'] })
+    const v = judge(item('`src/a.ts` and `parseThing()`'), ROOT, HOME, probe)
+    expect(v).toEqual({ level: 'may-be-stale', evidence: 'names `parseThing`, which no longer occurs in the code' })
   })
 
   test('a slashless path missing on disk but present in code gives no verdict', () => {
@@ -273,7 +289,7 @@ describe('judge', () => {
 
   test('gone outranks may-be-stale and skips changedSince', () => {
     const { probe, calls } = fake({ exist: [`${ROOT}/src/a.ts`], changed: ['src/a.ts'] })
-    expect(judge(item('`src/a.ts` `--gone`'), ROOT, HOME, probe)?.level).toBe('gone')
+    expect(judge(item('`src/a.ts` `src/gone.ts`'), ROOT, HOME, probe)?.level).toBe('gone')
     expect(calls.changed).toEqual([])
   })
 

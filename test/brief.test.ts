@@ -96,14 +96,14 @@ test("the user's own files are counted, not named", () => {
 
 /** The pinned shape: header, the gone row with its evidence beneath, a blank line, the notes. */
 test('a gone memory is named with what is gone, and Claude is told to ask before relying on it', () => {
-  const steered = [item('/repo/CLAUDE.md', 'instruction', { origin: 'project' }), memory('release-flow.md', { verdict: goneVerdict('bun run release') })]
+  const steered = [item('/repo/CLAUDE.md', 'instruction', { origin: 'project' }), memory('release-flow.md', { verdict: goneVerdict('scripts/release.sh') })]
   const out = brief(input({ files: [file('/repo/CLAUDE.md', 'project')], steered }))
   const lines = out.split('\n')
 
   expect(lines.slice(0, 4)).toEqual([
     'KANON  1 instruction file and 1 memory steer this session (observed) · full list: /kanon',
     '  gone     ~/.claude/projects/-home-user-repo/memory/release-flow.md',
-    '           names `bun run release`, which no longer exists',
+    '           names `scripts/release.sh`, which no longer exists',
     '',
   ])
   expect(prose(out)).toBe(GONE_NOTE)

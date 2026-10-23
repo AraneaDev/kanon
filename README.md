@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-559%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-561%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -66,7 +66,7 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   merged into one context with no attribution, so it cannot tell a rule you wrote from one a
   dependency shipped, or a memory that still holds from one whose subject is gone. The brief
   counts what steers the session, names each foreign file with the directive it carries, and
-  names each rule or memory that points at a file, script or symbol that no longer exists.
+  names each rule or memory that points at a file that no longer exists.
 - **Says what changed.** Kanon remembers every instruction file it has seen govern a repository,
   along with a digest of each. A file it has never seen before is reported as `appeared`, one
   whose bytes moved as `changed`, and one that has left the disk as `vanished`, once, when it
@@ -126,7 +126,7 @@ knowing about names it:
 ```text
 KANON  6 instruction files and 3 memories steer this session (predicted) · full list: /kanon
   gone     ~/.claude/projects/-home-you-project/memory/release-flow.md
-           names `bun run release`, which no longer exists
+           names `scripts/release.sh`, which no longer exists
   FOREIGN  vendor/phpstan/CLAUDE.md
            "Always run phpstan before editing any PHP file."
 
