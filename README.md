@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-588%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-603%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -74,19 +74,47 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   `CLAUDE.md`, where the file list looks identical and only the bytes moved. A rule Kanon has
   watched load before is never announced as new again, however long it has been since a session
   last loaded it. Drift is the report's to tell: the session-start brief leaves it out.
+- **Shows what else steered the session.** The report names each stale rule or memory, the
+  project's memories, the text every hook injected and which plugin it came from, the skills
+  invoked and each compaction.
 - **Speaks up mid-session.** An instruction file can load hours into a session, long after the
   session-start brief has gone out. When a foreign one does, Kanon names it at the next prompt.
 
 ```text
-SESSION  /home/you/project           ruleset 2026-10
+SESSION  /home/you/project          ruleset 2026-10
 
 LOADED
   user       ~/.claude/rules/style.md             session_start
   project    CLAUDE.md                            session_start
   project    .claude/rules/style.md               session_start
+  project    docs/conventions.md                  session_start
+             imported by CLAUDE.md
   FOREIGN    vendor/phpstan/CLAUDE.md             nested_traversal
              untracked in this repo
   project    .claude/rules/security.md            session_start
+
+STALE
+  may-stale  ~/.claude/projects/-home-you-project/memory/config.md names `loadLegacyConfig`, which no longer occurs in the code
+  ok         ~/.claude/projects/-home-you-project/memory/old-ci.md acknowledged
+  gone       ~/.claude/projects/-home-you-project/memory/release-flow.md names `scripts/release.sh`, which no longer exists
+
+MEMORY
+  ~/.claude/projects/-home-you-project/memory/MEMORY.md
+  ~/.claude/projects/-home-you-project/memory/config.md
+  ~/.claude/projects/-home-you-project/memory/old-ci.md
+  ~/.claude/projects/-home-you-project/memory/release-flow.md
+
+INJECTED
+  example-plugin  SessionStart          8.6k chars
+  kanon           SessionStart          0.3k chars
+  unattributed    UserPromptSubmit      0.3k chars
+  kanon           PreToolUse:Read       0.2k chars
+
+SKILLS
+  example-plugin:brainstorming
+
+COMPACTION
+  11:40  auto  968k -> 25k tokens
 
 DRIFT
   compared with what has governed this repository before
@@ -100,11 +128,22 @@ NOT LOADED
   quiet      docs/CLAUDE.md                       on-demand, not triggered
 
 CONFIG CHANGED
-  06:58  skills  ~/.claude/skills/nl-taal/SKILL.md
+  09:58  skills  ~/.claude/skills/nl-taal/SKILL.md
 ```
 
-That is a real run, not a mock-up. Piped into a file or a pipe it is exactly these bytes; on a
-terminal it arrives coloured, as in the screenshot above.
+That is a real run, not a mock-up: `bash tools/screenshots/make.sh sample` plants the repository,
+the session log, the transcript and the memories, and prints it. The only edit is the session root
+on the first line, which names wherever the fixtures were planted. Piped into a file or a pipe it
+is exactly these bytes; on a terminal it arrives coloured, as in the screenshot above.
+
+Between LOADED and DRIFT sits everything else that steered the session, each section left out when
+it is empty. `STALE` lists every rule or memory with a verdict: `gone` when a path it names no
+longer exists, `may-stale` when a function, flag or script it names occurs nowhere any more or a
+file it names has commits since it was written, and `ok` once you have acknowledged it with
+`kanon ack`. `MEMORY` lists the project's memories. `INJECTED` totals the text each hook added to
+the context, per plugin and hook event, attributed through the installed plugins' `hooks.json`;
+Kanon's own injections are listed like any other. `SKILLS` and `COMPACTION` name the skills invoked
+and each compaction, with its token counts before and after.
 
 The last column is Claude Code's own word for why a file loaded, printed verbatim. `session_start`
 and `nested_traversal` are not the whole vocabulary: `compact` has been observed too, which is how

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { render } from '../src/render'
+import type { Steered } from '../src/steering'
 import type { Report } from '../src/types'
 import type { Drift } from '../src/drift'
 
@@ -17,6 +18,10 @@ function base(): Report {
     originDisagrees: [],
     skipped: [],
     drift: null,
+    steered: [],
+    injections: [],
+    skills: [],
+    compactions: [],
   }
 }
 
@@ -133,6 +138,10 @@ test('reproduces the worked example from the design doc column-for-column', () =
     modelDisagrees: [],
     skipped: [],
     drift: null,
+    steered: [],
+    injections: [],
+    skills: [],
+    compactions: [],
   }
   const out = render(r)
   expect(out).toContain('  user       ~/.claude/rules/context7.md          session_start')
@@ -355,7 +364,7 @@ test('the DRIFT section is omitted when nothing changed', () => {
   expect(render({ ...base(), drift: NO_DRIFT })).not.toContain('DRIFT')
 })
 
-test('DRIFT sits directly after LOADED and before NOT LOADED', () => {
+test('DRIFT sits after LOADED and before NOT LOADED', () => {
   const out = render({
     ...base(),
     drift: { appeared: [{ path: '/repo/new.md', origin: 'project', sha256: 'a' }], vanished: [], changed: [] },
@@ -363,4 +372,110 @@ test('DRIFT sits directly after LOADED and before NOT LOADED', () => {
   })
   expect(out.indexOf('LOADED')).toBeLessThan(out.indexOf('DRIFT'))
   expect(out.indexOf('DRIFT')).toBeLessThan(out.indexOf('NOT LOADED'))
+})
+
+// --- what steered the session: stale flags, memory, injections, skills, compactions
+
+function item(path: string, kind: Steered['kind'], verdict: Steered['verdict'], acknowledged = false): Steered {
+  return { path, kind, origin: kind === 'memory' ? 'user' : 'project', digest: 'd', verdict, acknowledged }
+}
+
+test('STALE names each flagged item at the pinned columns, acknowledged ones as ok', () => {
+  const r = base()
+  r.steered = [
+    item('/repo/memory/release-flow.md', 'memory', { level: 'gone', evidence: 'names `bun run release`, which no longer exists' }),
+    item('/repo/.claude/rules/api.md', 'instruction', { level: 'may-be-stale', evidence: '`src/api.ts` changed after this was written' }),
+    item('/repo/memory/old.md', 'memory', { level: 'gone', evidence: 'names `x`, which no longer exists' }, true),
+    item('/repo/CLAUDE.md', 'instruction', null),
+  ]
+  const lines = render(r).split('\n')
+  const at = lines.indexOf('STALE')
+  expect(at).toBeGreaterThan(-1)
+  expect(lines.slice(at, at + 4)).toEqual([
+    'STALE',
+    '  gone       memory/release-flow.md               names `bun run release`, which no longer exists',
+    '  may-stale  .claude/rules/api.md                 `src/api.ts` changed after this was written',
+    '  ok         memory/old.md                        acknowledged',
+  ])
+  // An item with no verdict is not a stale flag of any level.
+  expect(lines.slice(at + 4).join('\n')).not.toContain('CLAUDE.md')
+})
+
+test('STALE shows a symbol that no longer occurs as may-stale, not gone', () => {
+  const r = base()
+  r.steered = [item('/repo/.claude/rules/x.md', 'instruction', { level: 'may-be-stale', evidence: 'names `parseThing`, which no longer occurs in the code' })]
+  expect(render(r)).toContain('  may-stale  .claude/rules/x.md                   names `parseThing`, which no longer occurs in the code')
+})
+
+test('STALE strips control characters from evidence quoted out of a file', () => {
+  const r = base()
+  r.steered = [item('/repo/memory/a.md', 'memory', { level: 'gone', evidence: 'names `a\x1b[2Kb`, which no longer exists' })]
+  const out = render(r)
+  expect(out).not.toContain('\x1b')
+  expect(out).toContain('names `a[2Kb`, which no longer exists')
+})
+
+test('MEMORY lists every memory that steers the session, and no instruction file', () => {
+  const r = base()
+  const dir = join(homedir(), '.claude', 'projects', '-repo', 'memory')
+  r.steered = [
+    item('/repo/CLAUDE.md', 'instruction', null),
+    item(join(dir, 'MEMORY.md'), 'memory', null),
+    item(join(dir, 'release-flow.md'), 'memory', { level: 'gone', evidence: 'e' }),
+  ]
+  const lines = render(r).split('\n')
+  const at = lines.indexOf('MEMORY')
+  expect(lines.slice(at)).toEqual([
+    'MEMORY',
+    '  ~/.claude/projects/-repo/memory/MEMORY.md',
+    '  ~/.claude/projects/-repo/memory/release-flow.md',
+  ])
+  expect(lines.length).toBe(at + 3)
+})
+
+test('INJECTED totals the characters per plugin and hook, in order of first sighting', () => {
+  const r = base()
+  r.injections = [
+    { hookName: 'SessionStart', chars: 5000, command: 'a', plugin: 'superpowers' },
+    { hookName: 'PreToolUse:Read', chars: 400, command: null, plugin: 'unattributed' },
+    { hookName: 'SessionStart', chars: 3600, command: 'b', plugin: 'superpowers' },
+    { hookName: 'SessionStart', chars: 1200, command: 'c', plugin: 'kanon' },
+  ]
+  const lines = render(r).split('\n')
+  const at = lines.indexOf('INJECTED')
+  expect(lines.slice(at, at + 4)).toEqual([
+    'INJECTED',
+    '  superpowers     SessionStart          8.6k chars',
+    '  unattributed    PreToolUse:Read       0.4k chars',
+    '  kanon           SessionStart          1.2k chars',
+  ])
+})
+
+test('SKILLS names each skill invoked, and COMPACTION each compaction with its tokens', () => {
+  const r = base()
+  r.skills = [{ name: 'superpowers:brainstorming', path: '/x/SKILL.md' }]
+  r.compactions = [{ t: '2026-10-24T21:40:12.000Z', trigger: 'auto', preTokens: 968_000, postTokens: 25_000 }]
+  const lines = render(r).split('\n')
+  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 2)).toEqual(['SKILLS', '  superpowers:brainstorming'])
+  expect(lines.slice(lines.indexOf('COMPACTION'), lines.indexOf('COMPACTION') + 2)).toEqual(['COMPACTION', '  21:40  auto  968k -> 25k tokens'])
+})
+
+test('each steering section is omitted when it has nothing to say', () => {
+  const r = base()
+  r.steered = [item('/repo/CLAUDE.md', 'instruction', null)]
+  const out = render(r)
+  for (const heading of ['STALE', 'MEMORY', 'INJECTED', 'SKILLS', 'COMPACTION']) expect(out).not.toContain(heading)
+})
+
+test('the steering sections sit after LOADED and before DRIFT, in a fixed order', () => {
+  const r = base()
+  r.steered = [item('/repo/memory/a.md', 'memory', { level: 'gone', evidence: 'e' })]
+  r.injections = [{ hookName: 'SessionStart', chars: 10, command: null, plugin: 'unattributed' }]
+  r.skills = [{ name: 's', path: '' }]
+  r.compactions = [{ t: '2026-10-24T21:40:00Z', trigger: 'manual', preTokens: 1000, postTokens: 1000 }]
+  r.drift = { appeared: [{ path: '/repo/new.md', origin: 'project', sha256: 'a' }], vanished: [], changed: [] }
+  const lines = render(r).split('\n')
+  const order = ['LOADED', 'STALE', 'MEMORY', 'INJECTED', 'SKILLS', 'COMPACTION', 'DRIFT'].map((h) => lines.indexOf(h))
+  expect(order.every((i) => i > -1)).toBe(true)
+  expect([...order].sort((a, b) => a - b)).toEqual(order)
 })

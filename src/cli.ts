@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
+import { ownerOf, pluginIndex } from './attribution'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
@@ -167,7 +168,13 @@ function latestSessionFor(cwd: string): string | undefined {
   return undefined
 }
 
-function collect(session: string, cwd: string): Report {
+/**
+ * The report for one session. `withSteering` adds what else steered it --
+ * stale flags, memories, hook injections, skills, compactions -- which only
+ * `report` prints; `brief`, `whose` and `alarm` read loads alone and do not
+ * pay for a plugin-cache walk or a staleness judgement they would discard.
+ */
+function collect(session: string, cwd: string, withSteering = false): Report {
   const file = sessionFile(session)
   const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : []
   // Only this run's lines: a resumed session reuses its id, so the file can
@@ -178,8 +185,40 @@ function collect(session: string, cwd: string): Report {
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
   const previous = readSnapshot(kanonHome(), root)
 
-  const { instructions } = transcriptFacts(events)
-  return buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null, instructions)
+  // One run-scoped read of the transcript serves every section built from it.
+  const facts = transcriptFacts(events)
+  const report = buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null, facts.instructions)
+  return withSteering ? { ...report, ...steeredBy(report, events, facts, home) } : report
+}
+
+/**
+ * What else steered the session, each part in its own guard: these are
+ * courtesies, and none of them may stop the report the loads already make.
+ *
+ * Staleness comes from the cache the brief wrote at session start when there
+ * is one, since that holds the user's acks as `kanon ack` last left them;
+ * otherwise it is judged here exactly as the brief judges it, and not
+ * cached, because writing the hot path's state is the brief's job.
+ */
+function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home: string): Pick<Report, 'steered' | 'injections' | 'skills' | 'compactions'> {
+  let steered: Steered[] = []
+  try {
+    steered = readSteering(kanonHome(), report.root) ?? judgeSteering(report.root, report.loaded, events, facts) ?? []
+  } catch {
+    // No stale flags is the honest answer to a failure to judge.
+  }
+  let injections: Report['injections'] = []
+  try {
+    const index = pluginIndex(join(home, 'plugins', 'cache'))
+    injections = facts.injections.map((i) => ({ ...i, plugin: ownerOf(i.command, index) }))
+  } catch {
+    // Attribution is a courtesy; see attribution.ts.
+  }
+  // A skill is listed again each time the transcript restates what has been
+  // invoked, so a name is shown once, where it was first seen.
+  const names = new Set<string>()
+  const skills = facts.skills.filter((s) => !names.has(s.name) && names.add(s.name))
+  return { steered, injections, skills, compactions: facts.compactions }
 }
 
 /**
@@ -341,23 +380,8 @@ function writtenAt(root: string, path: string, kind: Steered['kind']): Date {
  * costs the hot path its notes, never this brief its verdicts.
  */
 function steering(root: string, files: Classified[], events: Event[]): Steered[] {
-  const transcript = arg('transcript') || transcriptOf(events)
-  let steered: Steered[]
-  try {
-    steered = steer({
-      root,
-      // The user's home, not the Claude config dir: a note's `~/` means the
-      // former, and resolving it against the latter would call real files gone.
-      home: homedir(),
-      instructions: files,
-      memoryDir: transcript ? join(dirname(transcript), 'memory') : null,
-      facts: transcriptFacts(events),
-      probe: gitProbe(root),
-      written: (path, kind) => writtenAt(root, path, kind),
-      read: readBounded,
-      acks: readAcks(kanonHome(), root),
-    })
-  } catch {
+  const steered = judgeSteering(root, files, events, transcriptFacts(events))
+  if (steered === null) {
     return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
   }
   try {
@@ -366,6 +390,32 @@ function steering(root: string, files: Classified[], events: Event[]): Steered[]
     // Housekeeping for the hot path; see above.
   }
   return steered
+}
+
+/**
+ * The steering model for a root, judged now and not cached, or null when
+ * judging failed. Shared by the brief and the report so the two judge with
+ * the same probe, the same home and the same memory directory.
+ */
+function judgeSteering(root: string, files: Classified[], events: Event[], facts: TranscriptFacts): Steered[] | null {
+  const transcript = arg('transcript') || transcriptOf(events)
+  try {
+    return steer({
+      root,
+      // The user's home, not the Claude config dir: a note's `~/` means the
+      // former, and resolving it against the latter would call real files gone.
+      home: homedir(),
+      instructions: files,
+      memoryDir: transcript ? join(dirname(transcript), 'memory') : null,
+      facts,
+      probe: gitProbe(root),
+      written: (path, kind) => writtenAt(root, path, kind),
+      read: readBounded,
+      acks: readAcks(kanonHome(), root),
+    })
+  } catch {
+    return null
+  }
 }
 
 function briefInput(session: string | undefined, cwd: string): BriefInput {
@@ -472,7 +522,7 @@ function runReport(session: string | undefined, cwd: string): void {
     console.log(`kanon: no recorded session found for ${cwd}`)
     return
   }
-  const report = collect(session, cwd)
+  const report = collect(session, cwd, true)
   // Two renderings of one report, and the plain one is the record. Colour
   // is a property of the terminal it is being printed to, never of the
   // report itself, so the file on disk -- read back later, by anything --

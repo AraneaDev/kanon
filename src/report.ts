@@ -195,5 +195,7 @@ export function buildReport(
   // rather than called inside diff() so that diff stays pure.
   const drift: Drift | null = previous === null ? null : diff(previous, digest(loaded), existsSync)
 
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift }
+  // What else steered the session is filled in by cli.ts, which holds the
+  // transcript and the steering cache; this function stays about loads.
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift, steered: [], injections: [], skills: [], compactions: [] }
 }

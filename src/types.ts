@@ -1,4 +1,6 @@
 import type { Drift } from './drift'
+import type { Steered } from './steering'
+import type { Injection, TranscriptFacts } from './transcript'
 
 export type Origin = 'managed' | 'user' | 'foreign' | 'local' | 'project'
 
@@ -88,6 +90,20 @@ export interface Report {
    * statements: the first is "I cannot say", the second is "nothing moved".
    */
   drift: Drift | null
+  /**
+   * Everything else that steered the session, shown between LOADED and
+   * DRIFT. All four are empty when nothing was found or nothing could be
+   * read: they are courtesies, and none of them may cost the report.
+   *
+   * `steered` is the judged model, instruction files and memories alike,
+   * from the steering cache the brief wrote or computed fresh.
+   */
+  steered: Steered[]
+  /** Each hook injection of this run, with the plugin believed to own its command. */
+  injections: Array<Injection & { plugin: string }>
+  /** Skills invoked in this run, first sighting of each name. */
+  skills: TranscriptFacts['skills']
+  compactions: TranscriptFacts['compactions']
 }
 
 /**

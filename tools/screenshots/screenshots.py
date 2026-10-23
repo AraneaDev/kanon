@@ -374,11 +374,115 @@ def shot_admits():
            ASSETS / "admits.webp", cols=136)
 
 
+def steering(home, repo, claude):
+    """Plant everything besides instruction files that steers a session.
+
+    Claude Code keeps a project's memory beside its transcripts, in a
+    directory named after the project path, so both go under the planted
+    ~/.claude exactly where a real session would put them. The transcript
+    holds what the report reads out of it: hook injections, a skill, a
+    compaction. Its record shapes follow test/fixtures/transcript/; every
+    value is invented.
+
+    The injections are attributed the way the report attributes real ones,
+    through installed plugins' hooks.json files. Kanon's own entry is this
+    repository's hooks/hooks.json, copied in, so Kanon's own injections are
+    attributed by the same code path as anyone else's.
+
+    The session log gains the SessionStart that names the transcript. It goes
+    first, because a run starts at its SessionStart and nothing before one
+    belongs to it.
+    """
+    import json
+    project = claude / "projects" / "-home-you-project"
+    transcript = project / "demo.jsonl"
+    memory = project / "memory"
+    write(memory / "MEMORY.md", "- [Release flow](release-flow.md)\n- [Old CI](old-ci.md)\n- [Config](config.md)\n")
+    write(memory / "release-flow.md", "Cut a release with `scripts/release.sh`.\n")
+    write(memory / "old-ci.md", "CI is defined in `.github/workflows/legacy.yml`.\n")
+    write(memory / "config.md", "Settings are read by `loadLegacyConfig()`.\n")
+
+    other = "${CLAUDE_PLUGIN_ROOT}/hooks/session-start"
+    write(claude / "plugins" / "cache" / "example-market" / "example-plugin" / "1.0.0" / "hooks" / "hooks.json",
+          json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": other}]}]}}))
+    kanon_hooks = (ROOT / "hooks" / "hooks.json").read_text()
+    write(claude / "plugins" / "cache" / "aranea" / "kanon" / "1.0.0" / "hooks" / "hooks.json", kanon_hooks)
+    commands = {}
+    for event, groups in json.loads(kanon_hooks)["hooks"].items():
+        for group in groups:
+            for h in group["hooks"]:
+                commands.setdefault(event, []).append(h["command"])
+    kanon_start = next(c for c in commands["SessionStart"] if "session-start" in c)
+    kanon_read = commands["PreToolUse"][0]
+
+    def injected(t, hook, command, text):
+        """A hook's stdout and the context it added, as two attachments."""
+        out = []
+        if command:
+            stdout = json.dumps({"hookSpecificOutput": {"hookEventName": hook.split(":")[0], "additionalContext": text}})
+            out.append({"type": "attachment", "timestamp": t,
+                        "attachment": {"type": "hook_success", "hookName": hook, "command": command, "stdout": stdout}})
+        out.append({"type": "attachment", "timestamp": t,
+                    "attachment": {"type": "hook_additional_context", "hookName": hook, "content": [text]}})
+        return out
+
+    records = (
+        injected("2026-08-27T09:14:03.000Z", "SessionStart", other, "You have example-plugin. " * 344)
+        + injected("2026-08-27T09:14:03.000Z", "SessionStart", kanon_start, "KANON  6 instruction files and 4 memories steer this session. " * 5)
+        + injected("2026-08-27T09:20:00.000Z", "UserPromptSubmit", None, "Remember the house style. " * 12)
+        + injected("2026-08-27T09:31:00.000Z", "PreToolUse:Read", kanon_read, "KANON  a memory names a file that no longer exists. " * 4)
+        + [
+            {"type": "attachment", "timestamp": "2026-08-27T09:40:00.000Z",
+             "attachment": {"type": "invoked_skills", "skills": [{"name": "example-plugin:brainstorming", "path": "/home/you/.claude/skills/brainstorming/SKILL.md"}]}},
+            {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-08-27T11:40:00.000Z",
+             "compactMetadata": {"trigger": "auto", "preTokens": 968000, "postTokens": 25000}},
+        ]
+    )
+    write(transcript, "".join(json.dumps(r) + "\n" for r in records))
+
+    log = home / "sessions" / "demo.jsonl"
+    start = json.dumps({"t": "2026-08-27T09:14:02Z", "hook": "SessionStart", "raw": {
+        "session_id": "demo", "hook_event_name": "SessionStart", "cwd": str(repo),
+        "source": "startup", "transcript_path": str(transcript)}})
+    log.write_text(start + "\n" + log.read_text())
+
+    # The brief writes the steering cache the report reads, and the user
+    # waves one flag off with `kanon ack`, exactly as the brief tells them to.
+    run_cli(["brief", "--session", "demo", "--cwd", str(repo)], home, claude, False)
+    run_cli(["ack", "--cwd", str(repo), "~/.claude/projects/-home-you-project/memory/old-ci.md"], home, claude, False)
+
+
+def sample():
+    """Print the README's sample report: the plain text of a real run.
+
+    The same planted repository and drift as the report shot, plus what else
+    steers the session. Printed rather than painted, because the README shows
+    the bytes a pipe receives. The one edit is the session root on the first
+    line, which is wherever the fixtures were planted; it is replaced with
+    /home/you/project and the gap before the ruleset recomputed by
+    render.ts's own rule, so the line is the one render.ts emits for that
+    root. Every other path is already shown relative to the root or to the
+    planted home.
+    """
+    home, repo, claude = plant("sample")
+    drifted(home, repo, claude)
+    steering(home, repo, claude)
+    text = run_cli(["report", "--session", "demo", "--cwd", str(repo)], home, claude, False).decode("utf8")
+    first, rest = text.split("\n", 1)
+    shown = "/home/you/project"
+    ruleset = first[first.index("ruleset "):]
+    sys.stdout.write(f"SESSION  {shown}{' ' * max(1, 27 - len(shown))}{ruleset}\n{rest}")
+
+
 SHOTS = {"report": shot_report, "brief": shot_brief, "admits": shot_admits, "audit": shot_audit}
 
 
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if which == "sample":
+        WORK.mkdir(parents=True, exist_ok=True)
+        os.chmod(WORK, 0o700)
+        return sample()
     WORK.mkdir(parents=True, exist_ok=True)
     os.chmod(WORK, 0o700)
     if which == "all":

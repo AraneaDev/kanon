@@ -1475,3 +1475,108 @@ test('notice stays silent for an acknowledged flagged rule', async () => {
   const { repo, env } = withFlaggedRule('kanon-notice-ack-', 'path_glob_match', true)
   expect((await run(['notice', '--session', 's', '--cwd', repo], env)).trim()).toBe('')
 })
+
+// --- the report shows everything that steered the session -------------------
+
+/**
+ * A session whose transcript carries one plugin's SessionStart injection, a
+ * skill and a compaction, with an installed plugin cache that ships the hook
+ * command. Values are synthetic. The first record predates the run's start
+ * and must not be counted: one transcript spans every run of a session.
+ */
+function withTranscript(prefix: string) {
+  const { home, repo, env } = isolated(prefix)
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
+  const claude = join(home, 'claude')
+  const command = '"${CLAUDE_PLUGIN_ROOT}/hooks/start.sh"'
+  const hooksDir = join(claude, 'plugins', 'cache', 'example-market', 'example-plugin', '1.0.0', 'hooks')
+  mkdirSync(hooksDir, { recursive: true })
+  writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command }] }] } }))
+
+  const text = 'You have example-plugin. '.repeat(40)
+  const att = (timestamp: string, attachment: object) => JSON.stringify({ type: 'attachment', timestamp, attachment })
+  const transcript = join(home, 'transcript.jsonl')
+  writeFileSync(
+    transcript,
+    [
+      att('2026-10-23T23:00:00.000Z', { type: 'invoked_skills', skills: [{ name: 'earlier:run-skill', path: '/x' }] }),
+      att('2026-10-24T00:00:00.100Z', { type: 'hook_success', hookName: 'SessionStart', command, stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: text } }) }),
+      att('2026-10-24T00:00:00.200Z', { type: 'hook_additional_context', hookName: 'SessionStart', content: [text] }),
+      att('2026-10-24T00:00:00.300Z', { type: 'hook_additional_context', hookName: 'UserPromptSubmit', content: ['x'.repeat(400)] }),
+      att('2026-10-24T00:05:00.000Z', { type: 'invoked_skills', skills: [{ name: 'example-plugin:plan', path: '/home/user/skills/plan/SKILL.md' }] }),
+      att('2026-10-24T00:06:00.000Z', { type: 'invoked_skills', skills: [{ name: 'example-plugin:plan', path: '/home/user/skills/plan/SKILL.md' }] }),
+      JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: '2026-10-24T21:40:00.000Z', compactMetadata: { trigger: 'auto', preTokens: 968_000, postTokens: 25_000 } }),
+    ].join('\n') + '\n',
+  )
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  const lines = [
+    { t: '2026-10-24T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source: 'startup', transcript_path: transcript } },
+    { t: '2026-10-24T00:00:01Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: join(repo, 'CLAUDE.md'), load_reason: 'session_start' } },
+  ]
+  writeFileSync(join(home, 'sessions', 's.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+  return { home, repo, env: { ...env, CLAUDE_CONFIG_DIR: claude }, chars: text.length }
+}
+
+test('report names the plugin behind each hook injection, from the installed plugin cache', async () => {
+  const { repo, env, chars } = withTranscript('kanon-cli-injected-')
+  const out = (await run(['report', '--session', 's', '--cwd', repo], env)).split('\n')
+  const at = out.indexOf('INJECTED')
+  expect(at).toBeGreaterThan(-1)
+  expect(out[at + 1]).toBe(`  example-plugin  SessionStart          ${(chars / 1000).toFixed(1)}k chars`)
+  expect(out[at + 2]).toBe('  unattributed    UserPromptSubmit      0.4k chars')
+})
+
+test('report lists this run\'s skills once each, and its compactions', async () => {
+  const { repo, env } = withTranscript('kanon-cli-skills-')
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  const lines = out.split('\n')
+  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 3)).toEqual(['SKILLS', '  example-plugin:plan', ''])
+  expect(out).not.toContain('earlier:run-skill')
+  expect(out).toContain('COMPACTION\n  21:40  auto  968k -> 25k tokens')
+})
+
+/** Recorded the way withGoneMemory's transcript would be named by a real SessionStart. */
+function recordStart(home: string, repo: string, transcript: string): void {
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  const lines = [
+    { t: '2026-10-24T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source: 'startup', transcript_path: transcript } },
+    { t: '2026-10-24T00:00:01Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: join(repo, 'CLAUDE.md'), load_reason: 'session_start' } },
+  ]
+  writeFileSync(join(home, 'sessions', 's.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+}
+
+test('report judges staleness itself when no steering cache exists, and lists the memories', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-report-stale-')
+  recordStart(home, repo, transcript)
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain('STALE')
+  expect(out).toMatch(/\n {2}gone {7}\S*release-flow\.md +names `scripts\/release\.sh`, which no longer exists/)
+  expect(out).toContain(`MEMORY\n  ${memory}`)
+  // The report reads the cache; only the brief writes it.
+  expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
+})
+
+test('report reads the steering cache when present, and shows an acknowledged item as ok', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-report-acked-')
+  recordStart(home, repo, transcript)
+  const root = sessionRoot(repo)
+  const real = realpathSync(memory)
+  writeSteering(home, root, [
+    { path: real, kind: 'memory', origin: 'user', digest: hashFile(real), verdict: { level: 'gone', evidence: 'names `scripts/release.sh`, which no longer exists' }, acknowledged: true },
+  ])
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(out).toMatch(/\n {2}ok {9}\S*release-flow\.md +acknowledged/)
+  expect(out).not.toContain('which no longer exists')
+})
+
+test('a steering cache that cannot be parsed never stops the report', async () => {
+  const { home, repo, env, transcript } = withGoneMemory('kanon-cli-report-badcache-')
+  recordStart(home, repo, transcript)
+  const path = steeringPath(home, sessionRoot(repo))
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, '{not json')
+  const { out, code } = await runFull(['report', '--session', 's', '--cwd', repo], env)
+  expect(code).toBe(0)
+  expect(out).toContain('LOADED')
+  expect(out).toContain('STALE')
+})
