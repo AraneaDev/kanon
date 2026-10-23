@@ -146,6 +146,10 @@ describe('extractNames', () => {
     expect(paths('Install over `ssh://git@example.com/` or `git+ssh://example.com/x/y`, see file:///tmp/x/y.md.')).toEqual([])
   })
 
+  test('a path/to placeholder is not a path', () => {
+    expect(paths('Write `src/path/to/File.ts`, `path/to/x.md` or path/to/thing/ in prose.')).toEqual([])
+  })
+
   test('ordinary names are still taken', () => {
     expect(paths('Use `src/a.ts`, `~/.kanon/state/`, `/home/user/x.md` and `CLAUDE.md`.')).toEqual([
       'src/a.ts',
