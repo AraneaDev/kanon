@@ -150,6 +150,14 @@ describe('extractNames', () => {
     expect(paths('Write `src/path/to/File.ts`, `path/to/x.md` or path/to/thing/ in prose.')).toEqual([])
   })
 
+  test('an elided name is not a path', () => {
+    expect(paths('See `...pr1-ledger.md`, `src/.../x.ts`, `docs/…/y.md` and .../a/b.md.')).toEqual([])
+  })
+
+  test('a parent-relative name is still a path', () => {
+    expect(paths('See `../a.md` and ../x/y.md.')).toEqual(['../a.md', '../x/y.md'])
+  })
+
   test('ordinary names are still taken', () => {
     expect(paths('Use `src/a.ts`, `~/.kanon/state/`, `/home/user/x.md` and `CLAUDE.md`.')).toEqual([
       'src/a.ts',

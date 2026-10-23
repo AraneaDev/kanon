@@ -44,6 +44,9 @@ function notAPath(t: string): boolean {
   // `src/path/to/File.ts`: the conventional placeholder for "some path",
   // written in a note about how to write examples, and called gone.
   if (parts.some((p, i) => p === 'path' && parts[i + 1] === 'to')) return true
+  // `...pr1-ledger.md`, `src/.../x.ts`: a name with part of it left out,
+  // which can never resolve. `..` alone is the parent and stays a path.
+  if (t.includes('…') || parts.some((p) => p.startsWith('...'))) return true
   // `**/*.md`, `src/[ab].ts`: a glob, which matches files rather than
   // naming one. A rule describing path-scoped frontmatter was called gone.
   if (/[*?[\]]/.test(t)) return true
