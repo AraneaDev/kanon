@@ -44,20 +44,29 @@ export function gitProbe(root: string): Probe {
     exists,
 
     occursInCode(names) {
-      if (!names.length) return new Set()
+      // An empty pattern matches every line, and a newline would split one
+      // name into two patterns. Neither can be searched, so neither can be
+      // called missing.
+      const searchable = names.filter((n) => n !== '' && !/[\r\n]/.test(n))
+      const unsearchable = names.filter((n) => n === '' || /[\r\n]/.test(n))
+      if (!searchable.length) return new Set(names)
       let dir: string | null = null
       try {
         dir = mkdtempSync(join(tmpdir(), 'kanon-grep-'))
         const file = join(dir, 'patterns')
-        writeFileSync(file, names.join('\n') + '\n')
-        const r = git(root, ['grep', '-F', '-o', '-h', '--no-color', '-f', file, '--', '.', ':!*.md'])
+        writeFileSync(file, searchable.join('\n') + '\n')
+        // No `-o`: it reports only the leftmost-longest match at each
+        // position, so `foo` inside `foobar` would read as absent. Whole
+        // lines, checked with includes(), have no such blind spot. `-I`
+        // skips binary files, which only ever report "Binary file x matches".
+        const r = git(root, ['grep', '-F', '-h', '-I', '--no-color', '-f', file, '--', '.', ':!*.md'])
         if (!r) return new Set(names)
-        if (r.code === 1) return new Set()
+        if (r.code === 1) return new Set(unsearchable)
         // Not a repo, or grep itself broke: say nothing is missing rather
         // than invent a `gone` from a tool failure.
         if (r.code !== 0) return new Set(names)
-        const hits = new Set(r.out.split('\n').filter(Boolean))
-        return new Set(names.filter((n) => hits.has(n)))
+        const lines = r.out.split('\n').filter(Boolean)
+        return new Set([...unsearchable, ...searchable.filter((n) => lines.some((l) => l.includes(n)))])
       } catch {
         return new Set(names)
       } finally {

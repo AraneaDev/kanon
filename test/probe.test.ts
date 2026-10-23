@@ -37,6 +37,42 @@ describe('gitProbe.occursInCode', () => {
     expect(got).toEqual(new Set(['realThing']))
   })
 
+  test('a name occurring only inside a longer name is still found', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'foobar(1)\n' }, '2026-01-01T00:00:00Z')
+    expect(gitProbe(root).occursInCode(['foo', 'foobar'])).toEqual(new Set(['foo', 'foobar']))
+  })
+
+  test('an empty name is never searched and never throws; an absent name stays absent', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'x\n' }, '2026-01-01T00:00:00Z')
+    const got = gitProbe(root).occursInCode(['', 'absentName'])
+    expect(got.has('absentName')).toBe(false)
+    expect(got.has('')).toBe(true)
+  })
+
+  test('a name with a newline is dropped and counts as found', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'x\n' }, '2026-01-01T00:00:00Z')
+    const got = gitProbe(root).occursInCode(['a\nb', 'absentName'])
+    expect(got.has('a\nb')).toBe(true)
+    expect(got.has('absentName')).toBe(false)
+  })
+
+  test('a name starting with a dash is found', () => {
+    const root = repo()
+    commit(root, { 'a.ts': "const flag = '--fix'\n" }, '2026-01-01T00:00:00Z')
+    expect(gitProbe(root).occursInCode(['--fix'])).toEqual(new Set(['--fix']))
+  })
+
+  test('a name present only in a tracked binary file is not found', () => {
+    const root = repo()
+    writeFileSync(join(root, 'blob.bin'), Buffer.concat([Buffer.from('binaryOnlyName'), Buffer.from([0, 1, 2])]))
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-q', '-m', 'c'], '2026-01-01T00:00:00Z')
+    expect(gitProbe(root).occursInCode(['binaryOnlyName'])).toEqual(new Set())
+  })
+
   test('no match at all is an empty set', () => {
     const root = repo()
     commit(root, { 'a.ts': 'x\n' }, '2026-01-01T00:00:00Z')
