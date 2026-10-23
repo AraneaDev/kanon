@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hashFile, SNAPSHOT_VERSION } from '../src/drift'
 import { sessionRoot } from '../src/origin'
-import { readSnapshot, readSteering, readWatermark, steeringPath, writeAcks, writeSnapshot } from '../src/state'
+import { readAcks, readSnapshot, readSteering, readWatermark, steeringPath, writeAcks, writeSnapshot, writeSteering } from '../src/state'
+import type { Steered } from '../src/steering'
 import { tmp } from './tmp'
 
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts')
@@ -1229,4 +1230,206 @@ test('session-start.sh passes the transcript path to the brief', async () => {
   const i = args.indexOf('--transcript')
   expect(i).toBeGreaterThan(-1)
   expect(args[i + 1]).toBe('/home/user/.claude/projects/-home-user-repo/abc.jsonl')
+})
+
+// --- the Read warning and `kanon ack` --------------------------------------
+
+/**
+ * A memory flagged in a steering cache written directly, so `warn` can be
+ * driven without running discovery: on the hot path it only ever reads this.
+ */
+function withCachedMemory(prefix: string, verdict: Steered['verdict'], acknowledged = false) {
+  const { home, repo, env } = isolated(prefix)
+  const memoryDir = join(home, 'claude-projects', '-home-user-repo', 'memory')
+  mkdirSync(memoryDir, { recursive: true })
+  const memory = join(memoryDir, 'release-flow.md')
+  writeFileSync(memory, 'Cut a release with `scripts/release.sh`.\n')
+  const root = sessionRoot(repo)
+  writeSteering(home, root, [{ path: memory, kind: 'memory', origin: 'user', digest: hashFile(memory), verdict, acknowledged }])
+  return { home, repo, env, memory, root }
+}
+
+const GONE: Steered['verdict'] = { level: 'gone', evidence: 'names `scripts/release.sh`, which no longer exists' }
+
+/** Appends one SessionStart line per source to session `s`, the way record.sh does. */
+function starts(home: string, repo: string, ...sources: string[]): void {
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  for (const source of sources) {
+    const line = { t: '2026-10-24T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source } }
+    appendFileSync(join(home, 'sessions', 's.jsonl'), `${JSON.stringify(line)}\n`)
+  }
+}
+
+const warn = (path: string, repo: string, env: Record<string, string>, ...extra: string[]) =>
+  run(['warn', '--session', 's', '--path', path, '--cwd', repo, ...extra], env)
+
+test('warn names a gone memory once per compaction epoch, and again after every compact', async () => {
+  const { home, repo, env, memory } = withCachedMemory('kanon-cli-warn-epoch-', GONE)
+  starts(home, repo, 'startup')
+
+  const first = await warn(memory, repo, env)
+  expect(first.trim()).toBe(
+    `KANON  ${memory} names \`scripts/release.sh\`, which no longer exists. Before relying on it, ask the user whether it still holds. If it does, run: bun "${CLI}" ack --cwd "${sessionRoot(repo)}" "${memory}"`,
+  )
+  expect(await warn(memory, repo, env)).toBe('')
+
+  starts(home, repo, 'compact')
+  expect(await warn(memory, repo, env)).toContain('KANON  ')
+  expect(await warn(memory, repo, env)).toBe('')
+
+  // The current run starts at the last SessionStart, so it never holds more
+  // than one compact: a second one must still open a new epoch.
+  starts(home, repo, 'compact')
+  expect(await warn(memory, repo, env)).toContain('KANON  ')
+})
+
+test('warn --hook speaks on both PreToolUse channels and never returns a decision', async () => {
+  const { home, repo, env, memory } = withCachedMemory('kanon-cli-warn-hook-', GONE)
+  starts(home, repo, 'startup')
+  const parsed = JSON.parse((await warn(memory, repo, env, '--hook')).trim()) as Record<string, unknown>
+  const hso = parsed.hookSpecificOutput as Record<string, unknown>
+  expect(hso.hookEventName).toBe('PreToolUse')
+  expect(hso.additionalContext).toBe(parsed.systemMessage)
+  expect(String(parsed.systemMessage)).toContain('which no longer exists')
+  expect(JSON.stringify(parsed)).not.toMatch(/decision/i)
+})
+
+test('a may-be-stale memory gets the one-line note', async () => {
+  const { home, repo, env, memory } = withCachedMemory('kanon-cli-warn-stale-', { level: 'may-be-stale', evidence: '`src/x.ts` changed after this was written' })
+  starts(home, repo, 'startup')
+  expect((await warn(memory, repo, env)).trim()).toBe(`KANON  note: ${memory} may be stale: \`src/x.ts\` changed after this was written.`)
+})
+
+test('warn says nothing about a file the cache does not flag', async () => {
+  const { home, repo, env, memory } = withCachedMemory('kanon-cli-warn-clean-', null)
+  starts(home, repo, 'startup')
+  expect(await warn(memory, repo, env)).toBe('')
+  const elsewhere = join(repo, 'notes.md')
+  writeFileSync(elsewhere, 'Run `scripts/release.sh`.\n')
+  expect(await warn(elsewhere, repo, env)).toBe('')
+})
+
+test('an acknowledged memory is silent on Read', async () => {
+  const { home, repo, env, memory } = withCachedMemory('kanon-cli-warn-acked-', GONE, true)
+  starts(home, repo, 'startup')
+  expect(await warn(memory, repo, env)).toBe('')
+})
+
+test('warn finds a symlinked memory by the path it resolves to', async () => {
+  const { home, repo, env } = isolated('kanon-cli-warn-link-')
+  const target = join(home, 'dotfiles', 'release-flow.md')
+  mkdirSync(join(home, 'dotfiles'), { recursive: true })
+  writeFileSync(target, 'Cut a release with `scripts/release.sh`.\n')
+  const memoryDir = join(home, 'claude-projects', '-home-user-repo', 'memory')
+  mkdirSync(memoryDir, { recursive: true })
+  const link = join(memoryDir, 'release-flow.md')
+  symlinkSync(target, link)
+  writeSteering(home, sessionRoot(repo), [{ path: realpathSync(link), kind: 'memory', origin: 'user', digest: hashFile(target), verdict: GONE, acknowledged: false }])
+  starts(home, repo, 'startup')
+
+  expect(await warn(link, repo, env)).toContain('which no longer exists')
+})
+
+test('warn refuses a session id that would write outside the state directory', async () => {
+  const { home, repo, env, memory } = withCachedMemory('kanon-cli-warn-sid-', GONE)
+  const out = await run(['warn', '--session', '../escape', '--path', memory, '--cwd', repo], env)
+  expect(out).toBe('')
+  expect(existsSync(join(home, 'escape.warned'))).toBe(false)
+})
+
+test('ack then warn is silent, and the next brief is clean', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-ack-')
+  await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env)
+  starts(home, repo, 'startup')
+  expect(await warn(memory, repo, env)).toContain('which no longer exists')
+  starts(home, repo, 'compact')
+
+  const out = await run(['ack', '--cwd', repo, memory], env)
+  expect(out.trim()).toBe(`kanon: acknowledged ${memory}`)
+  const acks = readAcks(home, sessionRoot(repo))
+  expect(acks.map((a) => a.path)).toEqual([realpathSync(memory)])
+  expect(acks[0]?.digest).toBe(hashFile(memory))
+
+  expect(await warn(memory, repo, env)).toBe('')
+  const brief = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env))
+  expect(brief).toContain('nothing gone, nothing foreign')
+})
+
+test('ack accepts the ~/ spelling the brief shows for a memory', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-ack-tilde-')
+  const homed = { ...env, HOME: home }
+  const shown = `~/claude-projects/-home-user-repo/memory/release-flow.md`
+  expect(context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], homed))).toContain(`gone     ${shown}`)
+
+  expect((await run(['ack', '--cwd', repo, shown], homed)).trim()).toBe(`kanon: acknowledged ${shown}`)
+  expect(readAcks(home, sessionRoot(repo)).map((a) => a.path)).toEqual([realpathSync(memory)])
+})
+
+test('ack accepts a root-relative path for a project file', async () => {
+  const { home, repo, env, transcript } = withGoneMemory('kanon-cli-ack-rel-')
+  writeFileSync(join(repo, 'CLAUDE.md'), 'Release with `scripts/release.sh`.\n')
+  await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env)
+
+  expect((await run(['ack', '--cwd', repo, 'CLAUDE.md'], env)).trim()).toBe('kanon: acknowledged CLAUDE.md')
+  expect(readAcks(home, sessionRoot(repo)).map((a) => a.path)).toEqual([realpathSync(join(repo, 'CLAUDE.md'))])
+})
+
+test('ack of something that is not flagged says so and exits 0', async () => {
+  const { repo, env, transcript } = withGoneMemory('kanon-cli-ack-unknown-')
+  await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env)
+  const { out, code } = await runFull(['ack', '--cwd', repo, 'nowhere.md'], env)
+  expect(code).toBe(0)
+  expect(out.trim()).toBe('kanon: nowhere.md is not flagged')
+})
+
+// --- read.sh: the PreToolUse Read hook ---------------------------------------
+
+const READ_SH = join(import.meta.dir, '..', 'hooks', 'scripts', 'read.sh')
+
+/** read.sh with a fake `bun` first on PATH that records its arguments. */
+async function readHook(payload: string, home: string): Promise<{ code: number; out: string; args: string[] | null }> {
+  const bin = tmp('kanon-read-bin-')
+  const argsFile = join(bin, 'args')
+  writeFileSync(join(bin, 'bun'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\nexit 0\n`)
+  chmodSync(join(bin, 'bun'), 0o755)
+  const proc = Bun.spawn(['sh', READ_SH], {
+    stdin: new TextEncoder().encode(payload),
+    env: { ...process.env, KANON_HOME: home, PATH: `${bin}:${process.env.PATH}`, CLAUDE_PLUGIN_ROOT: join(import.meta.dir, '..') },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const out = await new Response(proc.stdout).text()
+  const code = await proc.exited
+  return { code, out, args: existsSync(argsFile) ? readFileSync(argsFile, 'utf8').split('\n') : null }
+}
+
+const readPayload = (path: string) =>
+  JSON.stringify({ session_id: 'abc', hook_event_name: 'PreToolUse', cwd: '/home/user/repo', tool_name: 'Read', tool_input: { file_path: path } })
+
+test('read.sh exits 0 silently, without starting Bun, on an empty payload, garbage and a non-memory path', async () => {
+  const home = tmp('kanon-read-')
+  mkdirSync(join(home, 'state'), { recursive: true })
+  writeFileSync(join(home, 'state', '0123456789abcdef.steer.json'), '{}')
+  for (const payload of ['', 'not json at all', readPayload('/home/user/repo/src/x.ts'), readPayload('/home/user/repo/docs/memory.md')]) {
+    const r = await readHook(payload, home)
+    expect(r.code).toBe(0)
+    expect(r.out).toBe('')
+    expect(r.args).toBeNull()
+  }
+})
+
+test('read.sh does not start Bun for a memory when no steering cache exists', async () => {
+  const r = await readHook(readPayload('/home/user/.claude/projects/-home-user-repo/memory/notes.md'), tmp('kanon-read-nocache-'))
+  expect(r.code).toBe(0)
+  expect(r.args).toBeNull()
+})
+
+test('read.sh hands a memory Read to warn when a steering cache exists', async () => {
+  const home = tmp('kanon-read-cache-')
+  mkdirSync(join(home, 'state'), { recursive: true })
+  writeFileSync(join(home, 'state', '0123456789abcdef.steer.json'), '{}')
+  const path = '/home/user/.claude/projects/-home-user-repo/memory/notes.md'
+  const r = await readHook(readPayload(path), home)
+  expect(r.code).toBe(0)
+  expect(r.args?.slice(1, 10)).toEqual(['warn', '--session', 'abc', '--path', path, '--cwd', '/home/user/repo', '--hook', ''])
 })

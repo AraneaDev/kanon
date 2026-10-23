@@ -8,19 +8,23 @@ import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, readStart, readTail } from './limits'
-import { cleanLine, currentRun, normalise, transcriptOf } from './normalise'
+import { cleanLine, compactions, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
-import { realPath } from './paths'
+import { realPath, short } from './paths'
 import { gitProbe, lastCommit } from './probe'
 import { render } from './render'
 import { renderAudit, type AuditEntry } from './audit'
 import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
-import { readAcks, readSnapshot, readWatermark, writeSnapshot, writeSteering, writeWatermark } from './state'
-import { steer, type Steered } from './steering'
+import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, writeAcks, writeSnapshot, writeSteering, writeWarned, writeWatermark } from './state'
+import { acknowledge, namedDigests, steer, type Steered } from './steering'
 import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
 import type { Classified, Event, Origin, Report } from './types'
+import { warning } from './warning'
+
+/** Absolute path to this file, so a command Kanon prints for Claude runs as printed. */
+const CLI = join(import.meta.dir, 'cli.ts')
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
@@ -35,6 +39,27 @@ function arg(name: string): string | undefined {
 function phraseArg(): string | undefined {
   const first = process.argv[3]
   return first !== undefined && !first.startsWith('--') ? first : undefined
+}
+
+/** Flags that take a value, so the value is never mistaken for a positional. */
+const VALUED = new Set(['session', 'cwd', 'transcript', 'path'])
+
+/**
+ * The first argument after the command that is neither a flag nor a flag's
+ * value. `ack` takes its item this way, after `--cwd`, exactly as the brief
+ * prints the command.
+ */
+function positionalArg(): string | undefined {
+  const argv = process.argv
+  for (let i = 3; i < argv.length; i++) {
+    const a = argv[i]!
+    if (a.startsWith('--')) {
+      if (VALUED.has(a.slice(2))) i++
+      continue
+    }
+    return a
+  }
+  return undefined
 }
 
 function flag(name: string): boolean {
@@ -357,7 +382,7 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
     files,
     missing: report ? report.missing : [],
     steered: steering(root, files, runEvents(session)),
-    cli: join(import.meta.dir, 'cli.ts'),
+    cli: CLI,
   }
 }
 
@@ -370,8 +395,9 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
  * holds with no attribution, and it closes by asking Claude to raise anything
  * alarming with the user; on that channel alone, both were addressed to a
  * reader that never received them. `hookSpecificOutput.additionalContext` is
- * the channel that does reach the model, on SessionStart and on
- * UserPromptSubmit alike.
+ * the channel that does reach the model, on SessionStart, UserPromptSubmit
+ * and PreToolUse alike. Neither field is a decision: on PreToolUse in
+ * particular, Kanon adds context to a Read and never allows, asks or denies.
  *
  * Both are emitted rather than one: the user keeps the visible line in the
  * transcript, and Claude gets the text that was written for it. The two carry
@@ -382,7 +408,7 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
  * No colour on either. This text is quoted verbatim into a JSON payload and
  * read by a model; see src/colour.ts for why that rules escape codes out.
  */
-function hookPayload(event: 'SessionStart' | 'UserPromptSubmit', text: string): string {
+function hookPayload(event: 'SessionStart' | 'UserPromptSubmit' | 'PreToolUse', text: string): string {
   return JSON.stringify({
     systemMessage: text,
     hookSpecificOutput: { hookEventName: event, additionalContext: text },
@@ -592,6 +618,109 @@ function runNotice(session: string | undefined, cwd: string): void {
   }
 }
 
+/**
+ * The item `ack` names, spelled as the brief and the Read warning print it:
+ * `~/...` for a file under the user's home, root-relative for a project
+ * file, or absolute. `~` is the user's home, never the Claude config dir,
+ * because that is what short() abbreviated. The result is realpathed, like
+ * every path in the steering cache it is looked up in.
+ */
+function itemPath(spelled: string, root: string): string {
+  const expanded = spelled === '~' || spelled.startsWith('~/') ? join(homedir(), spelled.slice(1)) : resolve(root, spelled)
+  return realPath(expanded)
+}
+
+/**
+ * `kanon ack`: the user saying a flagged item still holds. It records the
+ * item's digest as the session start judged it, and the digest of every
+ * file it names now, so a later change to either makes the flag speak again.
+ * The cached digest rather than a fresh one: an item edited since the brief
+ * is no longer the claim the user was shown, and acknowledging it under the
+ * new digest would silence something nobody looked at.
+ *
+ * The cache row is marked acknowledged too, because `warn` reads only the
+ * cache. Without it an ack would not quiet the Read warning until the next
+ * session start recomputed the row.
+ *
+ * An item that is not flagged is said plainly, with exit 0: a stale command
+ * pasted from an old brief is not an error worth a stack trace.
+ */
+function runAck(spelled: string | undefined, cwd: string): void {
+  if (spelled === undefined) {
+    console.log('usage: kanon ack --cwd <path> <item-path>')
+    return
+  }
+  const root = sessionRoot(cwd)
+  const path = itemPath(spelled, root)
+  const items = readSteering(kanonHome(), root) ?? []
+  const item = items.find((s) => s.path === path && s.verdict !== null)
+  if (!item) {
+    console.log(`kanon: ${spelled} is not flagged`)
+    return
+  }
+  // Same `home` the brief judged with, so the recorded names match the ones
+  // isAcknowledged() computes at the next session start.
+  const named = namedDigests(readBounded(path) ?? '', path, root, homedir())
+  const acks = readAcks(kanonHome(), root).filter((a) => a.path !== path)
+  writeAcks(kanonHome(), root, [...acks, acknowledge(item, named, new Date())])
+  writeSteering(kanonHome(), root, items.map((s) => (s.path === path ? { ...s, acknowledged: true } : s)))
+  // Printed after both writes: a confirmation of something that did not
+  // happen would be worse than the error main() reports instead.
+  console.log(`kanon: acknowledged ${short(path, root)}`)
+}
+
+/**
+ * The compaction epoch: compact starts across the whole log, not the current
+ * run. currentRun() starts at the last SessionStart of any source, compact
+ * included, so within it the count is never more than one, and a second
+ * compact would read as the same epoch as the first and lose its warning.
+ * Counted over every run the count only ever grows within a session, which
+ * is all the warned record needs. An unreadable log is epoch 0.
+ */
+function epoch(session: string): number {
+  try {
+    return compactions(normalise(readFileSync(sessionFile(session), 'utf8').split('\n')))
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * `kanon warn`, behind the PreToolUse Read hook. It reads the steering cache
+ * and nothing else Kanon would have to compute: read.sh has already bailed
+ * for anything that is not a memory, and this runs before every such Read.
+ *
+ * Once per item per compaction epoch: a compact drops the earlier warning
+ * from Claude's context, so the next Read of the item warns again. Printed
+ * BEFORE the warned record is written, as `notice` prints before its
+ * watermark: a crash between the two repeats a warning, the reverse order
+ * would lose one.
+ */
+function runWarn(session: string | undefined, cwd: string): void {
+  const file = arg('path')
+  if (!session || !file) return
+  // The id names a file under state/, and read.sh's guard is not the only
+  // way to reach this command.
+  if (session.includes('/') || session.startsWith('.')) return
+  const root = sessionRoot(cwd)
+  const path = realPath(resolve(cwd, file))
+  const item = readSteering(kanonHome(), root)?.find((s) => s.path === path)
+  if (!item || item.verdict === null || item.acknowledged) return
+
+  const now = epoch(session)
+  const warned = readWarned(kanonHome(), session)
+  const paths = warned.epoch === now ? warned.paths : []
+  if (paths.includes(path)) return
+
+  const text = warning(item, root, CLI)
+  console.log(flag('hook') ? hookPayload('PreToolUse', text) : text)
+  try {
+    writeWarned(kanonHome(), session, { epoch: now, paths: [...paths, path] })
+  } catch {
+    // A record that cannot be written costs a repeated warning, never a lost one.
+  }
+}
+
 function main(): void {
   const command = process.argv[2] ?? 'report'
   const cwd = arg('cwd') ?? process.cwd()
@@ -613,6 +742,8 @@ function main(): void {
   if (command === 'audit') return runAudit(cwd)
   if (command === 'alarm') return runAlarm(session, cwd)
   if (command === 'notice') return runNotice(session, cwd)
+  if (command === 'ack') return runAck(positionalArg(), cwd)
+  if (command === 'warn') return runWarn(sessionArg, cwd)
   if (command === 'whose') {
     const phrase = phraseArg()
     // No phrase falls through to the usage line rather than searching for
@@ -620,7 +751,7 @@ function main(): void {
     if (phrase !== undefined) return runWhose(phrase, session, cwd)
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit] [--session <id>] [--cwd <path>] [--transcript <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn] [--session <id>] [--cwd <path>] [--path <file>] [--transcript <path>] [--hook] [--commit-state]')
 }
 
 try {

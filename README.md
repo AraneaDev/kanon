@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-562%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-581%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -287,6 +287,7 @@ nothing has run, so the justification does not hold. `.git` is never entered.
 | `SessionStart` | Emits the brief. |
 | `SessionEnd` | Renders the report and commits the snapshot drift is measured against. |
 | `UserPromptSubmit` | Delivers a notice when a foreign file loaded since the last prompt. |
+| `PreToolUse` (`Read`) | Warns when Claude reads a memory that names something gone, once per compaction. |
 
 The last one runs on **every prompt**, which deserves saying plainly for a tool whose whole pitch
 is that it stays out of the way. It exists because `InstructionsLoaded` has no decision control:
@@ -297,6 +298,21 @@ What it costs on a normal turn is one `wc -l`. The script compares the session l
 against a watermark and exits without starting Bun unless the log actually grew, which on most
 turns it has not. And it never blocks: it returns context, or nothing. `UserPromptSubmit` *can*
 reject a prompt, and Kanon declines to, the same way it declines to block a `ConfigChange`.
+
+The `Read` hook runs before every file Claude reads, so it bails in `sh` first: unless the path sits
+in a memory directory and a steering cache exists, it never starts Bun. When it does, Bun only reads
+that cache. A memory that names something gone gets a warning asking Claude to check with you
+before relying on it; one that may be stale gets a one-line note. Like the others, it adds context
+and never allows, asks or denies.
+
+If the item still holds, the warning carries the command that says so:
+
+```bash
+bun "<plugin>/src/cli.ts" ack --cwd "<repo>" "<path>"
+```
+
+`kanon ack` takes the path as the brief shows it, relative to the repository, under `~/`, or
+absolute. The flag stays quiet until the item, or a file it names, changes.
 
 ## Where the data lives
 
@@ -309,6 +325,9 @@ never writes to it.
 | `~/.kanon/reports/<id>.txt` | The rendered report, written when the session ends |
 | `~/.kanon/state/<digest>.json` | The instruction files that governed this repository's last session, and a digest of each |
 | `~/.kanon/state/<id>.turn` | How much of a session's log has already been examined for notices |
+| `~/.kanon/state/<digest>.steer.json` | What steers this repository, with Kanon's verdict on each, for the hooks to read |
+| `~/.kanon/state/<digest>.ack.json` | The flags you acknowledged with `kanon ack` |
+| `~/.kanon/state/<id>.warned` | Which items a session has already been warned about, and since which compaction |
 
 Records older than 90 days are pruned on the next run. Point `KANON_HOME` somewhere else if you
 want the data to live elsewhere.
