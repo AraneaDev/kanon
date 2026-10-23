@@ -82,6 +82,7 @@ export function buildReport(
   importedBy: Map<string, string>,
   skipped: Skipped[] = [],
   previous: SnapshotEntry[] | null = null,
+  transcriptLoads: Array<{ path: string; type: string }> = [],
 ): Report {
   const byPath = new Map(candidates.map((c) => [c.path, c]))
 
@@ -112,6 +113,19 @@ export function buildReport(
     if (e.memoryType !== null && !claimedType.has(p)) claimedType.set(p, e.memoryType)
   }
 
+  // The transcript's `instructions` attachment names files that never fire
+  // InstructionsLoaded: AGENTS.md and the auto-memory MEMORY.md among them.
+  // They are observations like any event, so they count as loaded, but an
+  // event wins: it was recorded as the load happened, with its real reason.
+  for (const t of transcriptLoads) {
+    const p = realPath(resolve(root, t.path))
+    if (!firstReason.has(p)) {
+      firstReason.set(p, 'transcript')
+      loadedOrder.push(p)
+    }
+    if (t.type !== '' && !claimedType.has(p)) claimedType.set(p, t.type)
+  }
+
   const loaded: Classified[] = []
   const modelDisagrees: string[] = []
   const originDisagrees: OriginDisagreement[] = []
@@ -123,7 +137,14 @@ export function buildReport(
     // unmodelled, not a failure of the reachability model. Only flag a miss
     // that the model actually got wrong: an unexpected path outside any
     // dependency directory, or one explicitly marked unreachable.
-    if ((!candidate || candidate.label === 'unreachable') && !hasDependencySegment(p, root)) {
+    //
+    // Auto-memory is exempt: layer two does not model memory at all, so a
+    // MEMORY.md it never predicted says nothing about how far to trust it.
+    if (
+      (!candidate || candidate.label === 'unreachable') &&
+      !hasDependencySegment(p, root) &&
+      claimedType.get(p) !== 'AutoMem'
+    ) {
       // Kanon's candidate model was wrong about this path. That is a fault
       // in layer two, the prediction, not in layer one: origin
       // classification needs no prediction at all, so the file still gets

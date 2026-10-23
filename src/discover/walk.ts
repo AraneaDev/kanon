@@ -49,6 +49,16 @@ export function walkCandidates(cwd: string, homeConfig: string, root?: string): 
   for (const d of chain) {
     for (const name of PROJECT_FILES) push(join(d, name), 'ancestor-walk')
     push(join(d, '.claude', 'CLAUDE.md'), 'ancestor-walk')
+    // AGENTS.md is a fallback, not a peer. Observed with `claude -p` on
+    // 2026-10-24: a directory holding both files loaded CLAUDE.md alone, and
+    // one holding only AGENTS.md loaded AGENTS.md as `Project`. Predicting it
+    // beside a CLAUDE.md would report it missing in every clean session.
+    // Only the bare `CLAUDE.md` case was observed, so a `.claude/CLAUDE.md`
+    // is treated as suppressing it too: an unpredicted load costs a note in
+    // modelDisagrees, a wrong prediction costs a false missing.
+    if (!existsSync(join(d, 'CLAUDE.md')) && !existsSync(join(d, '.claude', 'CLAUDE.md'))) {
+      push(join(d, 'AGENTS.md'), 'ancestor-walk')
+    }
   }
 
   return out

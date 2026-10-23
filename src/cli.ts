@@ -8,7 +8,7 @@ import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, readStart } from './limits'
-import { cleanLine, currentRun, normalise } from './normalise'
+import { cleanLine, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
@@ -17,6 +17,7 @@ import { renderAudit, type AuditEntry } from './audit'
 import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
 import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
+import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
 import type { Classified, Origin, Report } from './types'
 
 function arg(name: string): string | undefined {
@@ -150,7 +151,21 @@ function collect(session: string, cwd: string): Report {
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
   const previous = readSnapshot(kanonHome(), root)
 
-  return buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null)
+  const { instructions } = transcriptFacts(transcriptOf(events))
+  return buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null, instructions)
+}
+
+/**
+ * What the session transcript says, or nothing. Read by its start through
+ * the size ceiling: a long session's transcript runs to many megabytes, and
+ * the session-start loads sit at its head. A missing or unreadable transcript
+ * is no evidence either way, so it degrades to EMPTY_FACTS rather than
+ * costing the report.
+ */
+function transcriptFacts(path: string | null): TranscriptFacts {
+  if (path === null) return EMPTY_FACTS
+  const buf = readStart(path)
+  return buf === null ? EMPTY_FACTS : readTranscript(buf.toString('utf8'))
 }
 
 /**

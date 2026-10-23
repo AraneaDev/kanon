@@ -387,3 +387,32 @@ test('a file gone from disk whose entry is still present is not yet reported as 
 
   expect(report.drift?.vanished).toEqual([])
 })
+
+test('a transcript load of AGENTS.md is loaded with reason transcript and origin project, not missing', () => {
+  const candidates: Candidate[] = [{ path: '/repo/AGENTS.md', label: 'launch', rule: 'ancestor-walk' }]
+  const r = buildReport([], candidates, ROOT, HOME, new Map(), [], null, [{ path: '/repo/AGENTS.md', type: 'Project' }])
+  expect(r.loaded.map((f) => [f.path, f.reason, f.origin])).toEqual([['/repo/AGENTS.md', 'transcript', 'project']])
+  expect(r.missing).toEqual([])
+  expect(r.modelDisagrees).toEqual([])
+})
+
+test('an AutoMem load of MEMORY.md is loaded as user and never questions the model', () => {
+  const memory = '/home/x/.claude/projects/x/memory/MEMORY.md'
+  const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: memory, type: 'AutoMem' }])
+  expect(r.loaded.map((f) => [f.path, f.reason, f.origin])).toEqual([[memory, 'transcript', 'user']])
+  expect(r.modelDisagrees).toEqual([])
+  expect(r.originDisagrees).toEqual([])
+})
+
+test('a file in both the events and the transcript appears once, with the event reason', () => {
+  const candidates: Candidate[] = [{ path: '/repo/CLAUDE.md', label: 'launch', rule: 'ancestor-walk' }]
+  const r = buildReport(normalise([line('/repo/CLAUDE.md')]), candidates, ROOT, HOME, new Map(), [], null, [
+    { path: '/repo/CLAUDE.md', type: 'Project' },
+  ])
+  expect(r.loaded.map((f) => [f.path, f.reason])).toEqual([['/repo/CLAUDE.md', 'session_start']])
+})
+
+test('a transcript load the model never predicted still questions the model', () => {
+  const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: '/repo/odd.md', type: 'Project' }])
+  expect(r.modelDisagrees).toEqual(['/repo/odd.md'])
+})

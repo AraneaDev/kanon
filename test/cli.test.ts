@@ -1066,3 +1066,36 @@ test('a matched line cannot inject terminal escapes into the whose output', asyn
   expect(out).toContain('CLAUDE.md')
   expect(out).not.toContain(esc)
 })
+
+test('report counts an AGENTS.md that only the transcript saw load', async () => {
+  const { home, repo, env } = isolated('kanon-cli-agents-')
+  writeFileSync(join(repo, 'AGENTS.md'), 'Prefer short answers.\n')
+  const transcript = join(home, 'transcript.jsonl')
+  writeFileSync(
+    transcript,
+    JSON.stringify({ type: 'attachment', attachment: { type: 'instructions', files: [{ path: join(repo, 'AGENTS.md'), type: 'Project' }] } }) + '\n',
+  )
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  writeFileSync(
+    join(home, 'sessions', 's.jsonl'),
+    JSON.stringify({ t: '2026-10-24T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source: 'startup', transcript_path: transcript } }) + '\n',
+  )
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain('AGENTS.md')
+  expect(out).toContain('transcript')
+  expect(out).not.toContain('NOT LOADED')
+})
+
+test('report still runs when the transcript named at session start is gone', async () => {
+  const { home, repo, env } = isolated('kanon-cli-notranscript-')
+  writeFileSync(join(repo, 'CLAUDE.md'), '')
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  const lines = [
+    { t: '2026-10-24T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source: 'startup', transcript_path: join(home, 'absent.jsonl') } },
+    { t: '2026-10-24T00:00:01Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: join(repo, 'CLAUDE.md'), load_reason: 'session_start' } },
+  ]
+  writeFileSync(join(home, 'sessions', 's.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain('CLAUDE.md')
+  expect(out).toContain('session_start')
+})
