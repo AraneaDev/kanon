@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { brief, type BriefInput } from '../src/brief'
+import { BRIEF_MAX, brief, type BriefInput } from '../src/brief'
 import type { Drift } from '../src/drift'
 import type { Classified } from '../src/types'
 
@@ -280,4 +280,47 @@ test('a long drift collapses to a count, and never collapses a foreign file', ()
   }))
   expect(out).toContain('more, run /kanon')
   expect(out).toContain('node_modules/foo/CLAUDE.md')
+})
+
+/**
+ * Claude Code caps a hook's additionalContext at 10,000 characters and
+ * spills the rest to a file, leaving the model a 2,000 character preview.
+ * The foreign list is the one part of the brief with no limit of its own,
+ * so a repository with hundreds of foreign loads would lose the notes that
+ * tell Claude what to do about them.
+ */
+function manyForeign(n: number): BriefInput {
+  const files = Array.from({ length: n }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
+  return input({ files: [file('/repo/CLAUDE.md', 'project'), ...files] })
+}
+const longExcerpt = () => 'x'.repeat(80)
+
+test('a brief with hundreds of foreign files stays under BRIEF_MAX', () => {
+  expect(brief(manyForeign(300), longExcerpt).length).toBeLessThanOrEqual(BRIEF_MAX)
+})
+
+test('a capped brief keeps its summary line and its closing notes', () => {
+  const lines = brief(manyForeign(300), longExcerpt).split('\n')
+
+  expect(lines[0]!.startsWith('KANON  ')).toBe(true)
+  expect(lines.join(' ').replace(/\s+/g, ' ')).toContain('Tell the user about the above in your first response.')
+  const more = lines.findIndex((l) => /^ {11}\.\.\. and \d+ more( \(\d+ FOREIGN\))?, run \/kanon for the full list$/.test(l))
+  expect(more).toBeGreaterThan(0)
+  expect(lines[more + 1]).toBe('')
+})
+
+/**
+ * When the cap bites, the FOREIGN rows are the last to go: naming a
+ * dependency's file is what the brief exists for, and the notes would
+ * otherwise warn about files Claude can no longer see.
+ */
+test('a capped brief drops ordinary rows before any FOREIGN row', () => {
+  const foreign = Array.from({ length: 80 }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
+  const own = [file('/repo/CLAUDE.md', 'project'), file('/repo/a/CLAUDE.md', 'project'), file('/repo/b/CLAUDE.md', 'project')]
+  const out = brief(input({ files: [...own, ...foreign] }), () => 'x'.repeat(120))
+
+  expect(out.length).toBeLessThanOrEqual(BRIEF_MAX)
+  expect(out).not.toContain('project  CLAUDE.md')
+  expect(out).toContain('FOREIGN  vendor/pkg0/CLAUDE.md')
+  expect(out).toMatch(/\.\.\. and \d+ more \(\d+ FOREIGN\), run \/kanon for the full list/)
 })

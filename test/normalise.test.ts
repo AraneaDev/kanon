@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { normalise } from '../src/normalise'
+import { currentRun, normalise } from '../src/normalise'
 
 /**
  * memory_type is Claude Code's own statement of a file's scope, confirmed
@@ -122,44 +122,89 @@ test('a payload with no timestamp normalises with an empty one, not undefined', 
 })
 
 /**
- * ConfigChange's field names are the ones Kanon has never seen on a live
- * payload (see the README's status note). Each is therefore read
- * defensively: a source it cannot read is reported as `unknown` rather than
- * guessed at, which is what makes a renamed field show up as a visibly
- * useless row instead of a confident wrong one.
+ * ConfigChange carries `source` and an optional `file_path`, confirmed on
+ * live payloads on 2026-10-23. Kanon had read `config_source` and
+ * `changed_keys` from the documentation, neither of which Claude Code sends,
+ * so every config row printed `unknown  (+0)` until the fixture was captured.
  */
-test('a ConfigChange with no usable config_source is reported as unknown, never guessed', () => {
-  const line = JSON.stringify({
-    t: '2026-08-27T06:58:00Z',
-    hook: 'ConfigChange',
-    raw: { config_source: null, changed_keys: ['skills'] },
+test('a live ConfigChange payload yields its source and file path', async () => {
+  const raw = await Bun.file(new URL('./fixtures/payloads/config-change.json', import.meta.url)).json()
+
+  const [e] = normalise([JSON.stringify({ t: '2026-10-02T21:07:00Z', hook: 'ConfigChange', raw })])
+
+  expect(e).toEqual({
+    t: '2026-10-02T21:07:00Z',
+    ev: 'config',
+    source: 'skills',
+    path: '/root/judge/.claude/skills/judge-report/SKILL.md',
   })
-
-  const [e] = normalise([line])
-
-  expect(e).toEqual({ t: '2026-08-27T06:58:00Z', ev: 'config', source: 'unknown', keys: ['skills'] })
 })
 
-test('a ConfigChange whose changed_keys is not a list yields no keys rather than throwing', () => {
-  const line = JSON.stringify({
-    t: '2026-08-27T06:58:00Z',
-    hook: 'ConfigChange',
-    raw: { config_source: 'skills', changed_keys: 'skills' },
-  })
+test('a ConfigChange with no file_path yields a null path', () => {
+  const line = JSON.stringify({ t: '2026-10-02T21:07:00Z', hook: 'ConfigChange', raw: { source: 'user_settings' } })
 
   const [e] = normalise([line])
 
-  expect(e).toMatchObject({ ev: 'config', source: 'skills', keys: [] })
+  expect(e).toEqual({ t: '2026-10-02T21:07:00Z', ev: 'config', source: 'user_settings', path: null })
 })
 
-test('non-string entries in changed_keys are dropped and the string ones kept', () => {
-  const line = JSON.stringify({
-    t: '2026-08-27T06:58:00Z',
-    hook: 'ConfigChange',
-    raw: { config_source: 'settings', changed_keys: ['a', 7, null, 'b'] },
-  })
+/**
+ * A source Kanon cannot read is reported as `unknown` rather than guessed
+ * at, which is what makes a renamed field show up as a visibly useless row
+ * instead of a confident wrong one. The old documented name is not a
+ * fallback: it never existed on a live payload.
+ */
+test('a ConfigChange with no usable source is reported as unknown, never guessed', () => {
+  const line = JSON.stringify({ t: '2026-10-02T21:07:00Z', hook: 'ConfigChange', raw: { source: 7, config_source: 'skills' } })
 
   const [e] = normalise([line])
 
-  expect(e).toMatchObject({ ev: 'config', keys: ['a', 'b'] })
+  expect(e).toMatchObject({ ev: 'config', source: 'unknown' })
+})
+
+/**
+ * An unclean shutdown (seen under WSL) can zero-fill the tail of an appended
+ * block, so a log line arrives prefixed with NUL bytes that record.sh never
+ * wrote. `trim()` does not remove `\0`, so such a line used to read as
+ * unparsed, and a damaged SessionStart stopped marking the start of its run.
+ */
+const nulSessionStart =
+  '\u0000'.repeat(1053) + JSON.stringify({ t: '2026-09-02T13:46:45Z', hook: 'SessionStart', raw: { session_id: 's' } })
+
+test('a line prefixed with NUL bytes still parses', () => {
+  const line =
+    '\u0000'.repeat(1053) +
+    JSON.stringify({ t: '2026-09-02T13:46:45Z', hook: 'InstructionsLoaded', raw: { file_path: '/a/CLAUDE.md', load_reason: 'session_start' } })
+
+  expect(normalise([line])).toEqual([
+    { t: '2026-09-02T13:46:45Z', ev: 'loaded', path: '/a/CLAUDE.md', reason: 'session_start', memoryType: null },
+  ])
+})
+
+test('a NUL-prefixed SessionStart still marks the start of a run', () => {
+  const loaded = (path: string) =>
+    JSON.stringify({ t: '2026-09-02T13:46:00Z', hook: 'InstructionsLoaded', raw: { file_path: path, load_reason: 'session_start' } })
+  const lines = [loaded('/a/CLAUDE.md'), nulSessionStart, loaded('/b/CLAUDE.md')]
+
+  expect(currentRun(lines)).toEqual(lines.slice(1))
+})
+
+test('NULs inside a truncated line leave it unparsed, never thrown', () => {
+  const events = normalise(['{"t":"x","hook":"Instr\u0000\u0000'])
+
+  expect(events).toHaveLength(1)
+  expect(events[0]!.ev).toBe('unparsed')
+})
+
+/**
+ * A zero-fill overwrites bytes rather than inserting them. NULs inside a
+ * line may stand where characters were, so removing them could turn
+ * "/repo/CLAUDE.md" into "/reCLAUDE.md": a path outside the root, read as
+ * FOREIGN. Only the padding at the edges of a line is stripped.
+ */
+test('NULs that replaced characters inside a line leave it unparsed', () => {
+  const line = JSON.stringify({ t: 'x', hook: 'InstructionsLoaded', raw: { file_path: '/repo/CLAUDE.md', load_reason: 'session_start' } })
+    .replace('po/', '\u0000\u0000\u0000')
+
+  expect(normalise([line]).map((e) => e.ev)).toEqual(['unparsed'])
 })

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MAX_FILE_BYTES, prune, tooLarge } from '../src/limits'
+import { MAX_FILE_BYTES, prune, readStart, tooLarge } from '../src/limits'
 import { tmp } from './tmp'
 
 test('a small file is not too large', () => {
@@ -206,4 +206,15 @@ test('prune never touches a file sitting directly in kanonHome', () => {
 
   expect(prune(home, Date.now())).toEqual([])
   expect(existsSync(f)).toBe(true)
+})
+
+test('readStart returns null for a missing path', () => {
+  expect(readStart(join(tmp('kanon-l-'), 'absent.md'))).toBeNull()
+})
+
+test('readStart returns at most max bytes', () => {
+  const f = join(tmp('kanon-l-'), 'big.md')
+  writeFileSync(f, Buffer.alloc(100, 0x61))
+
+  expect(readStart(f, 10)?.length).toBe(10)
 })

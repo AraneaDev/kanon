@@ -7,8 +7,8 @@ import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
-import { prune, tooLarge } from './limits'
-import { currentRun, normalise } from './normalise'
+import { prune, readStart } from './limits'
+import { cleanLine, currentRun, normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
@@ -95,7 +95,7 @@ function recordedRoot(path: string): string | undefined {
     return undefined
   }
   for (const line of text.split('\n')) {
-    const trimmed = line.trim()
+    const trimmed = cleanLine(line)
     if (!trimmed) continue
     let parsed: unknown
     try {
@@ -154,17 +154,13 @@ function collect(session: string, cwd: string): Report {
 }
 
 /**
- * A file's text, unless it is over the size ceiling or cannot be read. The
- * same ceiling the rest of the codebase applies, so a file Claude Code would
- * skip is never searched or quoted either.
+ * A file's text up to the size ceiling, or null when it cannot be read. An
+ * oversized file is read by its start, the part Claude Code loads, so it is
+ * searched and quoted like any other. A multibyte character split at the cut
+ * decodes as a replacement character, which is harmless in an excerpt.
  */
 function readBounded(path: string): string | null {
-  if (tooLarge(path)) return null
-  try {
-    return readFileSync(path, 'utf8')
-  } catch {
-    return null
-  }
+  return readStart(path)?.toString('utf8') ?? null
 }
 
 /**

@@ -342,13 +342,13 @@ test('a session that recorded no loads reports nothing recorded rather than an e
   mkdirSync(sessions, { recursive: true })
   writeFileSync(
     join(sessions, 's.jsonl'),
-    JSON.stringify({ t: '2026-08-27T06:58:00Z', hook: 'ConfigChange', raw: { cwd: repo, config_source: 'skills', changed_keys: ['a'] } }) + '\n',
+    JSON.stringify({ t: '2026-08-27T06:58:00Z', hook: 'ConfigChange', raw: { cwd: repo, source: 'skills', file_path: join(repo, '.claude', 'skills', 'x', 'SKILL.md') } }) + '\n',
   )
 
   const out = await run(['report', '--session', 's', '--cwd', repo], env)
   expect(out).toContain('nothing recorded')
   expect(out).toContain('CONFIG CHANGED')
-  expect(out).toContain('06:58  skills  (+1)')
+  expect(out).toContain('06:58  skills  .claude/skills/x/SKILL.md')
 })
 
 /**

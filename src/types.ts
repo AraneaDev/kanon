@@ -24,7 +24,7 @@ export interface LoadEvent {
   reason: string
   memoryType: string | null
 }
-export interface ConfigEvent { t: string; ev: 'config'; source: string; keys: string[] }
+export interface ConfigEvent { t: string; ev: 'config'; source: string; path: string | null }
 export interface UnparsedEvent { t: string; ev: 'unparsed'; raw: string }
 export type Event = LoadEvent | ConfigEvent | UnparsedEvent
 
@@ -113,7 +113,11 @@ export const CLAIMED_ORIGINS: Record<string, Origin[]> = {
   Project: ['project', 'local', 'foreign'],
 }
 
-export const RULESET = '2026-08'
+/**
+ * Stamps every report with the model of Claude Code's loader it was built
+ * from. 2026-10: an oversized nested CLAUDE.md loads by its start (2.1.309).
+ */
+export const RULESET = '2026-10'
 
 export const DEPENDENCY_SEGMENTS = [
   'node_modules', 'vendor', '.bun', '.venv', 'site-packages', '.cargo', '.gradle', 'Pods',

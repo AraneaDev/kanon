@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-374%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-386%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -79,7 +79,7 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   session-start brief has gone out. When a foreign one does, Kanon names it at the next prompt.
 
 ```text
-SESSION  /home/you/project           ruleset 2026-08
+SESSION  /home/you/project           ruleset 2026-10
 
 LOADED
   user       ~/.claude/rules/style.md             session_start
@@ -101,7 +101,7 @@ NOT LOADED
   quiet      docs/CLAUDE.md                       on-demand, not triggered
 
 CONFIG CHANGED
-  06:58  skills  (+1)
+  06:58  skills  ~/.claude/skills/nl-taal/SKILL.md
 ```
 
 That is a real run, not a mock-up. Piped into a file or a pipe it is exactly these bytes; on a
@@ -240,7 +240,7 @@ cloned something, or an install added packages, and you want to know what got a 
 uses one.
 
 ```text
-AUDIT  /home/you/project                            ruleset 2026-08
+AUDIT  /home/you/project                            ruleset 2026-10
 
   FOREIGN    node_modules/bun-types/CLAUDE.md     on-demand
              "Default to using Bun instead of Node.js."

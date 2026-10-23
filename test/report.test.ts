@@ -28,9 +28,9 @@ test('normalise turns a config change into a config event', () => {
   const raw = JSON.stringify({
     t: '2026-08-27T00:01:00Z',
     hook: 'ConfigChange',
-    raw: { hook_event_name: 'ConfigChange', config_source: 'skills', changed_keys: ['a'] },
+    raw: { hook_event_name: 'ConfigChange', source: 'skills', file_path: '/repo/.claude/skills/a/SKILL.md' },
   })
-  expect(normalise([raw])).toEqual([{ t: '2026-08-27T00:01:00Z', ev: 'config', source: 'skills', keys: ['a'] }])
+  expect(normalise([raw])).toEqual([{ t: '2026-08-27T00:01:00Z', ev: 'config', source: 'skills', path: '/repo/.claude/skills/a/SKILL.md' }])
 })
 
 test('normalise keeps an unparseable line rather than dropping it', () => {
@@ -123,7 +123,7 @@ test('an import flag is carried onto the loaded entry', () => {
 })
 
 test('the ruleset version is stamped on every report', () => {
-  expect(buildReport([], [], ROOT, HOME, new Map()).ruleset).toBe('2026-08')
+  expect(buildReport([], [], ROOT, HOME, new Map()).ruleset).toBe('2026-10')
 })
 
 test('the same file loaded twice appears once, keeping the first reason seen', () => {

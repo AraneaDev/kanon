@@ -18,12 +18,15 @@ Captured 2026-08-27 from a session in this repository.
   session recorded `compact`, so instruction files reload mid-session. Reasons
   are printed verbatim, so a new one costs nothing.
 
+## ConfigChange, settled 2026-10-23
+
+- **The documented field names were wrong.** Live `ConfigChange` payloads
+  carry `source` (seen: `user_settings`, `skills`) and an optional
+  `file_path`. Neither `config_source` nor `changed_keys` occurs. Until this
+  fixture existed every config row rendered as `unknown  (+0)`.
+
 ## Still open
 
-- **`ConfigChange` has not been observed.** `config-change.json` is absent
-  because no configuration change has been recorded yet. `normalise.ts` reads
-  `config_source` and `changed_keys` from the documentation alone, and that
-  half of the normaliser is still unconfirmed.
 - **Hook ordering is unknown.** Whether `SessionStart` fires before or after
   the first `InstructionsLoaded` decides whether the session-start brief can
   describe the current session or must predict it. `hooks.json` now records
@@ -34,3 +37,5 @@ Captured 2026-08-27 from a session in this repository.
 - `instructions-loaded.json` — a real `InstructionsLoaded` payload. Used by
   `test/normalise.test.ts`. Re-capture it from `~/.kanon/sessions/*.jsonl` if
   Claude Code changes shape; the test is written to fail rather than adapt.
+- `config-change.json` — a real `ConfigChange` payload, `source: "skills"`.
+  Used by `test/normalise.test.ts`, under the same re-capture rule.
