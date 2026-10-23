@@ -174,4 +174,53 @@ describe('judge', () => {
     expect(judge(item('Prefer small commits and/or short ones.'), ROOT, HOME, probe)).toBeNull()
     expect(judge(item('see `Object.keys` and `path.join`'), ROOT, HOME, probe)).toBeNull()
   })
+  test('repo scope: a missing ~ path or absolute path is gone by existence alone', () => {
+    const a = fake({ code: ['~/x/y.md'] })
+    expect(judge(item('`~/x/y.md`'), ROOT, HOME, a.probe)).toEqual({
+      level: 'gone',
+      evidence: 'names `~/x/y.md`, which no longer exists',
+    })
+    expect(a.calls.exists).toEqual([`${HOME}/x/y.md`])
+    expect(a.calls.code).toEqual([])
+    const b = fake({ code: ['/opt/gone/a.ts'] })
+    expect(judge(item('`/opt/gone/a.ts`'), ROOT, HOME, b.probe)?.level).toBe('gone')
+    expect(b.calls.code).toEqual([])
+  })
+
+  test('repo scope: an existing absolute path inside root that changed is may-be-stale', () => {
+    const { probe, calls } = fake({ exist: [`${ROOT}/src/a.ts`], changed: ['src/a.ts'] })
+    expect(judge(item(`\`${ROOT}/src/a.ts\``), ROOT, HOME, probe)).toEqual({
+      level: 'may-be-stale',
+      evidence: '`src/a.ts` changed after this was written',
+    })
+    expect(calls.changed[0]!.paths).toEqual(['src/a.ts'])
+  })
+
+  test('an existing absolute path outside root gives no verdict', () => {
+    const { probe, calls } = fake({ exist: ['/opt/tool/a.md'] })
+    expect(judge(item('`/opt/tool/a.md`'), ROOT, HOME, probe)).toBeNull()
+    expect(calls.changed).toEqual([])
+  })
+
+  test('a probe that throws never produces a verdict', () => {
+    const base = fake({ exist: [`${ROOT}/src/a.ts`] }).probe
+    const text = '`src/a.ts` `--flag`'
+    expect(judge(item(text), ROOT, HOME, { ...base, occursInCode: () => { throw new Error('rg died') } })).toBeNull()
+    expect(judge(item('`src/b.ts`'), ROOT, HOME, { ...base, exists: () => { throw new Error('EACCES') } })).toBeNull()
+    expect(judge(item('`bun run x`'), ROOT, HOME, { ...base, scripts: () => { throw new Error('bad json') } })).toBeNull()
+    expect(judge(item('`src/a.ts`'), ROOT, HOME, { ...base, changedSince: () => { throw new Error('git died') } })).toBeNull()
+    expect(judge(item('`~/x.md`', { origin: 'user' }), ROOT, HOME, { ...base, exists: () => { throw new Error('EIO') } })).toBeNull()
+  })
+
+  test('a memory item is judged with repo scope', () => {
+    const { probe } = fake({})
+    const it = item('`src/a.ts`', { kind: 'memory', origin: 'user', path: `${HOME}/.claude/projects/p/memory/m.md` })
+    expect(judge(it, ROOT, HOME, probe)?.level).toBe('gone')
+  })
+
+  test('repeated names are looked up once', () => {
+    const { probe, calls } = fake({})
+    judge(item('`--one` `parseThing()` `parseThing`'), ROOT, HOME, probe)
+    expect(calls.code[0]).toEqual(['--one', 'parseThing'])
+  })
 })

@@ -58,7 +58,7 @@ function judgeDisk(names: Name[], home: string, probe: Probe): Verdict | null {
   return null
 }
 
-function judgeRepo(item: Item, names: Name[], root: string, probe: Probe): Verdict | null {
+function judgeRepo(item: Item, names: Name[], root: string, home: string, probe: Probe): Verdict | null {
   const dir = dirname(item.path)
   // Where each checkable relative path was found, or null when it was not.
   const found = new Map<string, string | null>()
@@ -67,9 +67,16 @@ function judgeRepo(item: Item, names: Name[], root: string, probe: Probe): Verdi
 
   for (const n of names) {
     if (n.kind === 'path') {
-      // `@types/node` is a package name, not a file; `~/` and absolute paths
-      // say nothing about this checkout.
-      if (n.text.startsWith('@') || n.text.startsWith('~') || isAbsolute(n.text)) continue
+      // `@types/node` is a package name, not a file. `~/` and absolute paths
+      // are judged by existence alone, so repo scope stays a superset of disk
+      // scope, and they never go to the code lookup.
+      if (n.text.startsWith('@')) continue
+      const abs = n.text.startsWith('~/') ? join(home, n.text.slice(2)) : isAbsolute(n.text) ? n.text : null
+      if (abs) {
+        found.set(n.text, probe.exists(abs) ? abs : null)
+        checkable.push(n)
+        continue
+      }
       const hit = [resolve(root, n.text), resolve(dir, n.text)].find((p) => probe.exists(p)) ?? null
       found.set(n.text, hit)
       // `process.env` has a real file extension and no slash, so it is
@@ -81,7 +88,8 @@ function judgeRepo(item: Item, names: Name[], root: string, probe: Probe): Verdi
     checkable.push(n)
   }
 
-  const inCode = lookups.length ? probe.occursInCode(lookups) : new Set<string>()
+  const unique = [...new Set(lookups)]
+  const inCode = unique.length ? probe.occursInCode(unique) : new Set<string>()
   const scripts = checkable.some((n) => n.kind === 'script') ? probe.scripts() : null
 
   for (const n of checkable) {
@@ -117,5 +125,12 @@ export function judge(item: Item, root: string, home: string, probe: Probe): Ver
   if (scope === 'none') return null
   const names = extractNames(item.text)
   if (!names.length) return null
-  return scope === 'disk' ? judgeDisk(names, home, probe) : judgeRepo(item, names, root, probe)
+  // A probe that throws (git missing, an unreadable file, a malformed
+  // package.json) is a tooling failure, not evidence. Reporting `gone` on it
+  // would accuse a real file of not existing, so no verdict is the answer.
+  try {
+    return scope === 'disk' ? judgeDisk(names, home, probe) : judgeRepo(item, names, root, home, probe)
+  } catch {
+    return null
+  }
 }
