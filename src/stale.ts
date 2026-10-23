@@ -234,15 +234,16 @@ function locate(text: string, root: string, home: string): string {
 }
 
 /**
- * `rules/` written for both rules directories, `settings.json` for any of
- * the settings layers: a bare relative name equal to the trailing segments
- * of a well-known location is shorthand for it, and `rules/` in a project's
- * CLAUDE.md was reported gone. Whole segments only, and never a name
- * anchored with `./`, `../`, `~` or `/`, which says where it is.
+ * `rules/` written for both rules directories was reported gone, so bare
+ * `rules/` is shorthand for them, as is a `.claude/...` spelling that ends
+ * a well-known location. Nothing broader: bare `CLAUDE.md`, `settings.json`,
+ * `plugins/` and `projects/` are common names outside Claude Code, and the
+ * tracked-paths rule already keeps them quiet wherever they exist.
  */
 function isShorthand(text: string): boolean {
-  if (/^(?:\.{1,2}\/|~|\/)/.test(text)) return false
   const t = text.replace(/\/+$/, '')
+  if (t === 'rules') return true
+  if (!t.startsWith('.claude/')) return false
   return WELL_KNOWN_LOCATIONS.some((w) => {
     const full = w.replace(/^~\//, '').replace(/\/+$/, '')
     return full === t || full.endsWith(`/${t}`)

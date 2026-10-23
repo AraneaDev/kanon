@@ -386,10 +386,18 @@ describe('well-known configuration locations', () => {
     expect(judge(user('`/etc/claude-code/managed-settings.json`'), ROOT, HOME, probe)).toBeNull()
   })
 
-  /** `rules/` for both rules directories, `settings.json` for any settings layer. */
-  test('the trailing segments of a well-known location, missing, give no verdict', () => {
+  /** `rules/` for both rules directories. */
+  test('bare rules/ and .claude/ spellings, missing, give no verdict', () => {
     const { probe } = fake({})
-    expect(judge(item('`rules/` `projects/` `settings.json` `CLAUDE.md` `.claude/rules/`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(item('`rules/` `.claude/rules/` `.claude/settings.json`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  /** These names are common outside Claude Code; the tracked-paths rule keeps them quiet when they exist. */
+  test('bare plugins/, projects/, CLAUDE.md and settings.json, missing and untracked, are gone', () => {
+    for (const name of ['plugins/', 'projects/', 'CLAUDE.md', 'settings.json', 'settings.local.json']) {
+      const { probe } = fake({})
+      expect(judge(item(`see \`${name}\``), ROOT, HOME, probe)?.evidence).toBe(`names \`${name}\`, which no longer exists`)
+    }
   })
 
   test('a shorthand exempts whole trailing segments only, and never an anchored name', () => {
