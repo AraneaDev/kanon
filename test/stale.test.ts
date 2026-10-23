@@ -247,3 +247,46 @@ describe('judge', () => {
     expect(calls.code[0]).toEqual(['--one', 'parseThing'])
   })
 })
+
+/**
+ * Naming where instructions or settings can live is not a claim that a file
+ * lives there, so Claude Code's own configuration locations are never judged.
+ */
+describe('well-known configuration locations', () => {
+  const user = (text: string) => item(text, { origin: 'user', path: `${HOME}/.claude/rules/x.md` })
+
+  test('every spelling of ~/.claude/CLAUDE.md, missing, gives no verdict', () => {
+    const { probe } = fake({})
+    expect(judge(item('`~/.claude/CLAUDE.md`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(item(`\`${HOME}/.claude/CLAUDE.md\``), ROOT, HOME, probe)).toBeNull()
+    expect(judge(user('`~/.claude/CLAUDE.md`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(user(`\`${HOME}/.claude/CLAUDE.md\``), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('every spelling of CLAUDE.local.md, missing, gives no verdict', () => {
+    const { probe } = fake({})
+    expect(judge(item('`CLAUDE.local.md`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(item('`./CLAUDE.local.md`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(item(`\`${ROOT}/CLAUDE.local.md\``), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('a directory entry exempts the directory, in either spelling, but not the files below it', () => {
+    const { probe } = fake({})
+    expect(judge(item('`~/.claude/rules/` and `.claude/rules`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(item('`~/.claude/rules/foo.md`'), ROOT, HOME, probe)).toEqual({
+      level: 'gone',
+      evidence: 'names `~/.claude/rules/foo.md`, which no longer exists',
+    })
+  })
+
+  test('a managed policy file, missing, gives no verdict', () => {
+    const { probe } = fake({})
+    expect(judge(item('`/etc/claude-code/managed-settings.json`'), ROOT, HOME, probe)).toBeNull()
+    expect(judge(user('`/etc/claude-code/managed-settings.json`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('a well-known location does not hide another gone name in the same item', () => {
+    const { probe } = fake({})
+    expect(judge(item('`.mcp.json` and `src/gone.ts`'), ROOT, HOME, probe)?.evidence).toBe('names `src/gone.ts`, which no longer exists')
+  })
+})

@@ -142,6 +142,48 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
 }
 
 /**
+ * Claude Code's own configuration locations. Naming where instructions or
+ * settings CAN live is not a claim that a file exists there: a project's
+ * CLAUDE.md describing the loader names `~/.claude/CLAUDE.md`, and on a
+ * machine with no such file that was reported `gone`. So these are never
+ * judged, in any scope.
+ *
+ * `~/` entries match after `~` resolution, relative entries by their
+ * repo-relative spelling, and both by the absolute path either resolves to.
+ * A trailing slash exempts the directory itself only, so a named file below
+ * it (`~/.claude/rules/foo.md`) is still judged. The managed policy
+ * directories exempt everything beneath them.
+ */
+export const WELL_KNOWN_LOCATIONS = [
+  '~/.claude/CLAUDE.md',
+  '~/.claude/rules/',
+  '~/.claude/settings.json',
+  '~/.claude/settings.local.json',
+  '~/.claude.json',
+  '~/.claude/projects/',
+  '~/.claude/plugins/',
+  '.claude/CLAUDE.md',
+  '.claude/rules/',
+  '.claude/settings.json',
+  '.claude/settings.local.json',
+  'CLAUDE.local.md',
+  '.mcp.json',
+]
+export const MANAGED_POLICY_DIRS = ['/etc/claude-code/', '/Library/Application Support/ClaudeCode/']
+
+/** `~/` against home, anything relative against the root, trailing slash dropped. */
+function locate(text: string, root: string, home: string): string {
+  const abs = text.startsWith('~/') ? join(home, text.slice(2)) : resolve(root, text)
+  return abs.length > 1 ? abs.replace(/\/+$/, '') : abs
+}
+
+function isWellKnown(text: string, root: string, home: string): boolean {
+  const at = locate(text, root, home)
+  if (MANAGED_POLICY_DIRS.some((d) => at === d.slice(0, -1) || at.startsWith(d))) return true
+  return WELL_KNOWN_LOCATIONS.some((w) => locate(w, root, home) === at)
+}
+
+/**
  * Judge one item from the names it mentions. `gone` means a named thing is
  * absent where it should be; `may-be-stale` means a named file has commits
  * after the item was written. An item naming nothing checkable gets null.
@@ -149,7 +191,7 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
 export function judge(item: Item, root: string, home: string, probe: Probe): Verdict | null {
   const scope = scopeOf(item)
   if (scope === 'none') return null
-  const names = extractNames(item.text)
+  const names = extractNames(item.text).filter((n) => !(n.kind === 'path' && isWellKnown(n.text, root, home)))
   if (!names.length) return null
   // A probe that throws (git missing, an unreadable file, a malformed
   // package.json) is a tooling failure, not evidence. Reporting `gone` on it
