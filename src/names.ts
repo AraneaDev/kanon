@@ -16,6 +16,10 @@ const BARE = /(?<![\w@./~:-])(?:~|\.{1,2})?(?:\/?[\w.-]+)(?:\/[\w.-]+)+\/?/g
 const ONE_SHOT = /^(?:(?:bun|npm|pnpm)\s+run|yarn(?:\s+run)?)\s+([\w:.-]+)(?:\s|$)/
 // yarn's own subcommands, which `yarn x` would otherwise read as a script.
 const YARN_BUILTIN = new Set(['install', 'add', 'remove', 'init', 'upgrade', 'link', 'publish', 'cache', 'global', 'config'])
+// A slashless span is a path only with one of these extensions: `process.env`,
+// `Object.keys` and `path.join` are identifiers, and reading them as files
+// would report a false "gone".
+const FILE_EXT = new Set('md mdx txt json jsonc json5 yml yaml toml ini cfg conf env lock ts tsx mts cts js jsx mjs cjs sh bash zsh py rb php go rs java kt swift c h cpp hpp cs css scss html xml svg sql csv gitignore dockerignore'.split(' '))
 const blank = (s: string) => s.replace(/[^\n]/g, ' ')
 
 function fromSpan(span: string): Name | null {
@@ -29,8 +33,7 @@ function fromSpan(span: string): Name | null {
   if (/\s/.test(span)) return null
   if (/^https?:\/\//.test(span)) return null
   const ext = /\.([A-Za-z0-9]{1,5})$/.exec(span)
-  // A purely numeric extension is a version or a decimal, not a file type.
-  if (span.includes('/') || (ext && !/^\d+$/.test(ext[1]!))) return { kind: 'path', text: span }
+  if (span.includes('/') || (ext && FILE_EXT.has(ext[1]!.toLowerCase()))) return { kind: 'path', text: span }
   if (/^[A-Za-z_$][\w$]*(\(\))?$/.test(span)) {
     const bare = span.replace(/\(\)$/, '')
     if (bare.length >= 4 && (/[A-Z_]/.test(bare) || span.endsWith('()'))) return { kind: 'symbol', text: bare }
@@ -38,7 +41,11 @@ function fromSpan(span: string): Name | null {
   return null
 }
 
-/** A slash alone is not enough ("and/or", "2026/10/24"): demand a file extension, a second slash, or an anchor. */
+/**
+ * Deliberate recall trade-off: extensionless two-segment prose such as
+ * `src/discover` is not taken, because it reads the same as "and/or". The
+ * same name in a code span is taken, since the author marked it as a name.
+ * A slash alone is not enough ("and/or", "2026/10/24"): demand a file extension, a second slash, or an anchor. */
 function looksLikePath(t: string): boolean {
   if (t.includes('://')) return false
   const parts = t.split('/').filter(Boolean)
@@ -65,7 +72,8 @@ export function extractNames(markdown: string): Name[] {
   for (const m of prose.matchAll(IMPORT)) {
     const target = importTarget(m[2])
     // An @mention is not an import of anything on disk; only path-shaped
-    // targets are names.
+    // targets are names. Extensionless imports such as @Makefile are skipped
+    // on purpose: they are indistinguishable from a mention.
     if (target && (target.includes('/') || /\.[A-Za-z0-9]{1,5}$/.test(target))) {
       found.push({ at: m.index! + m[1]!.length, name: { kind: 'path', text: target } })
     }

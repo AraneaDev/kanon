@@ -80,4 +80,33 @@ describe('extractNames', () => {
       { kind: 'path', text: 'src/b.ts' },
     ])
   })
+
+  test('dotted identifiers are not paths, known file names still are', () => {
+    expect(one('`Object.keys` `path.join`')).toEqual([])
+    expect(one('`CLAUDE.md` `package.json` `.env`')).toEqual([
+      { kind: 'path', text: 'CLAUDE.md' },
+      { kind: 'path', text: 'package.json' },
+      { kind: 'path', text: '.env' },
+    ])
+  })
+
+  test('yarn install is not a script', () => {
+    expect(one('`yarn install`')).toEqual([])
+  })
+
+  test('--flag=value yields the flag alone', () => {
+    expect(one('`--session=abc`')).toEqual([{ kind: 'flag', text: '--session' }])
+  })
+
+  test('a numeric extension in prose is not a path', () => {
+    expect(one('version 1.0 and v1.2.3 shipped')).toEqual([])
+  })
+
+  test('an anchored extensionless path is a path', () => {
+    expect(one('run ./x/y first')).toEqual([{ kind: 'path', text: './x/y' }])
+  })
+
+  test('a path inside a Markdown link is a path', () => {
+    expect(one('[guide](docs/guide.md)')).toEqual([{ kind: 'path', text: 'docs/guide.md' }])
+  })
 })
