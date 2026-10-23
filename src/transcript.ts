@@ -68,7 +68,15 @@ function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
 }
 
-export function readTranscript(text: string): TranscriptFacts {
+/**
+ * `since` scopes the facts to one run. A transcript outlives a run: resume,
+ * clear and compact all append to the same file, from whatever directory the
+ * session is in by then, so without it an earlier run's loads in another root
+ * would be attributed to this one. A record with no parseable timestamp
+ * cannot be placed on either side of the boundary and is dropped.
+ */
+export function readTranscript(text: string, since: Date | null = null): TranscriptFacts {
+  const floor = since === null ? null : since.getTime()
   const seen = new Set<string>()
   const pending: Pending[] = []
   const runs: HookRun[] = []
@@ -85,6 +93,10 @@ export function readTranscript(text: string): TranscriptFacts {
     }
     if (!rec) continue
     const t = str(rec.timestamp) ?? ''
+    if (floor !== null) {
+      const at = Date.parse(t)
+      if (!Number.isFinite(at) || at < floor) continue
+    }
 
     const att = obj(rec.attachment)
     if (att) {

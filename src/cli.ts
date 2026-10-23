@@ -7,7 +7,7 @@ import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
-import { prune, readStart } from './limits'
+import { prune, readStart, readTail } from './limits'
 import { cleanLine, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
@@ -18,7 +18,7 @@ import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
 import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
 import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
-import type { Classified, Origin, Report } from './types'
+import type { Classified, Event, Origin, Report } from './types'
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`)
@@ -151,21 +151,28 @@ function collect(session: string, cwd: string): Report {
   const { root, candidates, skipped, importedBy } = discover(cwd, home)
   const previous = readSnapshot(kanonHome(), root)
 
-  const { instructions } = transcriptFacts(transcriptOf(events))
+  const { instructions } = transcriptFacts(events)
   return buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null, instructions)
 }
 
 /**
- * What the session transcript says, or nothing. Read by its start through
- * the size ceiling: a long session's transcript runs to many megabytes, and
- * the session-start loads sit at its head. A missing or unreadable transcript
- * is no evidence either way, so it degrades to EMPTY_FACTS rather than
- * costing the report.
+ * What the session transcript says about the current run, or nothing.
+ *
+ * One transcript spans every run of a session, possibly in several roots, so
+ * it is read by its tail, where the current run is, and cut at the run's
+ * start. `events` are already this run's only, so their last start event is
+ * the boundary. Kanon's own `t` is truncated to the second, which puts it at
+ * or before every transcript record of the same run, so no slack is needed.
+ * No start event, or a missing or unreadable transcript, is no evidence about
+ * this run and degrades to EMPTY_FACTS rather than costing the report.
  */
-function transcriptFacts(path: string | null): TranscriptFacts {
-  if (path === null) return EMPTY_FACTS
-  const buf = readStart(path)
-  return buf === null ? EMPTY_FACTS : readTranscript(buf.toString('utf8'))
+function transcriptFacts(events: Event[]): TranscriptFacts {
+  const path = transcriptOf(events)
+  let since: Date | null = null
+  for (const e of events) if (e.ev === 'start') since = new Date(e.t)
+  if (path === null || since === null || Number.isNaN(since.getTime())) return EMPTY_FACTS
+  const buf = readTail(path)
+  return buf === null ? EMPTY_FACTS : readTranscript(buf.toString('utf8'), since)
 }
 
 /**

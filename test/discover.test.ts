@@ -304,3 +304,17 @@ test('AGENTS.md is not predicted beside a CLAUDE.md', () => {
   expect(paths).toContain(join(repo, 'CLAUDE.md'))
   expect(paths).not.toContain(join(repo, 'AGENTS.md'))
 })
+
+test('a .claude/CLAUDE.md alone also keeps AGENTS.md from being predicted', () => {
+  const dir = tmp('kanon-d-agents-dot-')
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  mkdirSync(join(repo, '.claude'), { recursive: true })
+  writeFileSync(join(repo, '.claude', 'CLAUDE.md'), '# Project\n')
+  writeFileSync(join(repo, 'AGENTS.md'), 'Prefer short answers.\n')
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+  const paths = discover(repo, home).candidates.map((c) => c.path)
+  expect(paths).toContain(join(repo, '.claude', 'CLAUDE.md'))
+  expect(paths).not.toContain(join(repo, 'AGENTS.md'))
+})

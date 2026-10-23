@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 
 import { diff, digest, type Drift, type SnapshotEntry } from './drift'
 import { classify, hasDependencySegment } from './origin'
@@ -117,8 +117,19 @@ export function buildReport(
   // InstructionsLoaded: AGENTS.md and the auto-memory MEMORY.md among them.
   // They are observations like any event, so they count as loaded, but an
   // event wins: it was recorded as the load happened, with its real reason.
+  //
+  // A transcript-only load is admitted only under the root or the Claude
+  // config dir. The files the transcript adds are a project's AGENTS.md and
+  // the auto-memory, which live there; a genuinely foreign file fires
+  // InstructionsLoaded anyway, so this backstop loses nothing. What it stops
+  // is a load from another run in another root, which would otherwise read as
+  // FOREIGN: the worst output this tool has.
+  const realRoot = realPath(resolve(root))
+  const realHome = realPath(resolve(homeConfig))
+  const within = (p: string, base: string): boolean => p === base || p.startsWith(base.endsWith(sep) ? base : base + sep)
   for (const t of transcriptLoads) {
     const p = realPath(resolve(root, t.path))
+    if (!firstReason.has(p) && !within(p, realRoot) && !within(p, realHome)) continue
     if (!firstReason.has(p)) {
       firstReason.set(p, 'transcript')
       loadedOrder.push(p)

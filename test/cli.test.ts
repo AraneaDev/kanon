@@ -1073,7 +1073,7 @@ test('report counts an AGENTS.md that only the transcript saw load', async () =>
   const transcript = join(home, 'transcript.jsonl')
   writeFileSync(
     transcript,
-    JSON.stringify({ type: 'attachment', attachment: { type: 'instructions', files: [{ path: join(repo, 'AGENTS.md'), type: 'Project' }] } }) + '\n',
+    JSON.stringify({ type: 'attachment', timestamp: '2026-10-24T00:00:00.400Z', attachment: { type: 'instructions', files: [{ path: join(repo, 'AGENTS.md'), type: 'Project' }] } }) + '\n',
   )
   mkdirSync(join(home, 'sessions'), { recursive: true })
   writeFileSync(
@@ -1098,4 +1098,50 @@ test('report still runs when the transcript named at session start is gone', asy
   const out = await run(['report', '--session', 's', '--cwd', repo], env)
   expect(out).toContain('CLAUDE.md')
   expect(out).toContain('session_start')
+})
+
+/**
+ * One transcript spans every run of a session, so its head belongs to the
+ * first run. Run one here was in the main checkout and run two, after a
+ * compact, in a worktree of it: the main checkout's CLAUDE.md is outside the
+ * worktree's root, and counting it would report the project's own file as
+ * FOREIGN.
+ */
+test('transcript loads from an earlier run in another root are not counted', async () => {
+  const { home, repo, env } = isolated('kanon-cli-tworoots-')
+  writeFileSync(join(repo, 'CLAUDE.md'), '# main checkout\n')
+  const wt = join(repo, '.worktrees', 'wt')
+  mkdirSync(wt, { recursive: true })
+  writeFileSync(join(wt, '.git'), 'gitdir: ../../.git/worktrees/wt\n')
+  writeFileSync(join(wt, 'CLAUDE.md'), '# worktree\n')
+  writeFileSync(join(wt, 'AGENTS.md'), '# never loads beside CLAUDE.md\n')
+
+  const transcript = join(home, 'transcript.jsonl')
+  const att = (t: string, path: string) =>
+    JSON.stringify({ type: 'attachment', timestamp: t, attachment: { type: 'instructions', files: [{ path, type: 'Project' }] } })
+  writeFileSync(
+    transcript,
+    [att('2026-10-24T00:00:00.400Z', join(repo, 'CLAUDE.md')), att('2026-10-24T00:10:00.400Z', join(wt, 'CLAUDE.md'))].join('\n') + '\n',
+  )
+
+  const start = (t: string, cwd: string, source: string) =>
+    ({ t, hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd, source, transcript_path: transcript } })
+  const load = (t: string, cwd: string, file: string) =>
+    ({ t, hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd, file_path: file, load_reason: 'session_start' } })
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  writeFileSync(
+    join(home, 'sessions', 's.jsonl'),
+    [
+      start('2026-10-24T00:00:00Z', repo, 'startup'),
+      load('2026-10-24T00:00:00Z', repo, join(repo, 'CLAUDE.md')),
+      start('2026-10-24T00:10:00Z', wt, 'compact'),
+      load('2026-10-24T00:10:00Z', wt, join(wt, 'CLAUDE.md')),
+    ].map((l) => JSON.stringify(l)).join('\n') + '\n',
+  )
+
+  const out = await run(['report', '--session', 's', '--cwd', wt], env)
+  expect(out).toContain('CLAUDE.md')
+  expect(out).not.toContain('FOREIGN')
+  expect(out).not.toContain('reachability model disagrees')
+  expect(out).not.toContain(join(repo, 'CLAUDE.md'))
 })

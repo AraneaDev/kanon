@@ -95,3 +95,20 @@ test('renamed fields degrade to empty lists instead of throwing', () => {
   const odd = ['{"type":"attachment","attachment":{"type":"instructions","files":"nope"}}', '{"attachment":null}', '[]', 'null', '7']
   expect(readTranscript(odd.join('\n'))).toEqual(EMPTY_FACTS)
 })
+
+test('since keeps only records at or after it, and drops records with no timestamp', () => {
+  const att = (path: string, timestamp?: string) =>
+    JSON.stringify({ type: 'attachment', ...(timestamp ? { timestamp } : {}), attachment: { type: 'instructions', files: [{ path, type: 'Project' }] } })
+  const text = [
+    att('/home/user/example/earlier.md', '2026-10-24T00:00:00.400Z'),
+    att('/home/user/example/undated.md'),
+    att('/home/user/example/exact.md', '2026-10-24T00:10:00.000Z'),
+    att('/home/user/example/later.md', '2026-10-24T00:10:00.400Z'),
+  ].join('\n')
+  const since = new Date('2026-10-24T00:10:00Z')
+  expect(readTranscript(text, since).instructions.map((i) => i.path)).toEqual([
+    '/home/user/example/exact.md',
+    '/home/user/example/later.md',
+  ])
+  expect(readTranscript(text).instructions).toHaveLength(4)
+})

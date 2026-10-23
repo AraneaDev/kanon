@@ -416,3 +416,16 @@ test('a transcript load the model never predicted still questions the model', ()
   const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: '/repo/odd.md', type: 'Project' }])
   expect(r.modelDisagrees).toEqual(['/repo/odd.md'])
 })
+
+test('a transcript-only load outside root and homeConfig is not admitted', () => {
+  const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: '/elsewhere/CLAUDE.md', type: 'Project' }])
+  expect(r.loaded).toEqual([])
+  expect(r.modelDisagrees).toEqual([])
+})
+
+test('an event load outside root is still reported, whatever the transcript says', () => {
+  const r = buildReport(normalise([line('/elsewhere/CLAUDE.md')]), [], ROOT, HOME, new Map(), [], null, [
+    { path: '/elsewhere/CLAUDE.md', type: 'Project' },
+  ])
+  expect(r.loaded.map((f) => [f.path, f.reason])).toEqual([['/elsewhere/CLAUDE.md', 'session_start']])
+})

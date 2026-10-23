@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MAX_FILE_BYTES, prune, readStart, tooLarge } from '../src/limits'
+import { MAX_FILE_BYTES, prune, readStart, readTail, tooLarge } from '../src/limits'
 import { tmp } from './tmp'
 
 test('a small file is not too large', () => {
@@ -217,4 +217,21 @@ test('readStart returns at most max bytes', () => {
   writeFileSync(f, Buffer.alloc(100, 0x61))
 
   expect(readStart(f, 10)?.length).toBe(10)
+})
+
+test('readTail reads a small file whole', () => {
+  const f = join(tmp('kanon-tail-'), 'small.jsonl')
+  writeFileSync(f, 'one\ntwo\n')
+  expect(readTail(f, 1024)?.toString('utf8')).toBe('one\ntwo\n')
+})
+
+test('readTail drops the partial first line when it starts mid-file', () => {
+  const f = join(tmp('kanon-tail-'), 'big.jsonl')
+  writeFileSync(f, 'aaaaaaaa\nbbbb\ncccc\n')
+  // The last 8 bytes start inside "bbbb", so that fragment is not a line.
+  expect(readTail(f, 8)?.toString('utf8')).toBe('cccc\n')
+})
+
+test('readTail is null for an unreadable path', () => {
+  expect(readTail(join(tmp('kanon-tail-'), 'absent'))).toBeNull()
 })
