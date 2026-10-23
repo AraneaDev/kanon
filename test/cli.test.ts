@@ -3,7 +3,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFile
 import { join } from 'node:path'
 import { hashFile, SNAPSHOT_VERSION } from '../src/drift'
 import { sessionRoot } from '../src/origin'
-import { readAcks, readSnapshot, readSteering, readWatermark, steeringPath, writeAcks, writeSnapshot, writeSteering } from '../src/state'
+import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, steeringPath, writeAcks, writeSnapshot, writeSteering, writeWatermark } from '../src/state'
 import type { Steered } from '../src/steering'
 import { tmp } from './tmp'
 
@@ -1432,4 +1432,46 @@ test('read.sh hands a memory Read to warn when a steering cache exists', async (
   const r = await readHook(readPayload(path), home)
   expect(r.code).toBe(0)
   expect(r.args?.slice(1, 10)).toEqual(['warn', '--session', 'abc', '--path', path, '--cwd', '/home/user/repo', '--hook', ''])
+})
+
+// --- notice: a flagged rule that loads mid-session ---------------------------
+
+/** A project rule flagged in the cache, plus a session log that loads it for `reason`. */
+function withFlaggedRule(prefix: string, reason: string, acknowledged = false) {
+  const { home, repo, env } = isolated(prefix)
+  mkdirSync(join(repo, '.claude', 'rules'), { recursive: true })
+  const rule = realpathSync(join(repo, '.claude', 'rules')) + '/ci.md'
+  writeFileSync(rule, 'Run `scripts/ci.sh`.\n')
+  writeSteering(home, sessionRoot(repo), [{ path: rule, kind: 'instruction', origin: 'project', digest: hashFile(rule), verdict: GONE, acknowledged }])
+  starts(home, repo, 'startup')
+  const line = { t: '2026-10-24T00:00:00Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: rule, load_reason: reason } }
+  appendFileSync(join(home, 'sessions', 's.jsonl'), `${JSON.stringify(line)}\n`)
+  return { home, repo, env, rule }
+}
+
+test('notice warns about a gone rule that loaded for path_glob_match, once per epoch', async () => {
+  const { home, repo, env, rule } = withFlaggedRule('kanon-notice-flag-', 'path_glob_match')
+  const out = await run(['notice', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain(`KANON  ${join('.claude', 'rules', 'ci.md')}`)
+  expect(out).toContain('which no longer exists')
+  expect(out).toContain('ack --cwd')
+  expect(readWarned(home, 's').paths).toEqual([rule])
+  // Replay the same load after the watermark is reset: the warned record keeps it quiet.
+  writeWatermark(home, 's', 0)
+  expect((await run(['notice', '--session', 's', '--cwd', repo], env)).trim()).toBe('')
+  // A compact starts a new epoch, and the next load of it warns again.
+  starts(home, repo, 'compact')
+  appendFileSync(join(home, 'sessions', 's.jsonl'), `${JSON.stringify({ t: '2026-10-24T00:00:00Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: rule, load_reason: 'path_glob_match' } })}\n`)
+  writeWatermark(home, 's', 0)
+  expect(await run(['notice', '--session', 's', '--cwd', repo], env)).toContain('which no longer exists')
+})
+
+test('notice stays silent for a flagged rule the brief already named', async () => {
+  const { repo, env } = withFlaggedRule('kanon-notice-brief-', 'session_start')
+  expect((await run(['notice', '--session', 's', '--cwd', repo], env)).trim()).toBe('')
+})
+
+test('notice stays silent for an acknowledged flagged rule', async () => {
+  const { repo, env } = withFlaggedRule('kanon-notice-ack-', 'path_glob_match', true)
+  expect((await run(['notice', '--session', 's', '--cwd', repo], env)).trim()).toBe('')
 })

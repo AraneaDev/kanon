@@ -1,6 +1,8 @@
 import { wrap, type Excerpt } from './brief'
 import { short } from './paths'
+import type { Steered } from './steering'
 import type { Classified } from './types'
+import { warning } from './warning'
 
 /**
  * The `load_reason` values the session-start brief has already accounted
@@ -20,6 +22,13 @@ export interface NoticeInput {
   root: string
   /** Foreign loads recorded since the watermark, already filtered. */
   files: Classified[]
+  /**
+   * Flagged items that loaded since the watermark for a reason the brief did
+   * not cover, not acknowledged, not yet warned this epoch. Absent means none.
+   */
+  flagged?: Steered[]
+  /** The CLI path warning() prints in its ack command. */
+  cli?: string
 }
 
 /**
@@ -36,7 +45,8 @@ export interface NoticeInput {
  */
 export function notice(input: NoticeInput, excerpt: Excerpt = () => null): string {
   const { root, files } = input
-  if (files.length === 0) return ''
+  const flagged = (input.flagged ?? []).map((s) => warning(s, root, input.cli ?? '')).filter((w) => w.length > 0)
+  if (files.length === 0) return flagged.join('\n')
 
   const one = files.length === 1
   const out: string[] = [
@@ -56,5 +66,6 @@ export function notice(input: NoticeInput, excerpt: Excerpt = () => null): strin
     ),
   )
 
+  if (flagged.length > 0) out.push('', ...flagged)
   return out.join('\n')
 }

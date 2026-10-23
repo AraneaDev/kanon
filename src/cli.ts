@@ -571,6 +571,25 @@ function freshForeign(lines: string[], root: string, home: string): Classified[]
   return fresh
 }
 
+/**
+ * The flagged items among `lines` that loaded for a reason the brief did not
+ * already name, in the steering cache with a verdict, not acknowledged, and
+ * not in `warned`. Loaded paths are realpathed to meet the cache's keys.
+ */
+function freshFlagged(lines: string[], root: string, warned: string[]): Steered[] {
+  const cache = readSteering(kanonHome(), root) ?? []
+  const flagged: Steered[] = []
+  for (const e of normalise(lines)) {
+    if (e.ev !== 'loaded' || BRIEFED_REASONS.has(e.reason)) continue
+    const path = realPath(resolve(root, e.path))
+    const item = cache.find((s) => s.path === path)
+    if (!item || item.verdict === null || item.acknowledged) continue
+    if (warned.includes(path) || flagged.some((f) => f.path === path)) continue
+    flagged.push(item)
+  }
+  return flagged
+}
+
 function runNotice(session: string | undefined, cwd: string): void {
   // Nothing recorded means nothing to say, exactly as with `alarm`.
   if (!session || !existsSync(sessionFile(session))) return
@@ -603,7 +622,13 @@ function runNotice(session: string | undefined, cwd: string): void {
   const root = sessionRoot(cwd)
   const fresh = freshForeign(lines.slice(seen), root, claudeHome())
 
-  const text = notice({ root, files: fresh }, firstDirective)
+  const slice = lines.slice(seen)
+  const now = epoch(session)
+  const warned = readWarned(kanonHome(), session)
+  const warnedPaths = warned.epoch === now ? warned.paths : []
+  const flagged = freshFlagged(slice, root, warnedPaths)
+
+  const text = notice({ root, files: fresh, flagged, cli: CLI }, firstDirective)
   // Printed BEFORE the watermark advances. A crash between the two repeats
   // an alarm on the next turn; the reverse order would lose one, and for
   // an alarm a duplicate is the safe failure and silence is not.
@@ -615,6 +640,13 @@ function runNotice(session: string | undefined, cwd: string): void {
   } catch {
     // A watermark that cannot be written costs a repeated notice, never a
     // lost one. Never worth failing the command over.
+  }
+  if (flagged.length > 0) {
+    try {
+      writeWarned(kanonHome(), session, { epoch: now, paths: [...warnedPaths, ...flagged.map((f) => f.path)] })
+    } catch {
+      // A record that cannot be written costs a repeated warning, never a lost one.
+    }
   }
 }
 
