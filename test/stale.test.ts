@@ -11,14 +11,22 @@ function fake(o: {
   changed?: string[]
   /** Repo-relative tracked paths; empty (known, nothing tracked) by default, null for unknown. */
   tracked?: string[] | null
+  /** Names git ignores; none by default. */
+  ignored?: string[]
 }) {
-  const calls = { exists: [] as string[], code: [] as string[][], changed: [] as Array<{ paths: string[]; since: Date }> }
+  const calls = {
+    exists: [] as string[],
+    code: [] as string[][],
+    changed: [] as Array<{ paths: string[]; since: Date }>,
+    ignored: [] as string[][],
+  }
   const probe: Probe = {
     exists: (p) => (calls.exists.push(p), (o.exist ?? []).includes(p)),
     occursInCode: (names) => (calls.code.push(names), new Set(names.filter((n) => (o.code ?? []).includes(n)))),
     scripts: () => (o.scripts === undefined ? new Set() : o.scripts === null ? null : new Set(o.scripts)),
     changedSince: (paths, since) => (calls.changed.push({ paths, since }), o.changed ?? []),
     trackedPaths: () => (o.tracked === null ? null : (o.tracked ?? [])),
+    ignored: (paths) => (calls.ignored.push(paths), new Set(paths.filter((p) => (o.ignored ?? []).includes(p)))),
   }
   return { probe, calls }
 }
@@ -205,6 +213,25 @@ describe('judge', () => {
   test('a name with an extension is judged whatever its first segment', () => {
     const { probe } = fake({ tracked: ['src/a.ts'] })
     expect(judge(item('see `docs/gone.md`'), ROOT, HOME, probe)?.level).toBe('gone')
+  })
+
+  /** `.superpowers/` in a rule about where working files go: ignored, so never there to find. */
+  test('a directory name git ignores gives no verdict, one ignore check per item', () => {
+    const { probe, calls } = fake({ tracked: ['src/a.ts'], ignored: ['.superpowers/', 'out/'] })
+    expect(judge(item('keep `.superpowers/` and `out/` out of commits'), ROOT, HOME, probe)).toBeNull()
+    expect(calls.ignored).toEqual([['.superpowers/', 'out/']])
+  })
+
+  test('a directory name git does not ignore is still gone', () => {
+    const { probe } = fake({ tracked: ['src/a.ts'], ignored: ['out/'] })
+    expect(judge(item('see `out/` and `build/`'), ROOT, HOME, probe)?.evidence).toBe('names `build/`, which no longer exists')
+  })
+
+  /** A pointer to one ignored file is a claim that it is there; only directories are exempt. */
+  test('an ignored file name is still gone', () => {
+    const { probe, calls } = fake({ tracked: ['src/a.ts'], ignored: ['docs/plan.md'] })
+    expect(judge(item('see `docs/plan.md`'), ROOT, HOME, probe)?.level).toBe('gone')
+    expect(calls.ignored).toEqual([])
   })
 
   test('a relative path gives no verdict when the tracked set is unknown', () => {

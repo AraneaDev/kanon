@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Probe } from './stale'
 
-function git(root: string, args: string[]): { code: number; out: string } | null {
+function git(root: string, args: string[], input?: string): { code: number; out: string } | null {
   try {
-    const p = Bun.spawnSync(['git', '-C', root, ...args], { stdout: 'pipe', stderr: 'ignore' })
+    const stdin = input === undefined ? 'ignore' : Buffer.from(input)
+    const p = Bun.spawnSync(['git', '-C', root, ...args], { stdin, stdout: 'pipe', stderr: 'ignore' })
     return { code: p.exitCode, out: p.stdout.toString() }
   } catch {
     return null
@@ -52,6 +53,17 @@ export function gitProbe(root: string): Probe {
       const r = git(root, ['ls-files', '-z'])
       if (r && r.code === 0) tracked = r.out.split('\0').filter(Boolean)
       return tracked
+    },
+
+    ignored(paths) {
+      // `--no-index` asks the ignore rules alone, so a name that does not
+      // exist is still answered. Exit 1 means none is ignored; anything else
+      // but 0 is a failure, and unknown reads as ignored so it is never gone.
+      const r = git(root, ['check-ignore', '--no-index', '--stdin', '-z'], paths.join('\0') + '\0')
+      if (r && r.code === 1) return new Set()
+      if (!r || r.code !== 0) return new Set(paths)
+      const hit = new Set(r.out.split('\0').filter(Boolean))
+      return new Set(paths.filter((p) => hit.has(p)))
     },
 
     occursInCode(names) {

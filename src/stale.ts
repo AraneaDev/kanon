@@ -20,6 +20,8 @@ export interface Probe {
   changedSince(paths: string[], since: Date): string[]
   /** Repo-relative paths of every tracked file, or null when unknown (not a repo, git failed). */
   trackedPaths(): string[] | null
+  /** The subset of repo-relative `paths` git would ignore; all of them when unknown. */
+  ignored(paths: string[]): Set<string>
 }
 
 export interface Item {
@@ -138,6 +140,18 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
   const inCode = unique.length ? probe.occursInCode(unique) : new Set<string>()
   const scripts = checkable.some((n) => n.kind === 'script') ? probe.scripts() : null
 
+  // A directory name git ignores (`.superpowers/`, `releases/`) is a place
+  // for files the project keeps out of the tree, usually named in a rule
+  // saying so. It is absent from every fresh checkout, so its absence is not
+  // evidence. A named file inside one is still a claim that it is there.
+  // One ignore check per item, for the directory names that would be gone.
+  const misses = checkable.filter((n) => n.kind === 'path' && found.get(n.text) === null && !isPinned(n.text))
+  const tracked = misses.length ? probe.trackedPaths() : null
+  const dirs = tracked
+    ? misses.filter((n) => n.text.endsWith('/') && !tracked.some((p) => tracks(p, n.text))).map((n) => n.text)
+    : []
+  const ignored = dirs.length ? probe.ignored(dirs) : new Set<string>()
+
   for (const n of checkable) {
     if (n.kind === 'path') {
       if (found.get(n.text) !== null) continue
@@ -151,9 +165,8 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
       // new false gone each time a note named a file another way, so it is
       // gone only when no tracked path matches it at all. An unknown
       // tracked set is a tooling failure, not evidence.
-      const tracked = probe.trackedPaths()
       if (tracked === null || tracked.some((p) => tracks(p, n.text))) continue
-      if (!underTrackedDir(n.text, tracked)) continue
+      if (!underTrackedDir(n.text, tracked) || ignored.has(n.text)) continue
       return gone(n.text)
     } else if (n.kind === 'script') {
       if (scripts && !scripts.has(n.text)) return gone(n.text)

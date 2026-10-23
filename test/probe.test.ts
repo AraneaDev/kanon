@@ -196,3 +196,22 @@ describe('gitProbe.trackedPaths', () => {
     expect(gitProbe(tmp('kanon-nogit-')).trackedPaths()).toBeNull()
   })
 })
+
+describe('gitProbe.ignored', () => {
+  test('returns the names git ignores, whether or not they exist', () => {
+    const root = repo()
+    commit(root, { '.gitignore': '/.superpowers/\nout/\n', 'src/a.ts': 'x' }, '2026-01-01T00:00:00Z')
+    expect(gitProbe(root).ignored(['.superpowers/', 'deep/out/', 'src/', 'build/'])).toEqual(new Set(['.superpowers/', 'deep/out/']))
+  })
+
+  test('is empty when nothing is ignored', () => {
+    const root = repo()
+    commit(root, { 'src/a.ts': 'x' }, '2026-01-01T00:00:00Z')
+    expect(gitProbe(root).ignored(['build/'])).toEqual(new Set())
+  })
+
+  /** Not knowing is never evidence: outside a repository every name reads as ignored, so none is gone. */
+  test('reads every name as ignored outside a repository', () => {
+    expect(gitProbe(tmp('kanon-nogit-')).ignored(['build/'])).toEqual(new Set(['build/']))
+  })
+})
