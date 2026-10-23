@@ -63,4 +63,22 @@ describe('pluginIndex / ownerOf', () => {
     symlinkSync(join(outside, 'm'), join(cache, 'm'))
     expect(pluginIndex(cache).size).toBe(0)
   })
+
+  test('a command shipped by two different plugins is unattributed', () => {
+    const cache = tmp('kanon-attr-')
+    const cmd = '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start'
+    plugin(cache, 'm', 'first-plugin', '1', hooks(cmd))
+    plugin(cache, 'm', 'second-plugin', '1', hooks(cmd))
+    expect(ownerOf(cmd, pluginIndex(cache))).toBe('unattributed')
+  })
+
+  test('a hooks.json that is itself a symlink is not read', () => {
+    const cache = tmp('kanon-attr-')
+    const outside = tmp('kanon-attr-out-')
+    writeFileSync(join(outside, 'hooks.json'), hooks('run-linked'))
+    const dir = join(cache, 'm', 'p', '1', 'hooks')
+    mkdirSync(dir, { recursive: true })
+    symlinkSync(join(outside, 'hooks.json'), join(dir, 'hooks.json'))
+    expect(pluginIndex(cache).size).toBe(0)
+  })
 })
