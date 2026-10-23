@@ -180,10 +180,10 @@ def wrap(cwd, path, reason, memory_type=None):
     return json.dumps({"t": "2026-08-27T09:14:02Z", "hook": "InstructionsLoaded", "raw": raw})
 
 
-def wrap_config(cwd, source, keys):
+def wrap_config(cwd, source, file_path):
     import json
     raw = {"session_id": "demo", "hook_event_name": "ConfigChange", "cwd": cwd,
-           "config_source": source, "changed_keys": keys}
+           "source": source, "file_path": file_path}
     return json.dumps({"t": "2026-08-27T09:58:40Z", "hook": "ConfigChange", "raw": raw})
 
 
@@ -279,7 +279,7 @@ def drifted(home, repo, claude):
     also trip the reachability NOTE and the COULD NOT READ section, and this
     shot is about drift.
     """
-    base = loaded_session(repo) + [wrap_config(str(repo), "skills", ["a"])]
+    base = loaded_session(repo) + [wrap_config(str(repo), "skills", str(claude / "skills" / "nl-taal" / "SKILL.md"))]
     retired = repo / ".claude" / "rules" / "legacy.md"
     write(retired, "# Legacy\n\nSuperseded by the style rules.\n")
 

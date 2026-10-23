@@ -46,8 +46,11 @@ export function currentRun(lines: string[]): string[] {
  *
  * `file_path`, `load_reason` and `memory_type` are the InstructionsLoaded
  * field names, confirmed against a live session on 2026-08-27 (see
- * test/fixtures/payloads/). This function is the only place in the codebase
- * that names them, so if Anthropic renames one, this is a one-place edit.
+ * test/fixtures/payloads/). ConfigChange's are `source` and an optional
+ * `file_path`, confirmed on 2026-10-23; the `config_source` and
+ * `changed_keys` the documentation once suggested never occur. This function
+ * is the only place in the codebase that names them, so if Anthropic renames
+ * one, this is a one-place edit.
  */
 export function normalise(lines: string[]): Event[] {
   const out: Event[] = []
@@ -89,11 +92,9 @@ export function normalise(lines: string[]): Event[] {
     }
 
     if (w.hook === 'ConfigChange') {
-      const source = typeof raw.config_source === 'string' ? raw.config_source : 'unknown'
-      const keys = Array.isArray(raw.changed_keys)
-        ? raw.changed_keys.filter((k): k is string => typeof k === 'string')
-        : []
-      out.push({ t, ev: 'config', source, keys })
+      const source = typeof raw.source === 'string' ? raw.source : 'unknown'
+      const path = typeof raw.file_path === 'string' ? raw.file_path : null
+      out.push({ t, ev: 'config', source, path })
       continue
     }
 

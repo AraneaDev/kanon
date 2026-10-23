@@ -24,7 +24,7 @@ export interface LoadEvent {
   reason: string
   memoryType: string | null
 }
-export interface ConfigEvent { t: string; ev: 'config'; source: string; keys: string[] }
+export interface ConfigEvent { t: string; ev: 'config'; source: string; path: string | null }
 export interface UnparsedEvent { t: string; ev: 'unparsed'; raw: string }
 export type Event = LoadEvent | ConfigEvent | UnparsedEvent
 

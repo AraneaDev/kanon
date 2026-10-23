@@ -171,7 +171,11 @@ export function render(report: Report, paint: Paint = PLAIN): string {
     out.push('')
     out.push(paint.heading('CONFIG CHANGED'))
     for (const e of report.config) {
-      out.push(`  ${e.t.slice(11, 16)}  ${e.source}  ${paint.note(`(+${e.keys.length})`)}`)
+      // The file is the useful half: `skills` alone does not say which skill
+      // changed. Claude Code marks `file_path` optional, so a row may stop at
+      // the source, and then it stops cleanly rather than with trailing spaces.
+      const what = e.path === null ? '' : `  ${paint.path(short(e.path, root))}`
+      out.push(`  ${e.t.slice(11, 16)}  ${e.source}${what}`)
     }
   }
 

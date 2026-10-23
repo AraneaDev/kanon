@@ -122,44 +122,42 @@ test('a payload with no timestamp normalises with an empty one, not undefined', 
 })
 
 /**
- * ConfigChange's field names are the ones Kanon has never seen on a live
- * payload (see the README's status note). Each is therefore read
- * defensively: a source it cannot read is reported as `unknown` rather than
- * guessed at, which is what makes a renamed field show up as a visibly
- * useless row instead of a confident wrong one.
+ * ConfigChange carries `source` and an optional `file_path`, confirmed on
+ * live payloads on 2026-10-23. Kanon had read `config_source` and
+ * `changed_keys` from the documentation, neither of which Claude Code sends,
+ * so every config row printed `unknown  (+0)` until the fixture was captured.
  */
-test('a ConfigChange with no usable config_source is reported as unknown, never guessed', () => {
-  const line = JSON.stringify({
-    t: '2026-08-27T06:58:00Z',
-    hook: 'ConfigChange',
-    raw: { config_source: null, changed_keys: ['skills'] },
+test('a live ConfigChange payload yields its source and file path', async () => {
+  const raw = await Bun.file(new URL('./fixtures/payloads/config-change.json', import.meta.url)).json()
+
+  const [e] = normalise([JSON.stringify({ t: '2026-10-02T21:07:00Z', hook: 'ConfigChange', raw })])
+
+  expect(e).toEqual({
+    t: '2026-10-02T21:07:00Z',
+    ev: 'config',
+    source: 'skills',
+    path: '/root/judge/.claude/skills/judge-report/SKILL.md',
   })
-
-  const [e] = normalise([line])
-
-  expect(e).toEqual({ t: '2026-08-27T06:58:00Z', ev: 'config', source: 'unknown', keys: ['skills'] })
 })
 
-test('a ConfigChange whose changed_keys is not a list yields no keys rather than throwing', () => {
-  const line = JSON.stringify({
-    t: '2026-08-27T06:58:00Z',
-    hook: 'ConfigChange',
-    raw: { config_source: 'skills', changed_keys: 'skills' },
-  })
+test('a ConfigChange with no file_path yields a null path', () => {
+  const line = JSON.stringify({ t: '2026-10-02T21:07:00Z', hook: 'ConfigChange', raw: { source: 'user_settings' } })
 
   const [e] = normalise([line])
 
-  expect(e).toMatchObject({ ev: 'config', source: 'skills', keys: [] })
+  expect(e).toEqual({ t: '2026-10-02T21:07:00Z', ev: 'config', source: 'user_settings', path: null })
 })
 
-test('non-string entries in changed_keys are dropped and the string ones kept', () => {
-  const line = JSON.stringify({
-    t: '2026-08-27T06:58:00Z',
-    hook: 'ConfigChange',
-    raw: { config_source: 'settings', changed_keys: ['a', 7, null, 'b'] },
-  })
+/**
+ * A source Kanon cannot read is reported as `unknown` rather than guessed
+ * at, which is what makes a renamed field show up as a visibly useless row
+ * instead of a confident wrong one. The old documented name is not a
+ * fallback: it never existed on a live payload.
+ */
+test('a ConfigChange with no usable source is reported as unknown, never guessed', () => {
+  const line = JSON.stringify({ t: '2026-10-02T21:07:00Z', hook: 'ConfigChange', raw: { source: 7, config_source: 'skills' } })
 
   const [e] = normalise([line])
 
-  expect(e).toMatchObject({ ev: 'config', keys: ['a', 'b'] })
+  expect(e).toMatchObject({ ev: 'config', source: 'unknown' })
 })

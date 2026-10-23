@@ -60,12 +60,16 @@ test('warns when the reachability model disagrees with reality', () => {
   expect(render(r)).toContain('reachability model disagrees')
 })
 
-test('renders a config change', () => {
+test('a config change row names its source and the file that changed', () => {
   const r = base()
-  r.config = [{ t: '2026-08-27T00:52:00Z', ev: 'config', source: 'skills', keys: ['a', 'b'] }]
-  const out = render(r)
-  expect(out).toContain('CONFIG CHANGED')
-  expect(out).toContain('skills')
+  r.config = [
+    { t: '2026-08-27T06:58:00Z', ev: 'config', source: 'skills', path: '/repo/.claude/skills/x/SKILL.md' },
+    { t: '2026-08-27T06:58:00Z', ev: 'config', source: 'user_settings', path: null },
+  ]
+  const lines = render(r).split('\n')
+  expect(lines).toContain('CONFIG CHANGED')
+  expect(lines).toContain('  06:58  skills  .claude/skills/x/SKILL.md')
+  expect(lines).toContain('  06:58  user_settings')
 })
 
 test('a clean session still renders without throwing', () => {
@@ -125,7 +129,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
       { path: '/root/Knossos-MCP/docs/CLAUDE.md', label: 'on-demand', rule: 'subdirectory' },
       { path: '/root/Knossos-MCP/.claude/rules/api.md', label: 'path-scoped', rule: 'paths' },
     ],
-    config: [{ t: '2026-08-27T00:52:00Z', ev: 'config', source: 'skills', keys: ['a'] }],
+    config: [{ t: '2026-08-27T00:52:00Z', ev: 'config', source: 'skills', path: null }],
     modelDisagrees: [],
     skipped: [],
     drift: null,
@@ -138,7 +142,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
   expect(out).toContain('  missing    .claude/rules/testing.md             expected at launch')
   expect(out).toContain('  quiet      docs/CLAUDE.md                       on-demand, not triggered')
   expect(out).toContain('  quiet      .claude/rules/api.md                 path-scoped, no match')
-  expect(out).toContain('  00:52  skills  (+1)')
+  expect(out.split('\n')).toContain('  00:52  skills')
 })
 
 test('a path longer than the path column still gets a space before the reason', () => {

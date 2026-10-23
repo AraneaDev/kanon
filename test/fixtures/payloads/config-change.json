@@ -1,0 +1,10 @@
+{
+  "session_id": "25c3efd0-01f7-4a1a-8251-92c38810fb62",
+  "transcript_path": "/root/.claude/projects/-root-judge/25c3efd0-01f7-4a1a-8251-92c38810fb62.jsonl",
+  "cwd": "/root/judge/submissions/repos/z0rv-breadcrumbs",
+  "scratchpad_dir": "/tmp/claude-0/-root-judge/25c3efd0-01f7-4a1a-8251-92c38810fb62/scratchpad",
+  "prompt_id": "3c0f70f2-6edf-4038-9953-3020540db4e2",
+  "hook_event_name": "ConfigChange",
+  "source": "skills",
+  "file_path": "/root/judge/.claude/skills/judge-report/SKILL.md"
+}
