@@ -138,6 +138,10 @@ describe('extractNames', () => {
     expect(paths('Write `state/<id>.json`, `src/{name}.ts` and `~/.kanon/<session>/x`.')).toEqual([])
   })
 
+  test('a glob is a pattern, not a path', () => {
+    expect(paths('Rules are `**/*.md`; tests match `test/*.test.ts` and `src/[ab].ts`, or src/**/x.ts in prose.')).toEqual([])
+  })
+
   test('ordinary names are still taken', () => {
     expect(paths('Use `src/a.ts`, `~/.kanon/state/`, `/home/user/x.md` and `CLAUDE.md`.')).toEqual([
       'src/a.ts',

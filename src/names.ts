@@ -38,6 +38,9 @@ function notAPath(t: string): boolean {
   const parts = t.split('/').filter(Boolean)
   // `<id>`, `{name}`: a template for a path, never a path.
   if (parts.some((p) => /[<>{}]/.test(p))) return true
+  // `**/*.md`, `src/[ab].ts`: a glob, which matches files rather than
+  // naming one. A rule describing path-scoped frontmatter was called gone.
+  if (/[*?[\]]/.test(t)) return true
   if (t.startsWith('/')) {
     // `/kanon`, `/mcp`, `/kanon:report`: a slash command.
     if (parts.length <= 1) return true
