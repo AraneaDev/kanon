@@ -1,8 +1,14 @@
 # Payload fixtures
 
-Payloads captured verbatim from a live Claude Code session, kept so the
-normaliser is tested against what Claude Code actually sends rather than
-against what Kanon assumes it sends.
+Payloads captured from a live Claude Code session, kept so the normaliser is
+tested against what Claude Code actually sends rather than against what Kanon
+assumes it sends.
+
+The structure is verbatim: every field name, every field present, nothing
+added. The values are not. This repository is public, and a live payload
+carries a home path, session ids and the names of private files and projects,
+so each value is replaced by a synthetic one of the same type (`/home/user`,
+`example`, made-up UUIDs) wherever it does not change what the test checks.
 
 ## What the spike settled
 
@@ -36,6 +42,7 @@ Captured 2026-08-27 from a session in this repository.
 
 - `instructions-loaded.json` — a real `InstructionsLoaded` payload. Used by
   `test/normalise.test.ts`. Re-capture it from `~/.kanon/sessions/*.jsonl` if
-  Claude Code changes shape; the test is written to fail rather than adapt.
+  Claude Code changes shape, then replace its values as described above; the
+  test is written to fail rather than adapt.
 - `config-change.json` — a real `ConfigChange` payload, `source: "skills"`.
   Used by `test/normalise.test.ts`, under the same re-capture rule.

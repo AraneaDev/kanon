@@ -70,7 +70,7 @@ test('the payload captured from a live session normalises to a load event', asyn
   expect(e).toEqual({
     t: '2026-08-27T08:59:14Z',
     ev: 'loaded',
-    path: '/root/.claude/rules/schrijfstijl.md',
+    path: '/home/user/.claude/rules/style.md',
     reason: 'session_start',
     memoryType: 'User',
   })
@@ -136,7 +136,7 @@ test('a live ConfigChange payload yields its source and file path', async () => 
     t: '2026-10-02T21:07:00Z',
     ev: 'config',
     source: 'skills',
-    path: '/root/judge/.claude/skills/judge-report/SKILL.md',
+    path: '/home/user/example/.claude/skills/example-skill/SKILL.md',
   })
 })
 
