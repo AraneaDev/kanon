@@ -103,6 +103,36 @@ export function warnedPath(kanonHome: string, session: string): string {
   return join(stateDir(kanonHome), `${session}.warned`)
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+const isDigest = (v: unknown): v is string | null => v === null || typeof v === 'string'
+
+/**
+ * Entry guards for the cached lists. One bad entry is dropped rather than
+ * failing the file: the hooks consume these fields without checking, and a
+ * `null` reaching them would throw inside a session.
+ */
+function isSteered(v: unknown): v is Steered {
+  if (!isObj(v)) return false
+  const { path, kind, origin, digest, verdict, acknowledged } = v
+  const verdictOk =
+    verdict === null ||
+    (isObj(verdict) && (verdict.level === 'gone' || verdict.level === 'may-be-stale') && typeof verdict.evidence === 'string')
+  return (
+    typeof path === 'string' &&
+    (kind === 'instruction' || kind === 'memory') &&
+    typeof origin === 'string' &&
+    isDigest(digest) &&
+    verdictOk &&
+    typeof acknowledged === 'boolean'
+  )
+}
+
+function isAck(v: unknown): v is Ack {
+  if (!isObj(v)) return false
+  const { path, digest, named, t } = v
+  return typeof path === 'string' && isDigest(digest) && isObj(named) && Object.values(named).every(isDigest) && typeof t === 'string'
+}
+
 const STEERING_VERSION = 1
 const ACK_VERSION = 1
 const WARNED_VERSION = 1
@@ -132,7 +162,7 @@ function write(kanonHome: string, path: string, value: unknown): void {
 export function readSteering(kanonHome: string, root: string): Steered[] | null {
   const o = readObject(steeringPath(kanonHome, root))
   if (!o || o.v !== STEERING_VERSION || o.root !== root || !Array.isArray(o.items)) return null
-  return o.items as Steered[]
+  return o.items.filter(isSteered)
 }
 
 export function writeSteering(kanonHome: string, root: string, items: Steered[]): void {
@@ -146,7 +176,7 @@ export function writeSteering(kanonHome: string, root: string, items: Steered[])
 export function readAcks(kanonHome: string, root: string): Ack[] {
   const o = readObject(ackPath(kanonHome, root))
   if (!o || o.v !== ACK_VERSION || o.root !== root || !Array.isArray(o.acks)) return []
-  return o.acks as Ack[]
+  return o.acks.filter(isAck)
 }
 
 export function writeAcks(kanonHome: string, root: string, acks: Ack[]): void {

@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { hashFile } from './drift'
 import { extractNames } from './names'
 import { realPath } from './paths'
-import { judge, type Probe, type Verdict } from './stale'
+import { judge, nameCandidates, type Probe, type Verdict } from './stale'
 import type { TranscriptFacts } from './transcript'
 import type { Classified, Origin } from './types'
 
@@ -75,29 +75,18 @@ function memoryFiles(memoryDir: string | null): string[] {
 }
 
 /**
- * Where a named path points, resolved exactly as judge() resolves it, or null
- * when no resolution exists. `@`-prefixed names are packages, not files.
- */
-function resolveName(text: string, itemPath: string, root: string, home: string): string | null {
-  if (text.startsWith('@')) return null
-  const candidates = text.startsWith('~/')
-    ? [join(home, text.slice(2))]
-    : isAbsolute(text)
-      ? [text]
-      : [resolve(root, text), resolve(dirname(itemPath), text)]
-  return candidates.find((p) => existsSync(p)) ?? null
-}
-
-/**
  * The digest of every file an item names that exists, keyed by the name as
  * written. A name that resolves nowhere is left out, so a file appearing
  * later changes the record as surely as one changing does.
+ *
+ * Scope is ignored deliberately: a user-level rule's relative names may then
+ * clear its ack on an unrelated repo change, which is the safe direction.
  */
 export function namedDigests(text: string, itemPath: string, root: string, home: string): Record<string, string | null> {
   const out: Record<string, string | null> = {}
   for (const n of extractNames(text)) {
     if (n.kind !== 'path' || n.text in out) continue
-    const hit = resolveName(n.text, itemPath, root, home)
+    const hit = nameCandidates(n.text, itemPath, root, home).find((p) => existsSync(p))
     if (hit) out[n.text] = hashFile(hit)
   }
   return out
@@ -154,14 +143,25 @@ export function steer(input: SteeringInput): Steered[] {
 
 function row(e: Entry, input: SteeringInput): Steered {
   const out: Steered = { ...e, digest: null, verdict: null, acknowledged: false }
+  let text: string | null
   try {
-    const text = input.read(e.path)
+    text = input.read(e.path)
     if (text === null) return out
     out.digest = hashFile(e.path)
-    out.acknowledged = isAcknowledged(out, input.acks, namedDigests(text, e.path, input.root, input.home))
+  } catch {
+    return out
+  }
+  // Each in its own guard, verdict first: a bad ack or a failing `written`
+  // must never cost the other, and a lost verdict is the costlier loss.
+  try {
     out.verdict = judge({ ...e, written: input.written(e.path, e.kind), text }, input.root, input.home, input.probe)
   } catch {
-    // Whatever was established before the failure stands; the rest stays null.
+    // No verdict is the honest answer to a tooling failure.
+  }
+  try {
+    out.acknowledged = isAcknowledged(out, input.acks, namedDigests(text, e.path, input.root, input.home))
+  } catch {
+    // Unacknowledged: a flag that speaks again is the safe failure.
   }
   return out
 }

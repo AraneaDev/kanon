@@ -215,3 +215,18 @@ test('the warned record round trips, and anything unreadable is epoch 0 with not
     expect(readWarned(home, 'abc')).toEqual({ epoch: 0, paths: [] })
   }
 })
+
+test('a steering cache keeps its good items and drops malformed ones', () => {
+  const home = tmp('kanon-state-')
+  const bad = [null, { ...steered, kind: 'other' }, { ...steered, verdict: { level: 'x', evidence: 'e' } }, { ...steered, acknowledged: 'no' }, { ...steered, digest: 3 }]
+  corrupt(steeringPath(home, '/repo'), JSON.stringify({ v: 1, root: '/repo', t: 'x', items: [steered, ...bad, { ...steered, verdict: null, digest: null }] }))
+  expect(readSteering(home, '/repo')).toEqual([steered, { ...steered, verdict: null, digest: null }])
+})
+
+test('acknowledgements keep the well-formed entries only', () => {
+  const home = tmp('kanon-state-')
+  const { named: _named, ...noNamed } = ack
+  const bad = [null, noNamed, { ...ack, path: 1 }, { ...ack, digest: 2 }, { ...ack, named: [] }, { ...ack, named: { a: 3 } }, { ...ack, t: null }]
+  corrupt(ackPath(home, '/repo'), JSON.stringify({ v: 1, root: '/repo', acks: [...bad, ack, { ...ack, digest: null }] }))
+  expect(readAcks(home, '/repo')).toEqual([ack, { ...ack, digest: null }])
+})

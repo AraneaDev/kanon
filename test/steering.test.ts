@@ -159,6 +159,22 @@ describe('steer', () => {
   })
 })
 
+describe('a malformed ack never costs a verdict', () => {
+  for (const [label, acks] of [
+    ['a null ack', [null]],
+    ['an ack missing named', [{ path: 'MATCH', digest: 'MATCH', t: 'x' }]],
+  ] as const) {
+    test(label, () => {
+      const { memoryDir, input } = setup()
+      const path = join(memoryDir, 'notes.md')
+      const real = acks.map((a) => (a ? { ...a, path, digest: hashFile(path) } : a)) as unknown as SteeringInput['acks']
+      const row = steer(input({ acks: real })).find((i) => i.path === path)
+      expect(row?.verdict?.level).toBe('gone')
+      expect(row?.acknowledged).toBe(false)
+    })
+  }
+})
+
 describe('isAcknowledged', () => {
   const item = {
     path: '/home/user/proj/CLAUDE.md',

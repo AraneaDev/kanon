@@ -47,19 +47,36 @@ export function scopeOf(item: Item): Scope {
   }
 }
 
+/** A `~/` or absolute name, which means one place on disk whatever the item. */
+function isPinned(text: string): boolean {
+  return text.startsWith('~/') || isAbsolute(text)
+}
+
+/**
+ * Every place a named path may point, in the order they are tried: `~/`
+ * against home, an absolute path as is, anything else against the repo root
+ * and then the item's own directory. `@`-prefixed names are packages, not
+ * files, and point nowhere. Shared with steering.ts, so the file an
+ * acknowledgement digests is the file the verdict was judged on.
+ */
+export function nameCandidates(text: string, itemPath: string, root: string, home: string): string[] {
+  if (text.startsWith('@')) return []
+  if (text.startsWith('~/')) return [join(home, text.slice(2))]
+  if (isAbsolute(text)) return [text]
+  return [resolve(root, text), resolve(dirname(itemPath), text)]
+}
+
 const gone = (text: string): Verdict => ({ level: 'gone', evidence: `names \`${text}\`, which no longer exists` })
 
 function judgeDisk(names: Name[], home: string, probe: Probe): Verdict | null {
   for (const n of names) {
-    if (n.kind !== 'path') continue
-    const abs = n.text.startsWith('~/') ? join(home, n.text.slice(2)) : isAbsolute(n.text) ? n.text : null
-    if (abs && !probe.exists(abs)) return gone(n.text)
+    if (n.kind !== 'path' || !isPinned(n.text)) continue
+    if (!nameCandidates(n.text, '', '', home).some((p) => probe.exists(p))) return gone(n.text)
   }
   return null
 }
 
 function judgeRepo(item: Item, names: Name[], root: string, home: string, probe: Probe): Verdict | null {
-  const dir = dirname(item.path)
   // Where each checkable relative path was found, or null when it was not.
   const found = new Map<string, string | null>()
   const lookups: string[] = []
@@ -71,14 +88,12 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
       // are judged by existence alone, so repo scope stays a superset of disk
       // scope, and they never go to the code lookup.
       if (n.text.startsWith('@')) continue
-      const abs = n.text.startsWith('~/') ? join(home, n.text.slice(2)) : isAbsolute(n.text) ? n.text : null
-      if (abs) {
-        found.set(n.text, probe.exists(abs) ? abs : null)
+      const hit = nameCandidates(n.text, item.path, root, home).find((p) => probe.exists(p)) ?? null
+      found.set(n.text, hit)
+      if (isPinned(n.text)) {
         checkable.push(n)
         continue
       }
-      const hit = [resolve(root, n.text), resolve(dir, n.text)].find((p) => probe.exists(p)) ?? null
-      found.set(n.text, hit)
       // `process.env` has a real file extension and no slash, so it is
       // ambiguous: a miss on disk is gone only if no code mentions it either.
       if (!hit && !n.text.includes('/')) lookups.push(n.text)
