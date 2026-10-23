@@ -91,7 +91,10 @@ test('stripping the colour codes gives back the plain report byte for byte', () 
     { path: '/repo/.claude/rules/api.md', label: 'path-scoped', rule: 'paths' },
     { path: '/repo/CLAUDE.local.md', label: 'excluded', rule: 'ancestor' },
   ]
-  r.config = [{ t: '2026-08-27T06:58:00Z', ev: 'config', source: 'skills', path: null }]
+  r.config = [
+    { t: '2026-08-27T06:58:00Z', ev: 'config', source: 'skills', path: '/repo/.claude/skills/x/SKILL.md' },
+    { t: '2026-08-27T06:58:00Z', ev: 'config', source: 'user_settings', path: null },
+  ]
   r.modelDisagrees = ['/odd/CLAUDE.md']
   r.originDisagrees = [{ path: '/repo/CLAUDE.md', claimed: 'User', inferred: 'project' }]
   r.skipped = [

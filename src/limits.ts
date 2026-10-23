@@ -1,10 +1,13 @@
-import { closeSync, lstatSync, openSync, readdirSync, readSync, rmSync, statSync } from 'node:fs'
+import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readSync, rmSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 
 /**
  * Claude Code loads a CLAUDE.md up to 4 MiB. Since 2.1.309 a nested one over
- * the limit loads by its start rather than being skipped, so Kanon reads that
- * same start (`readStart`) wherever it hashes or quotes a file.
+ * the limit loads by its start rather than being skipped; that is the only
+ * case the changelog confirms. Drift and the brief's excerpts read the same
+ * start (`readStart`) for any file, which is right for a nested CLAUDE.md and
+ * harmless elsewhere. Discovery still reports an oversized rule or import as
+ * skipped, since nothing says those load at all.
  */
 export const MAX_FILE_BYTES = 4 * 1024 * 1024
 
@@ -33,7 +36,9 @@ export function readStart(path: string, max = MAX_FILE_BYTES): Buffer | null {
   let fd: number | undefined
   try {
     fd = openSync(path, 'r')
-    const buf = Buffer.alloc(Math.min(max, statSync(path).size))
+    // fstat, not stat: the size must come from the file just opened, not
+    // from whatever the path names by the time a second lookup runs.
+    const buf = Buffer.alloc(Math.min(max, fstatSync(fd).size))
     const n = readSync(fd, buf, 0, buf.length, 0)
     return buf.subarray(0, n)
   } catch {
