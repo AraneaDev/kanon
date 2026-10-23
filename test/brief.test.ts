@@ -304,7 +304,23 @@ test('a capped brief keeps its summary line and its closing notes', () => {
 
   expect(lines[0]!.startsWith('KANON  ')).toBe(true)
   expect(lines.join(' ').replace(/\s+/g, ' ')).toContain('Tell the user about the above in your first response.')
-  const more = lines.findIndex((l) => /^ {11}\.\.\. and \d+ more, run \/kanon for the full list$/.test(l))
+  const more = lines.findIndex((l) => /^ {11}\.\.\. and \d+ more( \(\d+ FOREIGN\))?, run \/kanon for the full list$/.test(l))
   expect(more).toBeGreaterThan(0)
   expect(lines[more + 1]).toBe('')
+})
+
+/**
+ * When the cap bites, the FOREIGN rows are the last to go: naming a
+ * dependency's file is what the brief exists for, and the notes would
+ * otherwise warn about files Claude can no longer see.
+ */
+test('a capped brief drops ordinary rows before any FOREIGN row', () => {
+  const foreign = Array.from({ length: 80 }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
+  const own = [file('/repo/CLAUDE.md', 'project'), file('/repo/a/CLAUDE.md', 'project'), file('/repo/b/CLAUDE.md', 'project')]
+  const out = brief(input({ files: [...own, ...foreign] }), () => 'x'.repeat(120))
+
+  expect(out.length).toBeLessThanOrEqual(BRIEF_MAX)
+  expect(out).not.toContain('project  CLAUDE.md')
+  expect(out).toContain('FOREIGN  vendor/pkg0/CLAUDE.md')
+  expect(out).toMatch(/\.\.\. and \d+ more \(\d+ FOREIGN\), run \/kanon for the full list/)
 })
