@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { normalise } from '../src/normalise'
+import { currentRun, normalise } from '../src/normalise'
 
 /**
  * memory_type is Claude Code's own statement of a file's scope, confirmed
@@ -160,4 +160,38 @@ test('a ConfigChange with no usable source is reported as unknown, never guessed
   const [e] = normalise([line])
 
   expect(e).toMatchObject({ ev: 'config', source: 'unknown' })
+})
+
+/**
+ * An unclean shutdown (seen under WSL) can zero-fill the tail of an appended
+ * block, so a log line arrives prefixed with NUL bytes that record.sh never
+ * wrote. `trim()` does not remove `\0`, so such a line used to read as
+ * unparsed, and a damaged SessionStart stopped marking the start of its run.
+ */
+const nulSessionStart =
+  '\u0000'.repeat(1053) + JSON.stringify({ t: '2026-09-02T13:46:45Z', hook: 'SessionStart', raw: { session_id: 's' } })
+
+test('a line prefixed with NUL bytes still parses', () => {
+  const line =
+    '\u0000'.repeat(1053) +
+    JSON.stringify({ t: '2026-09-02T13:46:45Z', hook: 'InstructionsLoaded', raw: { file_path: '/a/CLAUDE.md', load_reason: 'session_start' } })
+
+  expect(normalise([line])).toEqual([
+    { t: '2026-09-02T13:46:45Z', ev: 'loaded', path: '/a/CLAUDE.md', reason: 'session_start', memoryType: null },
+  ])
+})
+
+test('a NUL-prefixed SessionStart still marks the start of a run', () => {
+  const loaded = (path: string) =>
+    JSON.stringify({ t: '2026-09-02T13:46:00Z', hook: 'InstructionsLoaded', raw: { file_path: path, load_reason: 'session_start' } })
+  const lines = [loaded('/a/CLAUDE.md'), nulSessionStart, loaded('/b/CLAUDE.md')]
+
+  expect(currentRun(lines)).toEqual(lines.slice(1))
+})
+
+test('NULs inside a truncated line leave it unparsed, never thrown', () => {
+  const events = normalise(['{"t":"x","hook":"Instr\u0000\u0000'])
+
+  expect(events).toHaveLength(1)
+  expect(events[0]!.ev).toBe('unparsed')
 })

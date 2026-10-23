@@ -30,7 +30,7 @@ interface Wrapped {
 export function currentRun(lines: string[]): string[] {
   let start = 0
   for (const [i, line] of lines.entries()) {
-    const text = line.trim()
+    const text = cleanLine(line)
     if (!text) continue
     try {
       if ((JSON.parse(text) as { hook?: string }).hook === 'SessionStart') start = i
@@ -39,6 +39,19 @@ export function currentRun(lines: string[]): string[] {
     }
   }
   return lines.slice(start)
+}
+
+/**
+ * A log line as it can be parsed: NUL bytes removed, then trimmed.
+ *
+ * An unclean shutdown (seen under WSL, 2026-09-02) can zero-fill the tail of
+ * an appended block, so a line arrives prefixed with NULs that record.sh
+ * never wrote. `trim()` leaves `\0` alone, so such a line read as unparsed
+ * and a damaged SessionStart stopped marking where its run began. A NUL is
+ * never valid inside JSON text, so removing every one loses nothing.
+ */
+export function cleanLine(line: string): string {
+  return line.replaceAll('\u0000', '').trim()
 }
 
 /**
@@ -55,7 +68,7 @@ export function currentRun(lines: string[]): string[] {
 export function normalise(lines: string[]): Event[] {
   const out: Event[] = []
   for (const line of lines) {
-    const text = line.trim()
+    const text = cleanLine(line)
     if (!text) continue
 
     let w: Wrapped
