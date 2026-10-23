@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { SNAPSHOT_VERSION } from '../src/drift'
+import { hashFile, SNAPSHOT_VERSION } from '../src/drift'
 import { sessionRoot } from '../src/origin'
-import { readSnapshot, readWatermark, writeSnapshot } from '../src/state'
+import { readSnapshot, readSteering, readWatermark, steeringPath, writeAcks, writeSnapshot } from '../src/state'
 import { tmp } from './tmp'
 
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts')
@@ -255,8 +255,7 @@ test('brief falls back to prediction when nothing is recorded yet', async () => 
   const home = tmp('kanon-brief-cold-')
   const repo = freshRepo(home)
   const out = await run(['brief', '--cwd', repo], { KANON_HOME: home, CLAUDE_CONFIG_DIR: join(home, 'noclaude') })
-  expect(out).toContain('(predicted)')
-  expect(out).toContain('project  CLAUDE.md')
+  expect(out.trim()).toBe('KANON  1 instruction file steers this session (predicted) · nothing gone, nothing foreign')
 })
 
 test('prediction never reports a file as missing', async () => {
@@ -277,7 +276,8 @@ test('brief never exits non-zero and never prints a stack trace', async () => {
   const out = await new Response(proc.stdout).text()
   const code = await proc.exited
   expect(code).toBe(0)
-  expect(out).not.toContain('at ')
+  // A stack frame, not the two letters: the brief's own prose says "that".
+  expect(out).not.toMatch(/\bat \S+:\d+:\d+/)
 })
 
 // --- the paths a hook or a mistyped command actually takes ------------------
@@ -364,31 +364,18 @@ test('brief treats an existing but empty event log as unobserved and predicts in
   writeFileSync(join(sessions, 's.jsonl'), '')
 
   const out = await run(['brief', '--session', 's', '--cwd', repo], env)
-  expect(out).toContain('(predicted)')
-  expect(out).toContain('project  CLAUDE.md')
+  expect(out.trim()).toBe('KANON  1 instruction file steers this session (predicted) · nothing gone, nothing foreign')
 })
 
 /**
- * The vanished gate inside `diff()` (state must be `absent-unreported`, and
- * `exists()` must also say the file is gone) had no end-to-end coverage.
- * `test/brief.test.ts` only injects an already-filtered `Drift` into
- * `brief()` directly, so it can prove the rendering is right but can never
- * exercise the gate itself. This test drives it by planting a snapshot with
- * two files that are absent from the *predicted* set -- one still on disk,
- * one not -- and running the real `brief` CLI command with no session
- * recorded, which is the only way `briefInput` takes the `predicted` branch.
- * The sibling test below covers the observed basis.
+ * Drift moved out of the brief and into the report: the brief now names only
+ * what is gone or foreign. A snapshot naming a file that has since vanished
+ * still says nothing at session start, so the short brief stays one line.
  */
-test('a predicted brief suppresses a vanished file still on disk, but reports one that is actually gone', async () => {
+test('a predicted brief says nothing about drift, even with a vanished file in the baseline', async () => {
   const { home, repo, env } = isolated('kanon-cli-drift-')
-  // Gives predictedFiles() a non-empty result, so `brief()` reaches the
-  // drift block at all instead of taking its "no instruction files" branch.
   writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
-
-  const stillOnDisk = join(repo, 'old-still-here.md')
-  writeFileSync(stillOnDisk, '# not a candidate, just present\n')
   const actuallyGone = join(repo, 'deleted-rule.md')
-  // Deliberately never written: this is the file the gate must report.
 
   writeSnapshot(home, {
     v: SNAPSHOT_VERSION,
@@ -396,33 +383,22 @@ test('a predicted brief suppresses a vanished file still on disk, but reports on
     ruleset: 'test',
     session: 'previous-session',
     t: '2026-08-27T00:00:00Z',
-    files: [
-      { path: stillOnDisk, origin: 'project', sha256: 'x', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' },
-      { path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' },
-    ],
+    files: [{ path: actuallyGone, origin: 'project', sha256: 'y', lastSeen: '2026-08-27T00:00:00Z', state: 'absent-unreported' }],
   })
 
-  // No session file planted, so `briefInput` has no events and takes the
-  // predicted path. diff()'s vanished gate applies on both bases; this is
-  // the predicted half of that.
   const out = await run(['brief', '--cwd', repo], env)
-  expect(out).toContain('(predicted)')
-  expect(out).toContain('deleted-rule.md')
-  expect(out).not.toContain('old-still-here.md')
+  expect(out.trim()).toBe('KANON  1 instruction file steers this session (predicted) · nothing gone, nothing foreign')
 })
 
 /**
- * The sibling test above only ever drove the predicted basis, because the
- * narrowing used to live in a `driftForBasis` helper in cli.ts (since
- * removed) that applied it only there. The observed basis -- a real
- * recorded session, which is what
- * `report` always uses and what `brief` uses once anything has loaded --
- * had no gate at all, so a snapshot file this session never touched printed
- * as "vanished" even sitting untouched on disk. Drives both the `report`
- * and `brief` commands end to end against the same fixture so a regression
- * that only fixed one reader of the vanished gate would still be caught.
+ * The narrowing used to live in a `driftForBasis` helper in cli.ts (since
+ * removed) that applied it only to the predicted basis. The observed basis
+ * -- a real recorded session, which is what `report` always uses -- had no
+ * gate at all, so a snapshot file this session never touched printed as
+ * "vanished" even sitting untouched on disk. The brief half now pins that
+ * drift stays out of the brief altogether.
  */
-test('an observed report and brief both suppress a vanished file still on disk, but report one that is actually gone', async () => {
+test('an observed report suppresses a vanished file still on disk but reports one that is gone, and the brief names neither', async () => {
   const { home, repo, env } = isolated('kanon-cli-drift-observed-')
   writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
 
@@ -463,7 +439,7 @@ test('an observed report and brief both suppress a vanished file still on disk, 
   expect(report).not.toContain('old-still-here.md')
 
   const briefOut = await run(['brief', '--session', 's', '--cwd', repo], env)
-  expect(briefOut).toContain('deleted-rule.md')
+  expect(briefOut).not.toContain('deleted-rule.md')
   expect(briefOut).not.toContain('old-still-here.md')
 })
 
@@ -715,8 +691,7 @@ test('brief predicts rather than going silent when the session log cannot be rea
     systemMessage: string
     hookSpecificOutput: { additionalContext: string }
   }
-  expect(parsed.systemMessage).toContain('(predicted)')
-  expect(parsed.systemMessage).toContain('project  CLAUDE.md')
+  expect(parsed.systemMessage).toBe('KANON  1 instruction file steers this session (predicted) · nothing gone, nothing foreign')
   expect(parsed.hookSpecificOutput.additionalContext).toBe(parsed.systemMessage)
 })
 
@@ -1144,4 +1119,112 @@ test('transcript loads from an earlier run in another root are not counted', asy
   expect(out).not.toContain('FOREIGN')
   expect(out).not.toContain('reachability model disagrees')
   expect(out).not.toContain(join(repo, 'CLAUDE.md'))
+})
+
+// --- the short brief: what is gone, computed with the steering cache -------
+
+/**
+ * A repository with a memory directory beside a transcript path, the way
+ * Claude Code lays them out: `<project>/<session>.jsonl` and
+ * `<project>/memory/`. The memory names a script that does not exist.
+ */
+function withGoneMemory(prefix: string) {
+  const { home, repo, env } = isolated(prefix)
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
+  const project = join(home, 'claude-projects', '-home-user-repo')
+  const memoryDir = join(project, 'memory')
+  mkdirSync(memoryDir, { recursive: true })
+  const memory = join(memoryDir, 'release-flow.md')
+  writeFileSync(memory, 'Cut a release with `scripts/release.sh`.\n')
+  return { home, repo, env, memory, transcript: join(project, 'session-1.jsonl') }
+}
+
+function context(out: string): string {
+  return (JSON.parse(out.trim()) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext
+}
+
+test('brief --hook names a memory whose named file is gone, and caches the steering model', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-gone-')
+  const out = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env))
+  const lines = out.split('\n')
+
+  expect(lines[0]).toBe('KANON  1 instruction file and 1 memory steer this session (predicted) · full list: /kanon')
+  expect(lines[1]).toBe(`  gone     ${memory}`)
+  expect(lines[2]).toBe('           names `scripts/release.sh`, which no longer exists')
+
+  const root = sessionRoot(repo)
+  expect(existsSync(steeringPath(home, root))).toBe(true)
+  const cached = readSteering(home, root)
+  expect(cached?.find((s) => s.kind === 'memory')?.verdict?.level).toBe('gone')
+  expect(cached?.find((s) => s.kind === 'instruction')?.path).toBe(realpathSync(join(repo, 'CLAUDE.md')))
+})
+
+test('the ack command in the brief names this CLI and the resolved root', async () => {
+  const { repo, env, transcript } = withGoneMemory('kanon-cli-gone-ack-')
+  const out = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env))
+  const prose = out.split('\n').filter((l) => l.length > 0 && !l.startsWith('  ') && !l.startsWith('KANON')).join(' ')
+
+  expect(prose).toContain(`\`bun ${CLI} ack --cwd ${sessionRoot(repo)} <path>\``)
+})
+
+/** The ack file is keyed by the resolved root, the same key the brief reads it by. */
+test('an acknowledged gone memory leaves the brief clean', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-gone-acked-')
+  writeAcks(home, sessionRoot(repo), [{ path: realpathSync(memory), digest: hashFile(memory), named: {}, t: '2026-10-24T00:00:00Z' }])
+
+  const out = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env))
+  expect(out).toBe('KANON  1 instruction file and 1 memory steer this session (predicted) · nothing gone, nothing foreign')
+})
+
+/** By hand there is no --transcript, but the recorded SessionStart named one. */
+test('without --transcript the memory dir comes from the recorded SessionStart', async () => {
+  const { home, repo, env, transcript } = withGoneMemory('kanon-cli-gone-recorded-')
+  const sessions = join(home, 'sessions')
+  mkdirSync(sessions, { recursive: true })
+  const start = JSON.stringify({
+    t: '2026-10-24T00:00:00Z',
+    hook: 'SessionStart',
+    raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source: 'startup', transcript_path: transcript },
+  })
+  writeFileSync(join(sessions, 's.jsonl'), `${start}\n`)
+
+  const out = await run(['brief', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain('names `scripts/release.sh`, which no longer exists')
+})
+
+/** The cache is housekeeping for the hot path: failing to write it never silences the brief. */
+test('a steering cache that cannot be written still leaves the brief speaking', async () => {
+  const { home, repo, env, transcript } = withGoneMemory('kanon-cli-gone-unwritable-')
+  writeFileSync(join(home, 'state'), 'a file where the state directory should be')
+
+  const { out, code } = await runFull(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env)
+  expect(code).toBe(0)
+  expect(context(out)).toContain('names `scripts/release.sh`, which no longer exists')
+})
+
+/** session-start.sh hands the CLI the transcript path from the SessionStart payload. */
+test('session-start.sh passes the transcript path to the brief', async () => {
+  const bin = tmp('kanon-session-start-bin-')
+  const argsFile = join(bin, 'args')
+  writeFileSync(join(bin, 'bun'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\nexit 0\n`)
+  chmodSync(join(bin, 'bun'), 0o755)
+  const payload = JSON.stringify({
+    session_id: 'abc',
+    hook_event_name: 'SessionStart',
+    cwd: '/home/user/repo',
+    source: 'startup',
+    transcript_path: '/home/user/.claude/projects/-home-user-repo/abc.jsonl',
+  })
+  const proc = Bun.spawn(['sh', join(import.meta.dir, '..', 'hooks', 'scripts', 'session-start.sh')], {
+    stdin: new TextEncoder().encode(payload),
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CLAUDE_PLUGIN_ROOT: join(import.meta.dir, '..') },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  expect(await proc.exited).toBe(0)
+
+  const args = readFileSync(argsFile, 'utf8').split('\n')
+  const i = args.indexOf('--transcript')
+  expect(i).toBeGreaterThan(-1)
+  expect(args[i + 1]).toBe('/home/user/.claude/projects/-home-user-repo/abc.jsonl')
 })

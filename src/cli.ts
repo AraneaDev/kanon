@@ -1,22 +1,24 @@
 #!/usr/bin/env bun
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
-import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
+import { digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, readStart, readTail } from './limits'
 import { cleanLine, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
+import { gitProbe, lastCommit } from './probe'
 import { render } from './render'
 import { renderAudit, type AuditEntry } from './audit'
 import { matches, renderWhose } from './whose'
 import { buildReport } from './report'
-import { readSnapshot, readWatermark, writeSnapshot, writeWatermark } from './state'
+import { readAcks, readSnapshot, readWatermark, writeSnapshot, writeSteering, writeWatermark } from './state'
+import { steer, type Steered } from './steering'
 import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
 import type { Classified, Event, Origin, Report } from './types'
 
@@ -268,30 +270,94 @@ function observedReport(session: string | undefined, cwd: string): Report | null
   return report.loaded.length === 0 ? null : report
 }
 
+/**
+ * This run's events for a session, or none when there is no readable log.
+ * Unlike collect(), an unreadable log is not an error here: the brief only
+ * wants the transcript path the SessionStart recorded, and must always speak.
+ */
+function runEvents(session: string | undefined): Event[] {
+  if (session === undefined) return []
+  try {
+    return normalise(currentRun(readFileSync(sessionFile(session), 'utf8').split('\n')))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * When an item was last written, which is what `may-be-stale` measures a
+ * named file's commits against. An instruction file in the checkout is dated
+ * by its last commit, because a fresh clone gives every file today's mtime;
+ * anything else, and every memory, by its mtime. A file outside the root is
+ * never in this repository's history, so it costs no git spawn. A stat that
+ * fails throws, and steer() turns that into no verdict.
+ */
+function writtenAt(root: string, path: string, kind: Steered['kind']): Date {
+  const rel = relative(root, path)
+  const inRoot = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+  const commit = kind === 'instruction' && inRoot ? lastCommit(root, path) : null
+  return commit ?? statSync(path).mtime
+}
+
+/**
+ * Everything that steers this session, judged, and cached for the hot-path
+ * hooks to read. `root` must be the resolved sessionRoot(): the cache and
+ * the acks are keyed by that string, and a second spelling of the same
+ * checkout would read and write a different file.
+ *
+ * The memory directory sits beside the transcript. The SessionStart hook
+ * passes the transcript path; run by hand, the path the recorded
+ * SessionStart named stands in.
+ *
+ * The brief must always speak, so any failure in judging falls back to the
+ * instruction files alone with no verdicts, and that fallback is never
+ * cached: a cache with no verdicts would tell the hot path nothing is stale,
+ * when the truth is that nothing was checked. A cache that cannot be written
+ * costs the hot path its notes, never this brief its verdicts.
+ */
+function steering(root: string, files: Classified[], events: Event[]): Steered[] {
+  const transcript = arg('transcript') || transcriptOf(events)
+  let steered: Steered[]
+  try {
+    steered = steer({
+      root,
+      // The user's home, not the Claude config dir: a note's `~/` means the
+      // former, and resolving it against the latter would call real files gone.
+      home: homedir(),
+      instructions: files,
+      memoryDir: transcript ? join(dirname(transcript), 'memory') : null,
+      facts: transcriptFacts(events),
+      probe: gitProbe(root),
+      written: (path, kind) => writtenAt(root, path, kind),
+      read: readBounded,
+      acks: readAcks(kanonHome(), root),
+    })
+  } catch {
+    return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
+  }
+  try {
+    writeSteering(kanonHome(), root, steered)
+  } catch {
+    // Housekeeping for the hot path; see above.
+  }
+  return steered
+}
+
 function briefInput(session: string | undefined, cwd: string): BriefInput {
   const report = observedReport(session, cwd)
-  if (report === null) {
-    const home = claudeHome()
-    const root = sessionRoot(cwd)
-    const previous = readSnapshot(kanonHome(), root)?.files ?? null
-    const files = predictedFiles(cwd, home, root)
-    const drift = previous === null ? null : diff(previous, digest(files), existsSync)
-    return {
-      root,
-      basis: 'predicted',
-      files,
-      missing: [],
-      drift,
-    }
-  }
-  // report.drift already came out of buildReport's own diff() call, so it is
-  // forwarded as-is rather than recomputed here.
+  const home = claudeHome()
+  // Both come from sessionRoot(), so both are already realpathed.
+  const root = report ? report.root : sessionRoot(cwd)
+  const files = report ? report.loaded : predictedFiles(cwd, home, root)
+  // Drift is no longer the brief's to tell: the report carries it, and the
+  // brief names only what is gone or foreign.
   return {
-    root: report.root,
-    basis: 'observed',
-    files: report.loaded,
-    missing: report.missing,
-    drift: report.drift,
+    root,
+    basis: report ? 'observed' : 'predicted',
+    files,
+    missing: report ? report.missing : [],
+    steered: steering(root, files, runEvents(session)),
+    cli: join(import.meta.dir, 'cli.ts'),
   }
 }
 
@@ -554,7 +620,7 @@ function main(): void {
     if (phrase !== undefined) return runWhose(phrase, session, cwd)
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit] [--session <id>] [--cwd <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit] [--session <id>] [--cwd <path>] [--transcript <path>] [--hook] [--commit-state]')
 }
 
 try {

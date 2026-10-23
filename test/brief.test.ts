@@ -2,108 +2,170 @@ import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { BRIEF_MAX, brief, type BriefInput } from '../src/brief'
-import type { Drift } from '../src/drift'
+import type { Steered } from '../src/steering'
+import type { Verdict } from '../src/stale'
 import type { Classified } from '../src/types'
 
 // A real home directory, so short() abbreviates it to ~ the way it will in
 // a live session. A fictional /home/... path would silently print in full.
 const USER_RULE = join(homedir(), '.claude', 'rules', 'style.md')
+const MEMORY_DIR = join(homedir(), '.claude', 'projects', '-home-user-repo', 'memory')
+const CLI = '/opt/kanon/src/cli.ts'
 
 function file(path: string, origin: Classified['origin'], extra: Partial<Classified> = {}): Classified {
   return { path, origin, reason: 'session_start', viaImport: null, gitIgnored: null, gitTracked: null, ...extra }
 }
 
+function item(path: string, kind: Steered['kind'], extra: Partial<Steered> = {}): Steered {
+  return { path, kind, origin: 'user', digest: 'd', verdict: null, acknowledged: false, ...extra }
+}
+
+const goneVerdict = (name: string): Verdict => ({ level: 'gone', evidence: `names \`${name}\`, which no longer exists` })
+
+function memory(name: string, extra: Partial<Steered> = {}): Steered {
+  return item(join(MEMORY_DIR, name), 'memory', extra)
+}
+
+/** `steered` follows `files` unless a test sets it, so the two never disagree by accident. */
 function input(over: Partial<BriefInput> = {}): BriefInput {
+  const files = over.files ?? [file(USER_RULE, 'user'), file('/repo/CLAUDE.md', 'project')]
   return {
     root: '/repo',
     basis: 'observed',
-    files: [file(USER_RULE, 'user'), file('/repo/CLAUDE.md', 'project')],
+    files,
     missing: [],
-    drift: null,
+    steered: files.map((f) => item(f.path, 'instruction', { origin: f.origin })),
+    cli: CLI,
     ...over,
   }
 }
 
-/**
- * A count alone is not information: "3 files govern you" leaves Claude
- * unable to answer which rule came from where, which is the entire question
- * the brief exists to answer. Every file is named.
- */
-test('a clean session names each file and its origin', () => {
-  const out = brief(input())
+const GONE_NOTE =
+  'Before you rely on a gone item, ask the user whether it still holds, naming the item and what is gone. ' +
+  `If they say it does, record that with \`bun ${CLI} ack --cwd /repo <path>\`, then offer to update or delete ` +
+  'the item so the warning does not return. Do not raise gone items before you need them.'
 
-  expect(out).toContain('2 instruction files govern this session')
-  expect(out).toContain('user     ~/.claude/rules/style.md')
-  expect(out).toContain('project  CLAUDE.md')
-  expect(out).toContain('nothing foreign, nothing missing')
+/** The wrapped notes under the rows, rejoined into the sentences they were cut from. */
+function prose(out: string): string {
+  return out
+    .split('\n')
+    .filter((l) => l.length > 0 && !l.startsWith('  ') && !l.startsWith('KANON'))
+    .join(' ')
+}
+
+/**
+ * A clean session costs one line. The brief is prepended to every session,
+ * and the files the user wrote themselves are not news to anyone: /kanon has
+ * the full list for the moment someone asks.
+ */
+test('a clean session is exactly one line', () => {
+  expect(brief(input())).toBe('KANON  2 instruction files steer this session (observed) · nothing gone, nothing foreign')
 })
 
-/** Broadest scope first, foreign last, so the line that matters is the one
- * the eye lands on at the end of the list. */
-test('files are listed broadest origin first with foreign last', () => {
+test('the header counts what steers the session by kind', () => {
+  const steered = [
+    ...Array.from({ length: 6 }, (_, i) => item(`/repo/r${i}.md`, 'instruction', { origin: 'project' })),
+    memory('MEMORY.md'),
+    memory('a.md'),
+    memory('b.md'),
+  ]
+  expect(brief(input({ basis: 'predicted', steered }))).toBe(
+    'KANON  6 instruction files and 3 memories steer this session (predicted) · nothing gone, nothing foreign',
+  )
+})
+
+test('one of each reads as one, not ones', () => {
+  const one = [file('/repo/CLAUDE.md', 'project')]
+  expect(brief(input({ files: one }))).toBe('KANON  1 instruction file steers this session (observed) · nothing gone, nothing foreign')
+  expect(brief(input({ files: one, steered: [item('/repo/CLAUDE.md', 'instruction'), memory('MEMORY.md')] }))).toBe(
+    'KANON  1 instruction file and 1 memory steer this session (observed) · nothing gone, nothing foreign',
+  )
+})
+
+/** The user's own files are counted in the header, never listed: that is what /kanon is for. */
+test("the user's own files are counted, not named", () => {
+  const out = brief(input({ files: [file(USER_RULE, 'user'), file('/repo/CLAUDE.md', 'project'), file('/repo/vendor/p/CLAUDE.md', 'foreign')] }))
+
+  expect(out).not.toContain('style.md')
+  expect(out).not.toContain('project  CLAUDE.md')
+  expect(out).toContain('FOREIGN  vendor/p/CLAUDE.md')
+})
+
+/** The pinned shape: header, the gone row with its evidence beneath, a blank line, the notes. */
+test('a gone memory is named with what is gone, and Claude is told to ask before relying on it', () => {
+  const steered = [item('/repo/CLAUDE.md', 'instruction', { origin: 'project' }), memory('release-flow.md', { verdict: goneVerdict('bun run release') })]
+  const out = brief(input({ files: [file('/repo/CLAUDE.md', 'project')], steered }))
+  const lines = out.split('\n')
+
+  expect(lines.slice(0, 4)).toEqual([
+    'KANON  1 instruction file and 1 memory steer this session (observed) · full list: /kanon',
+    '  gone     ~/.claude/projects/-home-user-repo/memory/release-flow.md',
+    '           names `bun run release`, which no longer exists',
+    '',
+  ])
+  expect(prose(out)).toBe(GONE_NOTE)
+})
+
+/** Gone items are raised at the moment of reliance, so they alone do not ask for a first-response alarm. */
+test('a gone item alone does not tell Claude to raise it in its first response', () => {
+  const out = brief(input({ steered: [memory('a.md', { verdict: goneVerdict('x.sh') })] }))
+  expect(out).not.toContain('Tell the user')
+})
+
+test('the ack command in the notes names the CLI and the root', () => {
+  const out = brief(input({ root: '/srv/checkout', steered: [memory('a.md', { verdict: goneVerdict('x.sh') })] }))
+  expect(prose(out)).toContain(`\`bun ${CLI} ack --cwd /srv/checkout <path>\``)
+})
+
+test('an acknowledged gone item is not raised', () => {
+  const steered = [memory('a.md', { verdict: goneVerdict('x.sh'), acknowledged: true })]
+  expect(brief(input({ steered }))).toBe('KANON  1 memory steers this session (observed) · nothing gone, nothing foreign')
+})
+
+/** may-be-stale belongs to the report and the Read note, never to the brief. */
+test('a may-be-stale item never appears in the brief', () => {
+  const steered = [memory('a.md', { verdict: { level: 'may-be-stale', evidence: '`src/x.ts` changed after this was written' } })]
+  expect(brief(input({ steered }))).toBe('KANON  1 memory steers this session (observed) · nothing gone, nothing foreign')
+})
+
+test('gone rows come before FOREIGN rows', () => {
   const out = brief(
     input({
-      files: [
-        file('/repo/vendor/p/CLAUDE.md', 'foreign'),
-        file('/repo/CLAUDE.md', 'project'),
-        file(USER_RULE, 'user'),
-      ],
+      files: [file('/repo/vendor/p/CLAUDE.md', 'foreign')],
+      steered: [memory('a.md', { verdict: goneVerdict('x.sh') })],
     }),
   )
-  const order = out.split('\n').filter((l) => l.includes('CLAUDE.md') || l.includes('style.md'))
-
-  expect(order[0]).toContain('style.md')
-  expect(order[1]).toContain('CLAUDE.md')
-  expect(order[2]).toContain('vendor/p/CLAUDE.md')
+  const lines = out.split('\n')
+  expect(lines.findIndex((l) => l.startsWith('  gone'))).toBeLessThan(lines.findIndex((l) => l.startsWith('  FOREIGN')))
 })
 
-/**
- * The brief is prepended to every session, so an unusually large instruction
- * set must not cost a screen. Foreign files are never part of the tail: they
- * are the reason the brief exists.
- */
-test('a long list collapses its tail but never a foreign file', () => {
-  const many = Array.from({ length: 14 }, (_, i) => file(`/repo/r${i}.md`, 'project'))
-  const out = brief(input({ files: [...many, file('/repo/vendor/p/CLAUDE.md', 'foreign')] }))
-
-  expect(out).toContain('4 more')
-  expect(out).toContain('vendor/p/CLAUDE.md')
-})
-
-/**
- * Fix 6 (whole-branch review): `plural()` appends an "s" for any count but
- * one, so this tail printed "4 mores" -- a bug that shipped in 0.0.10, not
- * introduced by this branch, but now visibly inconsistent with the drift
- * tail 30 lines below, which has always read "N more". The existing test
- * above only checks the loose substring `'4 more'`, which stayed true of
- * the buggy wording too ("4 mores" contains "4 more"), so it never caught
- * this. Assert the exact string instead.
- */
-test('the file-list tail reads "N more", not "N mores"', () => {
-  const many = Array.from({ length: 14 }, (_, i) => file(`/repo/r${i}.md`, 'project'))
-  const out = brief(input({ files: many }))
-
-  expect(out).toContain('... and 4 more, run /kanon for the full list')
-  expect(out).not.toContain('4 mores')
+test('a gone item with FOREIGN beside it gets both notes, the first-response one first', () => {
+  const out = prose(
+    brief(
+      input({
+        files: [file('/repo/vendor/p/CLAUDE.md', 'foreign')],
+        steered: [memory('a.md', { verdict: goneVerdict('x.sh') })],
+      }),
+    ),
+  )
+  expect(out).toContain(`Tell the user about the above in your first response. ${GONE_NOTE}`)
 })
 
 /** Trust calibration: the point is that Claude knows the directive is not
  * the user's, so both facts have to be in the text. */
-test('a foreign file is named, tagged and marked as not the user\'s', () => {
+test("a foreign file is named, tagged and marked as not the user's", () => {
   const out = brief(input({ files: [file('/repo/vendor/p/CLAUDE.md', 'foreign', { gitTracked: false })] }))
 
   expect(out).toContain('FOREIGN  vendor/p/CLAUDE.md')
   expect(out).toContain('(untracked)')
   expect(out).toContain("not the user's")
+  expect(out.split('\n')[0]).toBe('KANON  1 instruction file steers this session (observed) · full list: /kanon')
 })
 
 test('a foreign file quotes the directive it carries when one can be read', () => {
-  const out = brief(
-    input({ files: [file('/repo/vendor/p/CLAUDE.md', 'foreign')] }),
-    () => 'Default to using Bun instead of Node.js.',
-  )
+  const out = brief(input({ files: [file('/repo/vendor/p/CLAUDE.md', 'foreign')] }), () => 'Default to using Bun instead of Node.js.')
 
-  expect(out).toContain('"Default to using Bun instead of Node.js."')
+  expect(out).toContain('           "Default to using Bun instead of Node.js."')
 })
 
 test('a foreign file that cannot be excerpted is still named', () => {
@@ -111,6 +173,15 @@ test('a foreign file that cannot be excerpted is still named', () => {
 
   expect(out).toContain('vendor/p/CLAUDE.md')
   expect(out).not.toContain('""')
+})
+
+/** Foreign files are never collapsed, however many of the user's own files sit beside them. */
+test('many own files never push a foreign file out of the brief', () => {
+  const many = Array.from({ length: 14 }, (_, i) => file(`/repo/r${i}.md`, 'project'))
+  const out = brief(input({ files: [...many, file('/repo/vendor/p/CLAUDE.md', 'foreign')] }))
+
+  expect(out).toContain('FOREIGN  vendor/p/CLAUDE.md')
+  expect(out).not.toContain('r0.md')
 })
 
 /** The "tell the user" half of the design: Claude is the delivery channel. */
@@ -124,11 +195,12 @@ test('a clean session does not tell Claude to say anything', () => {
   expect(brief(input())).not.toContain('Tell the user')
 })
 
-test('a missing launch file is listed alongside the loaded ones when observed', () => {
+test('a missing launch file is listed when observed', () => {
   const out = brief(input({ missing: [{ path: '/repo/.claude/rules/testing.md', label: 'launch', rule: 'rules-dir' }] }))
 
   expect(out).toContain('missing  .claude/rules/testing.md')
   expect(out).toContain('did not load')
+  expect(prose(out)).toContain('Tell the user about the above in your first response.')
 })
 
 /**
@@ -148,27 +220,17 @@ test('prediction never calls anything missing', () => {
 
   expect(out).not.toContain('testing.md')
   expect(out).not.toContain('did not load')
-})
-
-test('prediction says it is predicting', () => {
-  expect(brief(input({ basis: 'predicted' }))).toContain('predicted')
+  expect(out).toBe('KANON  2 instruction files steer this session (predicted) · nothing gone, nothing foreign')
 })
 
 test('observation says it is observing', () => {
-  expect(brief(input())).toContain('observed')
+  expect(brief(input())).toContain('(observed)')
 })
 
-test('an empty file list says so rather than claiming a clean session', () => {
-  const out = brief(input({ files: [] }))
+test('nothing steering the session says so rather than claiming a clean session', () => {
+  const out = brief(input({ files: [], steered: [] }))
 
   expect(out).toContain('no instruction files')
-})
-
-test('a single file reads as one file, not one files', () => {
-  const one = { files: [file('/repo/CLAUDE.md', 'project')] }
-
-  expect(brief(input({ ...one }))).toContain('1 instruction file governs this session')
-  expect(brief(input({ ...one, basis: 'predicted' }))).toContain('1 instruction file governs this session')
 })
 
 /**
@@ -177,7 +239,7 @@ test('a single file reads as one file, not one files', () => {
  * It has to name itself without sounding like a disclaimer on every line.
  */
 test('the basis is stated once, in the header', () => {
-  const out = brief(input({ basis: 'predicted' }))
+  const out = brief(input({ basis: 'predicted', files: [file('/repo/vendor/p/CLAUDE.md', 'foreign')], steered: [memory('a.md', { verdict: goneVerdict('x.sh') })] }))
 
   expect(out.split('\n')[0]).toContain('(predicted)')
   expect(out.split('\n').slice(1).join('\n')).not.toContain('predicted')
@@ -187,7 +249,7 @@ test('the basis is stated once, in the header', () => {
  * The closing prose has two readers and one long line serves neither.
  * Claude Code's transcript hard-wraps at the terminal width and will break a
  * word in half doing it; a model reading an unwrapped paragraph gets no line
- * structure at all. The file list above is a fixed-column table and is
+ * structure at all. The rows above are a fixed-column table and are
  * deliberately not subject to this.
  */
 test('the closing notes are wrapped, and never mid-word', () => {
@@ -195,99 +257,34 @@ test('the closing notes are wrapped, and never mid-word', () => {
     input({
       files: [file('/repo/vendor/p/CLAUDE.md', 'foreign')],
       missing: [{ path: '/repo/.claude/rules/testing.md', label: 'launch', rule: 'rules-dir' }],
+      steered: [memory('a.md', { verdict: goneVerdict('x.sh') })],
     }),
   )
 
-  const prose = out.split('\n').filter((l) => l.length > 0 && !l.startsWith('  ') && !l.startsWith('KANON'))
-  expect(prose.length).toBeGreaterThan(1)
-  for (const line of prose) expect(line.length).toBeLessThanOrEqual(76)
+  const lines = out.split('\n').filter((l) => l.length > 0 && !l.startsWith('  ') && !l.startsWith('KANON'))
+  expect(lines.length).toBeGreaterThan(1)
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(76)
   // Rejoining on spaces has to give the sentences back intact: a wrap that
   // split a word would leave a fragment behind here.
-  expect(prose.join(' ')).toContain("The FOREIGN file is not the user's")
-  expect(prose.join(' ')).toContain('Tell the user about the above in your first response.')
+  expect(prose(out)).toContain("The FOREIGN file is not the user's")
+  expect(prose(out)).toContain('Tell the user about the above in your first response.')
+  expect(prose(out)).toContain(GONE_NOTE)
 })
 
-/** A row in the file list is a column, not prose, and must never be wrapped. */
-test('a long path in the file list is left on one line', () => {
-  const path = '/repo/a/very/deeply/nested/directory/tree/that/keeps/going/CLAUDE.md'
-  const out = brief(input({ files: [file(path, 'project')] }))
+/** A row is a column, not prose, and must never be wrapped. */
+test('a long path in a row is left on one line', () => {
+  const path = '/repo/a/very/deeply/nested/directory/tree/that/keeps/going/vendor/CLAUDE.md'
+  const out = brief(input({ files: [file(path, 'foreign')] }))
 
   const row = out.split('\n').find((l) => l.includes('CLAUDE.md'))
-  expect(row).toContain('a/very/deeply/nested/directory/tree/that/keeps/going/CLAUDE.md')
-})
-
-function drift(over: Partial<Drift> = {}): Drift {
-  return { appeared: [], vanished: [], changed: [], ...over }
-}
-
-test('the brief names each drifted file', () => {
-  const out = brief(input({
-    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
-  }))
-  expect(out).toContain('changed')
-  expect(out).toContain('CLAUDE.md')
-})
-
-test('the drift block names the comparison it is making', () => {
-  const out = brief(input({
-    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
-  }))
-  // Pins the line that states what `appeared` means: never seen governing
-  // this repository before, not merely absent from the last session. A
-  // silent reversion to a "since your last session" framing would describe
-  // behaviour the code no longer has, and no other assertion here would
-  // notice.
-  expect(out).toContain('compared with what has governed this repository before')
-})
-
-/**
- * Fix 7 (whole-branch review): task 5 amended the "nothing foreign, nothing
- * missing" early return so a session with drift but no foreign and no
- * missing files does not print that line -- there IS something to report,
- * it's just not foreign or missing. Only the positive case (drift empty,
- * line present) was ever asserted; this is the negative half.
- */
-test('drift with nothing foreign or missing does not claim there is nothing to report', () => {
-  const out = brief(input({
-    drift: drift({ changed: [{ path: '/repo/CLAUDE.md', origin: 'project', sha256: 'x' }] }),
-  }))
-  expect(out).not.toContain('nothing foreign, nothing missing')
-})
-
-test('no baseline means the brief says nothing about drift', () => {
-  const out = brief(input({ drift: null }))
-  expect(out).not.toContain('changed')
-  expect(out).not.toContain('appeared')
-})
-
-test('an all-empty drift is silent too', () => {
-  expect(brief(input({ drift: drift() }))).not.toContain('appeared')
-})
-
-/**
- * The brief is prepended to every session, so a large drift must not cost a
- * screen -- but a foreign file is the reason the brief exists and can never
- * be the thing that gets collapsed.
- */
-test('a long drift collapses to a count, and never collapses a foreign file', () => {
-  const many = Array.from({ length: 14 }, (_, i) => ({
-    path: `/repo/r${i}.md`, origin: 'project' as const, sha256: 'x',
-  }))
-  const out = brief(input({
-    drift: drift({
-      appeared: [...many, { path: '/repo/node_modules/foo/CLAUDE.md', origin: 'foreign', sha256: 'y' }],
-    }),
-  }))
-  expect(out).toContain('more, run /kanon')
-  expect(out).toContain('node_modules/foo/CLAUDE.md')
+  expect(row).toContain('a/very/deeply/nested/directory/tree/that/keeps/going/vendor/CLAUDE.md')
 })
 
 /**
  * Claude Code caps a hook's additionalContext at 10,000 characters and
  * spills the rest to a file, leaving the model a 2,000 character preview.
- * The foreign list is the one part of the brief with no limit of its own,
- * so a repository with hundreds of foreign loads would lose the notes that
- * tell Claude what to do about them.
+ * The FOREIGN and gone lists have no limit of their own, so a repository
+ * with hundreds of either would lose the notes that tell Claude what to do.
  */
 function manyForeign(n: number): BriefInput {
   const files = Array.from({ length: n }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
@@ -309,18 +306,31 @@ test('a capped brief keeps its summary line and its closing notes', () => {
   expect(lines[more + 1]).toBe('')
 })
 
-/**
- * When the cap bites, the FOREIGN rows are the last to go: naming a
- * dependency's file is what the brief exists for, and the notes would
- * otherwise warn about files Claude can no longer see.
- */
-test('a capped brief drops ordinary rows before any FOREIGN row', () => {
-  const foreign = Array.from({ length: 80 }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
-  const own = [file('/repo/CLAUDE.md', 'project'), file('/repo/a/CLAUDE.md', 'project'), file('/repo/b/CLAUDE.md', 'project')]
-  const out = brief(input({ files: [...own, ...foreign] }), () => 'x'.repeat(120))
+test('a brief with 300 gone items stays under BRIEF_MAX and keeps the gone note', () => {
+  const steered = Array.from({ length: 300 }, (_, i) => memory(`note-${i}.md`, { verdict: goneVerdict(`scripts/tool-${i}.sh`) }))
+  const out = brief(input({ steered }))
 
   expect(out.length).toBeLessThanOrEqual(BRIEF_MAX)
-  expect(out).not.toContain('project  CLAUDE.md')
+  expect(out.split('\n')[0]).toBe('KANON  300 memories steer this session (observed) · full list: /kanon')
+  expect(out).toContain('  gone     ~/.claude/projects/-home-user-repo/memory/note-0.md')
+  expect(out).toMatch(/\n {11}\.\.\. and \d+ more \(\d+ gone\), run \/kanon for the full list\n/)
+  expect(prose(out)).toContain(GONE_NOTE)
+})
+
+/**
+ * When the cap bites, the FOREIGN and gone rows are the last to go: naming
+ * them is what the brief exists for, and the notes would otherwise warn
+ * about rows Claude can no longer see.
+ */
+test('a capped brief drops missing rows before any FOREIGN or gone row', () => {
+  const foreign = Array.from({ length: 80 }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
+  const missing = Array.from({ length: 3 }, (_, i) => ({ path: `/repo/.claude/rules/m${i}.md`, label: 'launch' as const, rule: 'rules-dir' }))
+  const steered = [...foreign.map((f) => item(f.path, 'instruction', { origin: 'foreign' })), memory('a.md', { verdict: goneVerdict('x.sh') })]
+  const out = brief(input({ files: foreign, missing, steered }), () => 'x'.repeat(120))
+
+  expect(out.length).toBeLessThanOrEqual(BRIEF_MAX)
+  expect(out).not.toContain('missing  .claude/rules/m0.md')
   expect(out).toContain('FOREIGN  vendor/pkg0/CLAUDE.md')
+  expect(out).toContain('  gone     ~/.claude/projects/-home-user-repo/memory/a.md')
   expect(out).toMatch(/\.\.\. and \d+ more \(\d+ FOREIGN\), run \/kanon for the full list/)
 })
