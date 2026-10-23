@@ -8,7 +8,7 @@ import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { diff, digest, merge, SNAPSHOT_VERSION } from './drift'
 import { prune, tooLarge } from './limits'
-import { currentRun, normalise } from './normalise'
+import { cleanLine, currentRun, normalise } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
 import { realPath } from './paths'
@@ -95,7 +95,7 @@ function recordedRoot(path: string): string | undefined {
     return undefined
   }
   for (const line of text.split('\n')) {
-    const trimmed = line.trim()
+    const trimmed = cleanLine(line)
     if (!trimmed) continue
     let parsed: unknown
     try {
