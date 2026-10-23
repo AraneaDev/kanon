@@ -90,6 +90,23 @@ function tracks(p: string, text: string): boolean {
   return p === t || p.endsWith(`/${t}`)
 }
 
+/**
+ * Whether an extensionless slashed name sits under a directory this repo
+ * tracks. `lexer/parser/AST`, `vitest/config`, `fix/some-branch` and
+ * `Owner/Repo` are shaped like paths but are a list of words, a module
+ * specifier, a branch and a repository, and each was reported gone. A path
+ * into this tree starts at one of its directories, so an extensionless
+ * name whose first segment is none of them is not judged. A name with an
+ * extension or a trailing slash claims a file or directory and is always
+ * judged.
+ */
+function underTrackedDir(text: string, tracked: string[]): boolean {
+  const t = text.replace(/^(?:\.\/)+/, '')
+  const parts = t.split('/')
+  if (!t.includes('/') || t.endsWith('/') || /\.[A-Za-z0-9]{1,5}$/.test(parts[parts.length - 1]!)) return true
+  return tracked.some((p) => tracks(p, `${parts[0]}/`))
+}
+
 function judgeRepo(item: Item, names: Name[], root: string, home: string, probe: Probe): Verdict | null {
   // Where each checkable relative path was found, or null when it was not.
   const found = new Map<string, string | null>()
@@ -135,7 +152,9 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
       // gone only when no tracked path matches it at all. An unknown
       // tracked set is a tooling failure, not evidence.
       const tracked = probe.trackedPaths()
-      if (tracked !== null && !tracked.some((p) => tracks(p, n.text))) return gone(n.text)
+      if (tracked === null || tracked.some((p) => tracks(p, n.text))) continue
+      if (!underTrackedDir(n.text, tracked)) continue
+      return gone(n.text)
     } else if (n.kind === 'script') {
       if (scripts && !scripts.has(n.text)) return gone(n.text)
     } else if (!inCode.has(n.text)) {

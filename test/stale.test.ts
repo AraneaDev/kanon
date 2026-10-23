@@ -189,6 +189,24 @@ describe('judge', () => {
     })
   })
 
+  /** `lexer/parser/AST`, `vitest/config`, `fix/branch`, `Owner/Repo`: a list or a name, not a path here. */
+  test('an extensionless name whose first segment is no tracked directory gives no verdict', () => {
+    const { probe } = fake({ tracked: ['src/a.ts', 'docs/x.md'] })
+    const text = '`lexer/parser/AST` `vitest/config` `fix/some-branch` `Owner/Repo` `./a/b/c` `X_/Y_=false`'
+    expect(judge(item(text), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('an extensionless name under a tracked directory is still judged', () => {
+    const { probe } = fake({ tracked: ['src/a.ts', 'lib/deep/x.ts'] })
+    expect(judge(item('see `src/gone`'), ROOT, HOME, probe)?.evidence).toBe('names `src/gone`, which no longer exists')
+    expect(judge(item('see `deep/gone`'), ROOT, HOME, probe)?.evidence).toBe('names `deep/gone`, which no longer exists')
+  })
+
+  test('a name with an extension is judged whatever its first segment', () => {
+    const { probe } = fake({ tracked: ['src/a.ts'] })
+    expect(judge(item('see `docs/gone.md`'), ROOT, HOME, probe)?.level).toBe('gone')
+  })
+
   test('a relative path gives no verdict when the tracked set is unknown', () => {
     const { probe } = fake({ tracked: null })
     expect(judge(item('see `src/gone.ts` and `gone/`'), ROOT, HOME, probe)).toBeNull()
