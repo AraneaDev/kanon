@@ -123,7 +123,7 @@ test('an import flag is carried onto the loaded entry', () => {
 })
 
 test('the ruleset version is stamped on every report', () => {
-  expect(buildReport([], [], ROOT, HOME, new Map()).ruleset).toBe('2026-08')
+  expect(buildReport([], [], ROOT, HOME, new Map()).ruleset).toBe('2026-10')
 })
 
 test('the same file loaded twice appears once, keeping the first reason seen', () => {
