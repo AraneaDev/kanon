@@ -35,6 +35,15 @@ export type Excerpt = (path: string) => string | null
 
 const ORIGIN_ORDER: Origin[] = ['managed', 'user', 'project', 'local', 'foreign']
 
+/**
+ * The longest brief Kanon emits. Claude Code caps a hook's additionalContext
+ * at 10,000 characters; past that it writes the text to a file and the model
+ * sees only a 2,000 character preview, which would cut off the notes telling
+ * Claude what to do about a FOREIGN file. 500 characters are left for the
+ * hook envelope around the brief.
+ */
+export const BRIEF_MAX = 9_500
+
 /** Wide enough for the longest tag (`project`, `FOREIGN`, `missing`) plus a gap. */
 const TAG_WIDTH = 9
 
@@ -122,22 +131,27 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   const hidden = rest.length - shown.length
 
   const verb = files.length === 1 ? 'governs' : 'govern'
-  const out: string[] = [`KANON  ${plural(files.length, 'instruction file')} ${verb} this session (${basis})`]
+  const header = `KANON  ${plural(files.length, 'instruction file')} ${verb} this session (${basis})`
+  // Rows are kept as units so the size cap can drop whole ones: an excerpt
+  // goes with its FOREIGN row, and `files` counts the files a unit names.
+  const units: Unit[] = []
+  const add = (files: number, ...lines: string[]) => units.push({ lines, files })
 
-  for (const f of shown) out.push(row(label(f.origin), short(f.path, root)))
+  for (const f of shown) add(1, row(label(f.origin), short(f.path, root)))
   // Not `plural(hidden, 'more')`: that helper appends an "s" for any count
   // but one ("4 mores"), which shipped in 0.0.10 and is real prose the
   // drift tail below got right from the start -- kept consistent with it
   // here rather than leaving the file contradict itself.
-  if (hidden > 0) out.push(row('', `... and ${hidden} more, run /kanon for the full list`))
+  if (hidden > 0) add(hidden, row('', `... and ${hidden} more, run /kanon for the full list`))
 
   for (const f of foreign) {
-    out.push(row('FOREIGN', short(f.path, root), f.gitTracked === false ? '   (untracked)' : ''))
     const quote = excerpt(f.path)
-    if (quote) out.push(`${' '.repeat(2 + TAG_WIDTH)}"${quote}"`)
+    const line = row('FOREIGN', short(f.path, root), f.gitTracked === false ? '   (untracked)' : '')
+    if (quote) add(1, line, `${' '.repeat(2 + TAG_WIDTH)}"${quote}"`)
+    else add(1, line)
   }
 
-  for (const c of missing) out.push(row('missing', short(c.path, root), '   (expected, did not load)'))
+  for (const c of missing) add(1, row('missing', short(c.path, root), '   (expected, did not load)'))
 
   const drift = input.drift
   if (drift !== null && !driftIsEmpty(drift)) {
@@ -153,22 +167,20 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
     const shownRows = otherRows.slice(0, LIST_LIMIT)
     const hiddenRows = otherRows.length - shownRows.length
 
-    out.push('')
-    out.push('  compared with what has governed this repository before:')
-    for (const [tag, f] of [...foreignRows, ...shownRows]) out.push(row(tag, short(f.path, root)))
+    add(0, '', '  compared with what has governed this repository before:')
+    for (const [tag, f] of [...foreignRows, ...shownRows]) add(1, row(tag, short(f.path, root)))
     // Not `plural(hiddenRows, 'more')`: that helper appends an "s" for any
     // count but one ("4 mores"), which is fine where an existing test only
     // checks a loose substring but is wrong prose on its own -- "more" does
     // not pluralize.
-    if (hiddenRows > 0) out.push(row('', `... and ${hiddenRows} more, run /kanon for the full list`))
+    if (hiddenRows > 0) add(hiddenRows, row('', `... and ${hiddenRows} more, run /kanon for the full list`))
   }
 
   if (foreign.length === 0 && missing.length === 0) {
-    if (drift === null || driftIsEmpty(drift)) out.push(row('', 'nothing foreign, nothing missing'))
-    return out.join('\n')
+    const clean = drift === null || driftIsEmpty(drift) ? [row('', 'nothing foreign, nothing missing')] : []
+    return fit(header, units, clean)
   }
 
-  out.push('')
   const notes: string[] = []
   if (foreign.length > 0) {
     const one = foreign.length === 1
@@ -182,7 +194,27 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
     )
   }
   notes.push('Tell the user about the above in your first response.')
-  out.push(...wrap(notes.join(' ')))
+  return fit(header, units, ['', ...wrap(notes.join(' '))])
+}
 
-  return out.join('\n')
+interface Unit {
+  lines: string[]
+  files: number
+}
+
+/**
+ * Join the brief, dropping whole rows from the end until it fits BRIEF_MAX.
+ * The header and the tail (the notes telling Claude what to do) always
+ * survive, since they are what a cut brief would otherwise lose first.
+ */
+function fit(header: string, units: Unit[], tail: string[]): string {
+  const join = (kept: Unit[], more: string[]) => [header, ...kept.flatMap((u) => u.lines), ...more, ...tail].join('\n')
+  let text = join(units, [])
+  const kept = [...units]
+  let dropped = 0
+  while (text.length > BRIEF_MAX && kept.length > 0) {
+    dropped += kept.pop()!.files
+    text = join(kept, dropped > 0 ? [row('', `... and ${dropped} more, run /kanon for the full list`)] : [])
+  }
+  return text
 }
