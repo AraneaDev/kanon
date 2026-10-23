@@ -185,7 +185,7 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   }
   // The ack command goes on a line of its own, outside the wrap, which would
   // otherwise split it at any of its spaces.
-  const ack = gone.length > 0 ? [`  bun ${input.cli} ack --cwd ${root} <path>`] : []
+  const ack = gone.length > 0 ? [`  bun "${input.cli}" ack --cwd "${root}" "<path>"`] : []
   return fit(header, units, ['', ...wrap(notes.join(' ')), ...ack])
 }
 

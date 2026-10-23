@@ -137,7 +137,7 @@ your first response. Before you rely on a gone item, ask the user whether it
 still holds, naming the item and what is gone. If they say it does, record
 that with the command below, then offer to update or delete the item so the
 warning does not return. Do not raise gone items before you need them.
-  bun /home/you/.claude/plugins/kanon/src/cli.ts ack --cwd /home/you/project <path>
+  bun "/home/you/.claude/plugins/kanon/src/cli.ts" ack --cwd "/home/you/project" "<path>"
 ```
 
 A FOREIGN file is raised in Claude's first response. A `gone` item is raised only when Claude is

@@ -46,7 +46,7 @@ const GONE_NOTE =
   'the item so the warning does not return. Do not raise gone items before you need them.'
 
 /** The ack command, on a line of its own so the wrap can never split it. */
-const ackLine = (root: string) => `  bun ${CLI} ack --cwd ${root} <path>`
+const ackLine = (root: string) => `  bun "${CLI}" ack --cwd "${root}" "<path>"`
 
 /** The wrapped notes under the rows, rejoined into the sentences they were cut from. */
 function prose(out: string): string {
