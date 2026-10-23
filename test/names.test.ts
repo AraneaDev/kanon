@@ -142,6 +142,10 @@ describe('extractNames', () => {
     expect(paths('Rules are `**/*.md`; tests match `test/*.test.ts` and `src/[ab].ts`, or src/**/x.ts in prose.')).toEqual([])
   })
 
+  test('a URL with any scheme is not a path', () => {
+    expect(paths('Install over `ssh://git@example.com/` or `git+ssh://example.com/x/y`, see file:///tmp/x/y.md.')).toEqual([])
+  })
+
   test('ordinary names are still taken', () => {
     expect(paths('Use `src/a.ts`, `~/.kanon/state/`, `/home/user/x.md` and `CLAUDE.md`.')).toEqual([
       'src/a.ts',

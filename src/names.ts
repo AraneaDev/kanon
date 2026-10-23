@@ -35,6 +35,9 @@ const FS_ROOTS = new Set(
  * it describes was reported `gone` in a live brief.
  */
 function notAPath(t: string): boolean {
+  // `ssh://git@github.com/`, `git+ssh://host/x`: a URL in any scheme, not
+  // only http(s), which fromSpan already drops. An ssh remote was called gone.
+  if (/^[A-Za-z][\w+.-]*:\/\//.test(t)) return true
   const parts = t.split('/').filter(Boolean)
   // `<id>`, `{name}`: a template for a path, never a path.
   if (parts.some((p) => /[<>{}]/.test(p))) return true
