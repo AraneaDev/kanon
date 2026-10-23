@@ -39,8 +39,9 @@ const ORIGIN_ORDER: Origin[] = ['managed', 'user', 'project', 'local', 'foreign'
  * The longest brief Kanon emits. Claude Code caps a hook's additionalContext
  * at 10,000 characters; past that it writes the text to a file and the model
  * sees only a 2,000 character preview, which would cut off the notes telling
- * Claude what to do about a FOREIGN file. 500 characters are left for the
- * hook envelope around the brief.
+ * Claude what to do about a FOREIGN file. The cap applies to the string
+ * itself; the 500 character margin covers the overflow row the cut adds and
+ * the chance that Claude Code counts characters differently from `.length`.
  */
 export const BRIEF_MAX = 9_500
 
