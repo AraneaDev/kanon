@@ -141,12 +141,12 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   const units: Unit[] = []
   for (const s of gone) {
     // The evidence quotes a name taken from a file Kanon did not write.
-    units.push({ keep: Keep.Kept, kind: 'gone', lines: [row('gone', short(s.path, root)), `${INDENT}${stripControl(s.verdict!.evidence)}`] })
+    units.push({ keep: Keep.Gone, kind: 'gone', lines: [row('gone', short(s.path, root)), `${INDENT}${stripControl(s.verdict!.evidence)}`] })
   }
   for (const f of foreign) {
     const quote = excerpt(f.path)
     const line = row('FOREIGN', short(f.path, root), f.gitTracked === false ? '   (untracked)' : '')
-    units.push({ keep: Keep.Kept, kind: 'foreign', lines: quote ? [line, `${INDENT}"${quote}"`] : [line] })
+    units.push({ keep: Keep.Foreign, kind: 'foreign', lines: quote ? [line, `${INDENT}"${quote}"`] : [line] })
   }
   for (const c of missing) {
     units.push({ keep: Keep.Missing, kind: 'missing', lines: [row('missing', short(c.path, root), '   (expected, did not load)')] })
@@ -164,27 +164,43 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
       `The user may believe the missing ${missing.length === 1 ? 'file governs' : 'files govern'} you. ${missing.length === 1 ? 'It does' : 'They do'} not.`,
     )
   }
-  if (foreign.length > 0 || missing.length > 0) notes.push('Tell the user about the above in your first response.')
+  // Names its subject rather than saying "the above": the gone rows sit above
+  // too, and they are the ones Claude must not raise up front.
+  if (foreign.length > 0 || missing.length > 0) {
+    const subject =
+      foreign.length > 0 && missing.length > 0
+        ? 'the FOREIGN and missing files'
+        : foreign.length > 0
+          ? `the FOREIGN ${foreign.length === 1 ? 'file' : 'files'}`
+          : `the missing ${missing.length === 1 ? 'file' : 'files'}`
+    notes.push(`Tell the user about ${subject} in your first response.`)
+  }
   // Gone items are raised at the moment of reliance, not up front: most of
   // them will never matter to this session, and a first response that opens
   // with a list of stale notes is noise the user learns to skip.
   if (gone.length > 0) {
     notes.push(
-      `Before you rely on a gone item, ask the user whether it still holds, naming the item and what is gone. If they say it does, record that with \`bun ${input.cli} ack --cwd ${root} <path>\`, then offer to update or delete the item so the warning does not return. Do not raise gone items before you need them.`,
+      `Before you rely on a gone item, ask the user whether it still holds, naming the item and what is gone. If they say it does, record that with the command below, then offer to update or delete the item so the warning does not return. Do not raise gone items before you need them.`,
     )
   }
-  return fit(header, units, ['', ...wrap(notes.join(' '))])
+  // The ack command goes on a line of its own, outside the wrap, which would
+  // otherwise split it at any of its spaces.
+  const ack = gone.length > 0 ? [`  bun ${input.cli} ack --cwd ${root} <path>`] : []
+  return fit(header, units, ['', ...wrap(notes.join(' ')), ...ack])
 }
 
 /**
- * What the size cap gives up last, lowest first. FOREIGN and gone rows
- * outrank everything a cut could take, because the notes warn about them by
- * name: dropping them first would leave a warning about rows Claude cannot
- * see.
+ * What the size cap gives up last, lowest first. FOREIGN rows outrank
+ * everything, because a dependency's directive is already in Claude's
+ * context and the notes warn about each one by name. Gone rows come next:
+ * they are only asked about at the moment of reliance, so losing a few to
+ * the cap costs less. The header and the notes are the never-cut structure
+ * and sit outside the ranks entirely: fit() only ever drops units.
  */
 const enum Keep {
   Missing = 0,
-  Kept = 1,
+  Gone = 1,
+  Foreign = 2,
 }
 
 interface Unit {

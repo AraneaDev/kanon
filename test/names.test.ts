@@ -109,4 +109,41 @@ describe('extractNames', () => {
   test('a path inside a Markdown link is a path', () => {
     expect(one('[guide](docs/guide.md)')).toEqual([{ kind: 'path', text: 'docs/guide.md' }])
   })
+
+  // Names that are path-shaped and are not paths. Each one was a false
+  // `gone` in a live brief.
+  const paths = (md: string) => one(md).filter((n) => n.kind === 'path').map((n) => n.text)
+
+  test('a slash command is not a path', () => {
+    expect(paths('Run `/kanon`, `/mcp` or `/kanon:report`, or type /kanon in prose.')).toEqual([])
+  })
+
+  test('an anchored name outside the filesystem roots is not a path', () => {
+    expect(paths('IDs look like `/org/project`; ignore `/.superpowers/` in git.')).toEqual([])
+  })
+
+  test('an absolute path under a filesystem root is still a path', () => {
+    expect(paths('See `/home/user/x.md`, `/tmp/a` and /etc/hosts/x.conf.')).toEqual(['/home/user/x.md', '/tmp/a', '/etc/hosts/x.conf'])
+  })
+
+  test('a URL with no scheme is not a path', () => {
+    expect(paths('Read `docs.example.com/en/hooks`, github.com/user/repo and see www.example.org/a/b.')).toEqual([])
+  })
+
+  test('a file name with an extension still counts in the first segment', () => {
+    expect(paths('Edit `config.json/x` and `src/a.ts`.')).toEqual(['config.json/x', 'src/a.ts'])
+  })
+
+  test('a placeholder segment is not a path', () => {
+    expect(paths('Write `state/<id>.json`, `src/{name}.ts` and `~/.kanon/<session>/x`.')).toEqual([])
+  })
+
+  test('ordinary names are still taken', () => {
+    expect(paths('Use `src/a.ts`, `~/.kanon/state/`, `/home/user/x.md` and `CLAUDE.md`.')).toEqual([
+      'src/a.ts',
+      '~/.kanon/state/',
+      '/home/user/x.md',
+      'CLAUDE.md',
+    ])
+  })
 })

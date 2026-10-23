@@ -42,8 +42,11 @@ function input(over: Partial<BriefInput> = {}): BriefInput {
 
 const GONE_NOTE =
   'Before you rely on a gone item, ask the user whether it still holds, naming the item and what is gone. ' +
-  `If they say it does, record that with \`bun ${CLI} ack --cwd /repo <path>\`, then offer to update or delete ` +
+  'If they say it does, record that with the command below, then offer to update or delete ' +
   'the item so the warning does not return. Do not raise gone items before you need them.'
+
+/** The ack command, on a line of its own so the wrap can never split it. */
+const ackLine = (root: string) => `  bun ${CLI} ack --cwd ${root} <path>`
 
 /** The wrapped notes under the rows, rejoined into the sentences they were cut from. */
 function prose(out: string): string {
@@ -104,6 +107,7 @@ test('a gone memory is named with what is gone, and Claude is told to ask before
     '',
   ])
   expect(prose(out)).toBe(GONE_NOTE)
+  expect(lines[lines.length - 1]).toBe(ackLine('/repo'))
 })
 
 /** Gone items are raised at the moment of reliance, so they alone do not ask for a first-response alarm. */
@@ -114,7 +118,7 @@ test('a gone item alone does not tell Claude to raise it in its first response',
 
 test('the ack command in the notes names the CLI and the root', () => {
   const out = brief(input({ root: '/srv/checkout', steered: [memory('a.md', { verdict: goneVerdict('x.sh') })] }))
-  expect(prose(out)).toContain(`\`bun ${CLI} ack --cwd /srv/checkout <path>\``)
+  expect(out.split('\n')).toContain(ackLine('/srv/checkout'))
 })
 
 test('an acknowledged gone item is not raised', () => {
@@ -148,7 +152,7 @@ test('a gone item with FOREIGN beside it gets both notes, the first-response one
       }),
     ),
   )
-  expect(out).toContain(`Tell the user about the above in your first response. ${GONE_NOTE}`)
+  expect(out).toContain(`Tell the user about the FOREIGN file in your first response. ${GONE_NOTE}`)
 })
 
 /** Trust calibration: the point is that Claude knows the directive is not
@@ -200,7 +204,7 @@ test('a missing launch file is listed when observed', () => {
 
   expect(out).toContain('missing  .claude/rules/testing.md')
   expect(out).toContain('did not load')
-  expect(prose(out)).toContain('Tell the user about the above in your first response.')
+  expect(prose(out)).toContain('Tell the user about the missing file in your first response.')
 })
 
 /**
@@ -267,7 +271,7 @@ test('the closing notes are wrapped, and never mid-word', () => {
   // Rejoining on spaces has to give the sentences back intact: a wrap that
   // split a word would leave a fragment behind here.
   expect(prose(out)).toContain("The FOREIGN file is not the user's")
-  expect(prose(out)).toContain('Tell the user about the above in your first response.')
+  expect(prose(out)).toContain('Tell the user about the FOREIGN and missing files in your first response.')
   expect(prose(out)).toContain(GONE_NOTE)
 })
 
@@ -300,7 +304,7 @@ test('a capped brief keeps its summary line and its closing notes', () => {
   const lines = brief(manyForeign(300), longExcerpt).split('\n')
 
   expect(lines[0]!.startsWith('KANON  ')).toBe(true)
-  expect(lines.join(' ').replace(/\s+/g, ' ')).toContain('Tell the user about the above in your first response.')
+  expect(lines.join(' ').replace(/\s+/g, ' ')).toContain('Tell the user about the FOREIGN files in your first response.')
   const more = lines.findIndex((l) => /^ {11}\.\.\. and \d+ more( \(\d+ FOREIGN\))?, run \/kanon for the full list$/.test(l))
   expect(more).toBeGreaterThan(0)
   expect(lines[more + 1]).toBe('')
@@ -322,7 +326,7 @@ test('a brief with 300 gone items stays under BRIEF_MAX and keeps the gone note'
  * them is what the brief exists for, and the notes would otherwise warn
  * about rows Claude can no longer see.
  */
-test('a capped brief drops missing rows before any FOREIGN or gone row', () => {
+test('a capped brief drops missing rows, then gone rows, before any FOREIGN row', () => {
   const foreign = Array.from({ length: 80 }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
   const missing = Array.from({ length: 3 }, (_, i) => ({ path: `/repo/.claude/rules/m${i}.md`, label: 'launch' as const, rule: 'rules-dir' }))
   const steered = [...foreign.map((f) => item(f.path, 'instruction', { origin: 'foreign' })), memory('a.md', { verdict: goneVerdict('x.sh') })]
@@ -331,6 +335,21 @@ test('a capped brief drops missing rows before any FOREIGN or gone row', () => {
   expect(out.length).toBeLessThanOrEqual(BRIEF_MAX)
   expect(out).not.toContain('missing  .claude/rules/m0.md')
   expect(out).toContain('FOREIGN  vendor/pkg0/CLAUDE.md')
-  expect(out).toContain('  gone     ~/.claude/projects/-home-user-repo/memory/a.md')
-  expect(out).toMatch(/\.\.\. and \d+ more \(\d+ FOREIGN\), run \/kanon for the full list/)
+  // The cap reached past the missing rows and the one gone row before it
+  // took any FOREIGN row, so all three kinds are counted in the overflow.
+  expect(out).not.toContain('memory/a.md')
+  expect(out).toMatch(/\.\.\. and \d+ more \(\d+ FOREIGN, 1 gone\), run \/kanon for the full list/)
+})
+
+/** FOREIGN outranks gone: a dependency's directive is the more urgent thing to keep in view. */
+test('a capped brief cuts gone rows before any FOREIGN row', () => {
+  const foreign = Array.from({ length: 40 }, (_, i) => file(`/repo/vendor/pkg${i}/CLAUDE.md`, 'foreign'))
+  const gone = Array.from({ length: 200 }, (_, i) => memory(`note-${i}.md`, { verdict: goneVerdict(`scripts/tool-${i}.sh`) }))
+  const steered = [...foreign.map((f) => item(f.path, 'instruction', { origin: 'foreign' })), ...gone]
+  const out = brief(input({ files: foreign, steered }), () => 'x'.repeat(80))
+
+  expect(out.length).toBeLessThanOrEqual(BRIEF_MAX)
+  for (let i = 0; i < 40; i++) expect(out).toContain(`FOREIGN  vendor/pkg${i}/CLAUDE.md`)
+  expect(out).not.toContain('memory/note-199.md')
+  expect(out).toMatch(/\.\.\. and \d+ more \(\d+ gone\), run \/kanon for the full list/)
 })

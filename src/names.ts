@@ -22,6 +22,38 @@ const YARN_BUILTIN = new Set(['install', 'add', 'remove', 'init', 'upgrade', 'li
 const FILE_EXT = new Set('md mdx txt json jsonc json5 yml yaml toml ini cfg conf env lock ts tsx mts cts js jsx mjs cjs sh bash zsh py rb php go rs java kt swift c h cpp hpp cs css scss html xml svg sql csv gitignore dockerignore'.split(' '))
 const blank = (s: string) => s.replace(/[^\n]/g, ' ')
 
+// The top-level directories an absolute path in a note can plausibly start
+// with, across Linux, macOS and Nix. Anything else anchored at `/` is an ID
+// format (`/org/project`) or an ignore pattern (`/.superpowers/`), and
+// judging it against the disk reported a false "gone" for both.
+const FS_ROOTS = new Set(
+  'home Users root tmp var etc usr opt srv mnt media Volumes private nix proc dev run Library System Applications'.split(' '),
+)
+
+/**
+ * A path-shaped name that is not a path. Each rule is here because the name
+ * it describes was reported `gone` in a live brief.
+ */
+function notAPath(t: string): boolean {
+  const parts = t.split('/').filter(Boolean)
+  // `<id>`, `{name}`: a template for a path, never a path.
+  if (parts.some((p) => /[<>{}]/.test(p))) return true
+  if (t.startsWith('/')) {
+    // `/kanon`, `/mcp`, `/kanon:report`: a slash command.
+    if (parts.length <= 1) return true
+    // `/org/project`, `/.superpowers/`: not under any filesystem root.
+    if (!FS_ROOTS.has(parts[0]!)) return true
+    return false
+  }
+  // `docs.example.com/en/hooks`, `github.com/x/y`: a URL with its scheme
+  // left off. Two or more dot-separated labels in the first segment, the
+  // last of which is not a file extension, so `config.json/x` is kept.
+  const first = parts[0] ?? ''
+  const host = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.exec(first)
+  if (host && parts.length > 1 && !FILE_EXT.has(first.slice(first.lastIndexOf('.') + 1).toLowerCase())) return true
+  return false
+}
+
 function fromSpan(span: string): Name | null {
   if (/^--[A-Za-z][\w-]*(=\S*)?$/.test(span)) return { kind: 'flag', text: span.split('=')[0]! }
   const run = ONE_SHOT.exec(span)
@@ -87,6 +119,7 @@ export function extractNames(markdown: string): Name[] {
   const seen = new Set<string>()
   const out: Name[] = []
   for (const { name } of found) {
+    if (name.kind === 'path' && notAPath(name.text)) continue
     const key = `${name.kind}\0${name.text}`
     if (seen.has(key)) continue
     seen.add(key)

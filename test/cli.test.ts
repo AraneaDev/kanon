@@ -1162,9 +1162,7 @@ test('brief --hook names a memory whose named file is gone, and caches the steer
 test('the ack command in the brief names this CLI and the resolved root', async () => {
   const { repo, env, transcript } = withGoneMemory('kanon-cli-gone-ack-')
   const out = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env))
-  const prose = out.split('\n').filter((l) => l.length > 0 && !l.startsWith('  ') && !l.startsWith('KANON')).join(' ')
-
-  expect(prose).toContain(`\`bun ${CLI} ack --cwd ${sessionRoot(repo)} <path>\``)
+  expect(out.split('\n')).toContain(`  bun ${CLI} ack --cwd ${sessionRoot(repo)} <path>`)
 })
 
 /** The ack file is keyed by the resolved root, the same key the brief reads it by. */
