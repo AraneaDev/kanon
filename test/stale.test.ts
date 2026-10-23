@@ -9,6 +9,8 @@ function fake(o: {
   code?: string[]
   scripts?: string[] | null
   changed?: string[]
+  /** Basenames of tracked files; empty (known, nothing tracked) by default, null for unknown. */
+  tracked?: string[] | null
 }) {
   const calls = { exists: [] as string[], code: [] as string[][], changed: [] as Array<{ paths: string[]; since: Date }> }
   const probe: Probe = {
@@ -16,6 +18,7 @@ function fake(o: {
     occursInCode: (names) => (calls.code.push(names), new Set(names.filter((n) => (o.code ?? []).includes(n)))),
     scripts: () => (o.scripts === undefined ? new Set() : o.scripts === null ? null : new Set(o.scripts)),
     changedSince: (paths, since) => (calls.changed.push({ paths, since }), o.changed ?? []),
+    trackedBasenames: () => (o.tracked === null ? null : new Set(o.tracked ?? [])),
   }
   return { probe, calls }
 }
@@ -134,6 +137,26 @@ describe('judge', () => {
       level: 'gone',
       evidence: 'names `notes.md`, which no longer exists',
     })
+  })
+
+  /** A file named by its basename is usually somewhere in the tree, not at the root. */
+  test('a slashless name tracked elsewhere in the repo gives no verdict', () => {
+    const { probe } = fake({ tracked: ['normalise.ts', 'cli.ts'] })
+    expect(judge(item('the only file naming payload fields is `normalise.ts`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('a slashless name tracked nowhere and absent from code is gone', () => {
+    const { probe } = fake({ tracked: ['cli.ts'] })
+    expect(judge(item('see `gone.ts`'), ROOT, HOME, probe)).toEqual({
+      level: 'gone',
+      evidence: 'names `gone.ts`, which no longer exists',
+    })
+  })
+
+  /** Not knowing what is tracked is a tooling failure, and that never reads as gone. */
+  test('a slashless name gives no verdict when the tracked set is unknown', () => {
+    const { probe } = fake({ tracked: null })
+    expect(judge(item('see `gone.ts`'), ROOT, HOME, probe)).toBeNull()
   })
 
   test('a path with a slash is judged by existence alone, not by code', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gitProbe, lastCommit } from '../src/probe'
 import { tmp } from './tmp'
@@ -170,5 +170,29 @@ describe('lastCommit', () => {
     writeFileSync(join(root, 'new.ts'), 'x')
     expect(lastCommit(root, 'new.ts')).toBeNull()
     expect(lastCommit(tmp('kanon-nogit-'), 'a.ts')).toBeNull()
+  })
+})
+
+describe('gitProbe.trackedBasenames', () => {
+  test('returns the basenames of tracked files only', () => {
+    const root = repo()
+    commit(root, { 'src/normalise.ts': 'x', 'README.md': 'y', 'deep/a/b/c.json': '{}' }, '2026-01-01T00:00:00Z')
+    writeFileSync(join(root, 'untracked.ts'), 'z')
+    expect(gitProbe(root).trackedBasenames()).toEqual(new Set(['normalise.ts', 'README.md', 'c.json']))
+  })
+
+  /** One git spawn per probe: the second call answers from the cache even with git gone. */
+  test('asks git once across two calls', () => {
+    const root = repo()
+    commit(root, { 'src/a.ts': 'x' }, '2026-01-01T00:00:00Z')
+    const probe = gitProbe(root)
+    const first = probe.trackedBasenames()
+    rmSync(join(root, '.git'), { recursive: true, force: true })
+    expect(probe.trackedBasenames()).toBe(first)
+    expect(first).toEqual(new Set(['a.ts']))
+  })
+
+  test('is null outside a repository', () => {
+    expect(gitProbe(tmp('kanon-nogit-')).trackedBasenames()).toBeNull()
   })
 })

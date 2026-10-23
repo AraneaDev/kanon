@@ -18,6 +18,8 @@ export interface Probe {
   scripts(): Set<string> | null
   /** Repo-relative paths among `paths` with a commit after `since`; empty when not a git repo. */
   changedSince(paths: string[], since: Date): string[]
+  /** Basenames of every tracked file in the repo, or null when unknown (not a repo, git failed). */
+  trackedBasenames(): Set<string> | null
 }
 
 export interface Item {
@@ -109,7 +111,16 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
 
   for (const n of checkable) {
     if (n.kind === 'path') {
-      if (found.get(n.text) === null && !(inCode.has(n.text) && !n.text.includes('/'))) return gone(n.text)
+      if (found.get(n.text) !== null) continue
+      if (n.text.includes('/') || isPinned(n.text)) return gone(n.text)
+      // A slashless name (`normalise.ts`) is usually a file named by its
+      // basename from somewhere in the tree, not one at the root: reading it
+      // as gone accused a project's own CLAUDE.md of naming a missing file.
+      // It is gone only when no tracked file has that name and no code
+      // mentions it. An unknown tracked set is a tooling failure, not evidence.
+      if (inCode.has(n.text)) continue
+      const tracked = probe.trackedBasenames()
+      if (tracked !== null && !tracked.has(n.text)) return gone(n.text)
     } else if (n.kind === 'script') {
       if (scripts && !scripts.has(n.text)) return gone(n.text)
     } else if (!inCode.has(n.text)) {

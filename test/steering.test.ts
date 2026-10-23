@@ -14,6 +14,7 @@ const diskProbe: Probe = {
   occursInCode: (names) => new Set(names),
   scripts: () => null,
   changedSince: () => [],
+  trackedBasenames: () => null,
 }
 
 const cls = (path: string, origin: Classified['origin'] = 'project'): Classified => ({
