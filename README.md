@@ -101,7 +101,7 @@ NOT LOADED
   quiet      docs/CLAUDE.md                       on-demand, not triggered
 
 CONFIG CHANGED
-  06:58  skills  (+1)
+  06:58  skills  ~/.claude/skills/nl-taal/SKILL.md
 ```
 
 That is a real run, not a mock-up. Piped into a file or a pipe it is exactly these bytes; on a
