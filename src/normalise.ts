@@ -67,7 +67,8 @@ export function cleanLine(line: string): string {
  * field names, confirmed against a live session on 2026-08-27 (see
  * test/fixtures/payloads/). ConfigChange's are `source` and an optional
  * `file_path`, confirmed on 2026-10-23; the `config_source` and
- * `changed_keys` the documentation once suggested never occur. This function
+ * `changed_keys` the documentation once suggested never occur. SessionStart's
+ * are `source` and `transcript_path`. This function
  * is the only place in the codebase that names them, so if Anthropic renames
  * one, this is a one-place edit.
  */
@@ -117,7 +118,26 @@ export function normalise(lines: string[]): Event[] {
       continue
     }
 
+    if (w.hook === 'SessionStart') {
+      const source = typeof raw.source === 'string' ? raw.source : 'unknown'
+      const transcript = typeof raw.transcript_path === 'string' ? raw.transcript_path : null
+      out.push({ t, ev: 'start', source, transcript })
+      continue
+    }
+
     out.push({ t, ev: 'unparsed', raw: text })
   }
   return out
+}
+
+/** The transcript path named by the last start event that carries one. */
+export function transcriptOf(events: Event[]): string | null {
+  let found: string | null = null
+  for (const e of events) if (e.ev === 'start' && e.transcript) found = e.transcript
+  return found
+}
+
+/** How many times the context was compacted: start events with source `compact`. */
+export function compactions(events: Event[]): number {
+  return events.filter((e) => e.ev === 'start' && e.source === 'compact').length
 }

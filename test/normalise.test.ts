@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { currentRun, normalise } from '../src/normalise'
+import { compactions, currentRun, normalise, transcriptOf } from '../src/normalise'
 
 /**
  * memory_type is Claude Code's own statement of a file's scope, confirmed
@@ -207,4 +207,32 @@ test('NULs that replaced characters inside a line leave it unparsed', () => {
     .replace('po/', '\u0000\u0000\u0000')
 
   expect(normalise([line]).map((e) => e.ev)).toEqual(['unparsed'])
+})
+
+const start = (raw: Record<string, unknown>) =>
+  JSON.stringify({ t: '2026-10-24T10:00:00Z', hook: 'SessionStart', raw })
+
+test('a SessionStart payload yields a start event with its source and transcript', () => {
+  const [e] = normalise([start({ source: 'compact', transcript_path: '/t/x.jsonl' })])
+  expect(e).toEqual({ t: '2026-10-24T10:00:00Z', ev: 'start', source: 'compact', transcript: '/t/x.jsonl' })
+})
+
+test('a SessionStart without source is unknown', () => {
+  const [e] = normalise([start({})])
+  expect(e).toEqual({ t: '2026-10-24T10:00:00Z', ev: 'start', source: 'unknown', transcript: null })
+})
+
+test('compactions counts compact starts only', () => {
+  const events = normalise(['startup', 'compact', 'resume', 'compact'].map((source) => start({ source })))
+  expect(compactions(events)).toBe(2)
+})
+
+test('transcriptOf takes the last start event that names one', () => {
+  const events = normalise([
+    start({ source: 'startup', transcript_path: '/t/a.jsonl' }),
+    start({ source: 'resume', transcript_path: '/t/b.jsonl' }),
+    start({ source: 'compact' }),
+  ])
+  expect(transcriptOf(events)).toBe('/t/b.jsonl')
+  expect(transcriptOf([])).toBeNull()
 })

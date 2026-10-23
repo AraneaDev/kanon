@@ -26,7 +26,8 @@ export interface LoadEvent {
 }
 export interface ConfigEvent { t: string; ev: 'config'; source: string; path: string | null }
 export interface UnparsedEvent { t: string; ev: 'unparsed'; raw: string }
-export type Event = LoadEvent | ConfigEvent | UnparsedEvent
+export interface StartEvent { t: string; ev: 'start'; source: string; transcript: string | null }
+export type Event = LoadEvent | ConfigEvent | StartEvent | UnparsedEvent
 
 export interface Classified {
   path: string
