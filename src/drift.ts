@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs'
-import { tooLarge } from './limits'
+import { readStart } from './limits'
 import { realPath } from './paths'
 import type { Classified, Origin } from './types'
 
@@ -89,9 +88,10 @@ export interface Drift {
  * sha256 of a file's bytes, or null when it cannot be read.
  *
  * A hash is provenance, not meaning: it answers "is this the same file as
- * last time" without Kanon forming any view of what the file says. The
- * 4 MiB ceiling is the one Claude Code itself applies, reused so that a file
- * Claude Code would skip is not hashed either.
+ * last time" without Kanon forming any view of what the file says. Only
+ * the first 4 MiB are hashed: that is the part of an oversized nested
+ * CLAUDE.md Claude Code loads, so a change past it changes nothing that
+ * governs the session.
  *
  * Taken in the cold path, never in record.sh. The hot path stays a sed and
  * an append. The consequence is that the digest describes the file as it is
@@ -101,12 +101,8 @@ export interface Drift {
  * for this hash to answer a different question.
  */
 export function hashFile(path: string): string | null {
-  if (tooLarge(path)) return null
-  try {
-    return new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex')
-  } catch {
-    return null
-  }
+  const bytes = readStart(path)
+  return bytes === null ? null : new Bun.CryptoHasher('sha256').update(bytes).digest('hex')
 }
 
 /**

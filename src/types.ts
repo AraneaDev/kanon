@@ -113,7 +113,11 @@ export const CLAIMED_ORIGINS: Record<string, Origin[]> = {
   Project: ['project', 'local', 'foreign'],
 }
 
-export const RULESET = '2026-08'
+/**
+ * Stamps every report with the model of Claude Code's loader it was built
+ * from. 2026-10: an oversized nested CLAUDE.md loads by its start (2.1.309).
+ */
+export const RULESET = '2026-10'
 
 export const DEPENDENCY_SEGMENTS = [
   'node_modules', 'vendor', '.bun', '.venv', 'site-packages', '.cargo', '.gradle', 'Pods',

@@ -1,7 +1,11 @@
-import { lstatSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { closeSync, lstatSync, openSync, readdirSync, readSync, rmSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 
-/** Claude Code loads a CLAUDE.md up to 4 MiB and skips a larger one. */
+/**
+ * Claude Code loads a CLAUDE.md up to 4 MiB. Since 2.1.309 a nested one over
+ * the limit loads by its start rather than being skipped, so Kanon reads that
+ * same start (`readStart`) wherever it hashes or quotes a file.
+ */
 export const MAX_FILE_BYTES = 4 * 1024 * 1024
 
 /**
@@ -17,6 +21,25 @@ export function tooLarge(path: string): boolean {
     return statSync(path).size > MAX_FILE_BYTES
   } catch {
     return false
+  }
+}
+
+/**
+ * The first `max` bytes of a file, following symlinks, or null when it cannot
+ * be read. This is the part of an oversized instruction file Claude Code
+ * actually loads, so it is the part drift hashes and the brief quotes.
+ */
+export function readStart(path: string, max = MAX_FILE_BYTES): Buffer | null {
+  let fd: number | undefined
+  try {
+    fd = openSync(path, 'r')
+    const buf = Buffer.alloc(Math.min(max, statSync(path).size))
+    const n = readSync(fd, buf, 0, buf.length, 0)
+    return buf.subarray(0, n)
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) closeSync(fd)
   }
 }
 

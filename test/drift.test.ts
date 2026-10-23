@@ -13,6 +13,7 @@ import {
   type SnapshotEntry,
 } from '../src/drift'
 import type { Classified } from '../src/types'
+import { MAX_FILE_BYTES } from '../src/limits'
 import { tmp } from './tmp'
 
 function classified(path: string): Classified {
@@ -316,4 +317,39 @@ test('an entry with an unparseable lastSeen is kept rather than dropped', () => 
  */
 test('SNAPSHOT_MAX_AGE_DAYS is 90 days', () => {
   expect(SNAPSHOT_MAX_AGE_DAYS).toBe(90)
+})
+
+/**
+ * Since Claude Code 2.1.309 a nested CLAUDE.md over the size limit loads by
+ * its start instead of being skipped. Drift has to see that file too, so it
+ * hashes the same start Claude Code reads.
+ */
+const sha = (b: Buffer) => new Bun.CryptoHasher('sha256').update(b).digest('hex')
+
+test('an oversized file hashes by its first MAX_FILE_BYTES', () => {
+  const f = join(tmp('kanon-d-'), 'CLAUDE.md')
+  const bytes = Buffer.alloc(MAX_FILE_BYTES + 10, 0x61)
+  writeFileSync(f, bytes)
+
+  expect(hashFile(f)).toBe(sha(bytes.subarray(0, MAX_FILE_BYTES)))
+})
+
+test('a change past the limit does not change the digest', () => {
+  const f = join(tmp('kanon-d-'), 'CLAUDE.md')
+  const bytes = Buffer.alloc(MAX_FILE_BYTES + 10, 0x61)
+  writeFileSync(f, bytes)
+  const before = hashFile(f)
+  bytes[bytes.length - 1] = 0x62
+  writeFileSync(f, bytes)
+
+  expect(before).not.toBeNull()
+  expect(hashFile(f)).toBe(before)
+})
+
+test('a file of exactly MAX_FILE_BYTES hashes as the whole file', () => {
+  const f = join(tmp('kanon-d-'), 'CLAUDE.md')
+  const bytes = Buffer.alloc(MAX_FILE_BYTES, 0x61)
+  writeFileSync(f, bytes)
+
+  expect(hashFile(f)).toBe(sha(bytes))
 })
