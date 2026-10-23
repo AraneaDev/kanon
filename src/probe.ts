@@ -42,15 +42,15 @@ function exists(absPath: string): boolean {
 export function gitProbe(root: string): Probe {
   // Computed on first use, then kept for the probe's lifetime: one
   // `ls-files` per session start, however many names ask.
-  let tracked: Set<string> | null | undefined
+  let tracked: string[] | null | undefined
   return {
     exists,
 
-    trackedBasenames() {
+    trackedPaths() {
       if (tracked !== undefined) return tracked
       tracked = null
       const r = git(root, ['ls-files', '-z'])
-      if (r && r.code === 0) tracked = new Set(r.out.split('\0').filter(Boolean).map((p) => p.slice(p.lastIndexOf('/') + 1)))
+      if (r && r.code === 0) tracked = r.out.split('\0').filter(Boolean)
       return tracked
     },
 

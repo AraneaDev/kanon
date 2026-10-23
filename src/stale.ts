@@ -18,8 +18,8 @@ export interface Probe {
   scripts(): Set<string> | null
   /** Repo-relative paths among `paths` with a commit after `since`; empty when not a git repo. */
   changedSince(paths: string[], since: Date): string[]
-  /** Basenames of every tracked file in the repo, or null when unknown (not a repo, git failed). */
-  trackedBasenames(): Set<string> | null
+  /** Repo-relative paths of every tracked file, or null when unknown (not a repo, git failed). */
+  trackedPaths(): string[] | null
 }
 
 export interface Item {
@@ -78,6 +78,18 @@ function judgeDisk(names: Name[], home: string, probe: Probe): Verdict | null {
   return null
 }
 
+/**
+ * Whether tracked path `p` matches relative name `text` by whole trailing
+ * segments: `a/b.ts` matches `a/b.ts` and `x/a/b.ts`, never `xa/b.ts`. A
+ * trailing-slash name is a directory and matches any tracked path inside a
+ * directory of that name, wherever it sits.
+ */
+function tracks(p: string, text: string): boolean {
+  const t = text.replace(/^(?:\.\/)+/, '')
+  if (t.endsWith('/')) return p.startsWith(t) || p.includes(`/${t}`)
+  return p === t || p.endsWith(`/${t}`)
+}
+
 function judgeRepo(item: Item, names: Name[], root: string, home: string, probe: Probe): Verdict | null {
   // Where each checkable relative path was found, or null when it was not.
   const found = new Map<string, string | null>()
@@ -112,15 +124,18 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
   for (const n of checkable) {
     if (n.kind === 'path') {
       if (found.get(n.text) !== null) continue
-      if (n.text.includes('/') || isPinned(n.text)) return gone(n.text)
-      // A slashless name (`normalise.ts`) is usually a file named by its
-      // basename from somewhere in the tree, not one at the root: reading it
-      // as gone accused a project's own CLAUDE.md of naming a missing file.
-      // It is gone only when no tracked file has that name and no code
-      // mentions it. An unknown tracked set is a tooling failure, not evidence.
-      if (inCode.has(n.text)) continue
-      const tracked = probe.trackedBasenames()
-      if (tracked !== null && !tracked.has(n.text)) return gone(n.text)
+      if (isPinned(n.text)) return gone(n.text)
+      // A slashless name that code mentions (`process.env`) is an identifier.
+      if (!n.text.includes('/') && inCode.has(n.text)) continue
+      // A relative name is usually written from somewhere inside the tree,
+      // not from the root or the item's directory: `normalise.ts` for
+      // `src/normalise.ts`, `discover/walk.ts`, or `rules/` for every rules
+      // directory. Judging those against two directories alone produced a
+      // new false gone each time a note named a file another way, so it is
+      // gone only when no tracked path matches it at all. An unknown
+      // tracked set is a tooling failure, not evidence.
+      const tracked = probe.trackedPaths()
+      if (tracked !== null && !tracked.some((p) => tracks(p, n.text))) return gone(n.text)
     } else if (n.kind === 'script') {
       if (scripts && !scripts.has(n.text)) return gone(n.text)
     } else if (!inCode.has(n.text)) {

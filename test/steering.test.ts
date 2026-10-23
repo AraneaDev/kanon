@@ -8,13 +8,13 @@ import { EMPTY_FACTS } from '../src/transcript'
 import type { Classified } from '../src/types'
 import { tmp } from './tmp'
 
-/** A probe that answers from disk for existence and finds every name in code. */
+/** A probe that answers from disk for existence, finds every name in code, and tracks nothing. */
 const diskProbe: Probe = {
   exists: (p) => existsSync(p),
   occursInCode: (names) => new Set(names),
   scripts: () => null,
   changedSince: () => [],
-  trackedBasenames: () => null,
+  trackedPaths: () => [],
 }
 
 const cls = (path: string, origin: Classified['origin'] = 'project'): Classified => ({

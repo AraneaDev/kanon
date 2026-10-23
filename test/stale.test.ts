@@ -9,7 +9,7 @@ function fake(o: {
   code?: string[]
   scripts?: string[] | null
   changed?: string[]
-  /** Basenames of tracked files; empty (known, nothing tracked) by default, null for unknown. */
+  /** Repo-relative tracked paths; empty (known, nothing tracked) by default, null for unknown. */
   tracked?: string[] | null
 }) {
   const calls = { exists: [] as string[], code: [] as string[][], changed: [] as Array<{ paths: string[]; since: Date }> }
@@ -18,7 +18,7 @@ function fake(o: {
     occursInCode: (names) => (calls.code.push(names), new Set(names.filter((n) => (o.code ?? []).includes(n)))),
     scripts: () => (o.scripts === undefined ? new Set() : o.scripts === null ? null : new Set(o.scripts)),
     changedSince: (paths, since) => (calls.changed.push({ paths, since }), o.changed ?? []),
-    trackedBasenames: () => (o.tracked === null ? null : new Set(o.tracked ?? [])),
+    trackedPaths: () => (o.tracked === null ? null : (o.tracked ?? [])),
   }
   return { probe, calls }
 }
@@ -141,12 +141,12 @@ describe('judge', () => {
 
   /** A file named by its basename is usually somewhere in the tree, not at the root. */
   test('a slashless name tracked elsewhere in the repo gives no verdict', () => {
-    const { probe } = fake({ tracked: ['normalise.ts', 'cli.ts'] })
+    const { probe } = fake({ tracked: ['src/normalise.ts', 'src/cli.ts'] })
     expect(judge(item('the only file naming payload fields is `normalise.ts`'), ROOT, HOME, probe)).toBeNull()
   })
 
   test('a slashless name tracked nowhere and absent from code is gone', () => {
-    const { probe } = fake({ tracked: ['cli.ts'] })
+    const { probe } = fake({ tracked: ['src/cli.ts', 'src/xgone.ts'] })
     expect(judge(item('see `gone.ts`'), ROOT, HOME, probe)).toEqual({
       level: 'gone',
       evidence: 'names `gone.ts`, which no longer exists',
@@ -157,6 +157,46 @@ describe('judge', () => {
   test('a slashless name gives no verdict when the tracked set is unknown', () => {
     const { probe } = fake({ tracked: null })
     expect(judge(item('see `gone.ts`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  /** A relative path is often written from inside the tree (`discover/walk.ts` for `src/discover/walk.ts`). */
+  test('a relative path tracked as the trailing segments of a deeper path gives no verdict', () => {
+    const { probe } = fake({ tracked: ['src/discover/walk.ts'] })
+    expect(judge(item('see `discover/walk.ts`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('a relative path matches tracked paths by whole segments only', () => {
+    const { probe } = fake({ tracked: ['src/rediscover/walk.ts', 'src/discover/walk.tsx'] })
+    expect(judge(item('see `discover/walk.ts`'), ROOT, HOME, probe)).toEqual({
+      level: 'gone',
+      evidence: 'names `discover/walk.ts`, which no longer exists',
+    })
+  })
+
+  /** `rules/` names every `rules/` directory in the tree, wherever it sits. */
+  test('a directory name contained in a tracked path gives no verdict', () => {
+    const root = fake({ tracked: ['rules/a.md'] })
+    expect(judge(item('under `rules/`'), ROOT, HOME, root.probe)).toBeNull()
+    const deep = fake({ tracked: ['.claude/rules/sub/a.md'] })
+    expect(judge(item('under `rules/` and `rules/sub/`'), ROOT, HOME, deep.probe)).toBeNull()
+  })
+
+  test('a directory name matches tracked paths by whole segments only', () => {
+    const { probe } = fake({ tracked: ['src/myrules/a.md', 'rules.md', 'x/rulesets/b.md'] })
+    expect(judge(item('under `rules/`'), ROOT, HOME, probe)).toEqual({
+      level: 'gone',
+      evidence: 'names `rules/`, which no longer exists',
+    })
+  })
+
+  test('a relative path gives no verdict when the tracked set is unknown', () => {
+    const { probe } = fake({ tracked: null })
+    expect(judge(item('see `src/gone.ts` and `gone/`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('a pinned path is judged by disk alone, whatever is tracked', () => {
+    const { probe } = fake({ tracked: ['home/user/x/y.md', 'x/y.md'] })
+    expect(judge(item('see `~/x/y.md`'), ROOT, HOME, probe)?.level).toBe('gone')
   })
 
   test('a path with a slash is judged by existence alone, not by code', () => {

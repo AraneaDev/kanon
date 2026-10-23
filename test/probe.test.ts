@@ -173,12 +173,12 @@ describe('lastCommit', () => {
   })
 })
 
-describe('gitProbe.trackedBasenames', () => {
-  test('returns the basenames of tracked files only', () => {
+describe('gitProbe.trackedPaths', () => {
+  test('returns the repo-relative paths of tracked files only', () => {
     const root = repo()
     commit(root, { 'src/normalise.ts': 'x', 'README.md': 'y', 'deep/a/b/c.json': '{}' }, '2026-01-01T00:00:00Z')
     writeFileSync(join(root, 'untracked.ts'), 'z')
-    expect(gitProbe(root).trackedBasenames()).toEqual(new Set(['normalise.ts', 'README.md', 'c.json']))
+    expect(gitProbe(root).trackedPaths()?.sort()).toEqual(['README.md', 'deep/a/b/c.json', 'src/normalise.ts'])
   })
 
   /** One git spawn per probe: the second call answers from the cache even with git gone. */
@@ -186,13 +186,13 @@ describe('gitProbe.trackedBasenames', () => {
     const root = repo()
     commit(root, { 'src/a.ts': 'x' }, '2026-01-01T00:00:00Z')
     const probe = gitProbe(root)
-    const first = probe.trackedBasenames()
+    const first = probe.trackedPaths()
     rmSync(join(root, '.git'), { recursive: true, force: true })
-    expect(probe.trackedBasenames()).toBe(first)
-    expect(first).toEqual(new Set(['a.ts']))
+    expect(probe.trackedPaths()).toBe(first)
+    expect(first).toEqual(['src/a.ts'])
   })
 
   test('is null outside a repository', () => {
-    expect(gitProbe(tmp('kanon-nogit-')).trackedBasenames()).toBeNull()
+    expect(gitProbe(tmp('kanon-nogit-')).trackedPaths()).toBeNull()
   })
 })

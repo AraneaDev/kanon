@@ -1130,6 +1130,10 @@ test('transcript loads from an earlier run in another root are not counted', asy
  */
 function withGoneMemory(prefix: string) {
   const { home, repo, env } = isolated(prefix)
+  // A real repository, not a bare `.git` directory: a relative path is gone
+  // only when git can say no tracked file matches it.
+  rmSync(join(repo, '.git'), { recursive: true, force: true })
+  Bun.spawnSync(['git', 'init', '-q', repo])
   writeFileSync(join(repo, 'CLAUDE.md'), '# Project\n')
   const project = join(home, 'claude-projects', '-home-user-repo')
   const memoryDir = join(project, 'memory')
