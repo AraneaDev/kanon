@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MAX_FILE_BYTES, prune, readStart, readTail, tooLarge } from '../src/limits'
+import { MAX_FILE_BYTES, prune, readBack, readStart, tooLarge } from '../src/limits'
 import { tmp } from './tmp'
 
 test('a small file is not too large', () => {
@@ -219,19 +219,39 @@ test('readStart returns at most max bytes', () => {
   expect(readStart(f, 10)?.length).toBe(10)
 })
 
-test('readTail reads a small file whole', () => {
-  const f = join(tmp('kanon-tail-'), 'small.jsonl')
+const never = () => false
+
+test('readBack reads a small file whole', () => {
+  const f = join(tmp('kanon-back-'), 'small.jsonl')
   writeFileSync(f, 'one\ntwo\n')
-  expect(readTail(f, 1024)?.toString('utf8')).toBe('one\ntwo\n')
+  expect(readBack(f, never, 4, 1024)?.toString('utf8')).toBe('one\ntwo\n')
 })
 
-test('readTail drops the partial first line when it starts mid-file', () => {
-  const f = join(tmp('kanon-tail-'), 'big.jsonl')
+test('readBack reads chunk by chunk from the end and stops at the first chunk that is enough', () => {
+  const f = join(tmp('kanon-back-'), 'big.jsonl')
+  writeFileSync(f, 'aaaa\nbbbb\ncccc\ndddd\n')
+  const seen: string[] = []
+  const enough = (head: Buffer) => (seen.push(head.toString('utf8')), head.includes('b'))
+  // 20 bytes in chunks of 6: the reads start at 14, 8 and 2. Each chunk is
+  // judged with its partial first line dropped (its last line may be cut
+  // too), and the result drops the partial first line of all it read.
+  expect(readBack(f, enough, 6, 1024)?.toString('utf8')).toBe('bbbb\ncccc\ndddd\n')
+  expect(seen).toEqual(['dddd\n', 'cccc', 'bbb'])
+})
+
+test('readBack reads to the start of the file when nothing is enough', () => {
+  const f = join(tmp('kanon-back-'), 'big.jsonl')
+  writeFileSync(f, 'aaaa\nbbbb\ncccc\ndddd\n')
+  expect(readBack(f, never, 6, 1024)?.toString('utf8')).toBe('aaaa\nbbbb\ncccc\ndddd\n')
+})
+
+test('readBack stops at the cap and drops the partial first line there', () => {
+  const f = join(tmp('kanon-back-'), 'big.jsonl')
   writeFileSync(f, 'aaaaaaaa\nbbbb\ncccc\n')
   // The last 8 bytes start inside "bbbb", so that fragment is not a line.
-  expect(readTail(f, 8)?.toString('utf8')).toBe('cccc\n')
+  expect(readBack(f, never, 3, 8)?.toString('utf8')).toBe('cccc\n')
 })
 
-test('readTail is null for an unreadable path', () => {
-  expect(readTail(join(tmp('kanon-tail-'), 'absent'))).toBeNull()
+test('readBack is null for an unreadable path', () => {
+  expect(readBack(join(tmp('kanon-back-'), 'absent'), never)).toBeNull()
 })

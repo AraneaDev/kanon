@@ -48,31 +48,57 @@ export function readStart(path: string, max = MAX_FILE_BYTES): Buffer | null {
   }
 }
 
+/** How much of a transcript is read at a time, from its end. */
+export const TRANSCRIPT_CHUNK = 4 * 1024 * 1024
+/** The most of a transcript ever read: a run longer than this is read by its last 128 MiB. */
+export const TRANSCRIPT_CAP = 128 * 1024 * 1024
+
 /**
- * The last `max` bytes of a file, following symlinks, or null when it cannot
- * be read. A transcript grows for the whole life of a session and the current
- * run sits at its end, so this is the part worth reading. When the read
- * starts mid-file, everything up to the first newline is a fragment of a
- * record and is dropped rather than handed to a parser as if it were whole.
+ * The end of a file, read backwards `chunk` bytes at a time until `enough`
+ * says the chunk just read reaches far enough back, the start of the file is
+ * reached, or `cap` bytes have been read; null when it cannot be read.
+ *
+ * A transcript grows for the whole life of a session and the current run sits
+ * at its end, but how far back that run starts is anyone's guess. A fixed
+ * 16 MiB tail lost a long run's early records, so a session that invoked
+ * several skills read as having invoked none. Each chunk is offered to
+ * `enough` on its own, never everything read so far, so judging stays linear
+ * in what is read.
+ *
+ * Wherever the read starts mid-file, everything up to the first newline is a
+ * fragment of a record and is dropped, both from what `enough` is shown and
+ * from the result, rather than handed to a parser as if it were whole.
  */
-export function readTail(path: string, max = 16 * 1024 * 1024): Buffer | null {
+export function readBack(path: string, enough: (head: Buffer) => boolean, chunk = TRANSCRIPT_CHUNK, cap = TRANSCRIPT_CAP): Buffer | null {
   let fd: number | undefined
   try {
     fd = openSync(path, 'r')
     // fstat, not stat, for the same reason as readStart.
     const size = fstatSync(fd).size
-    const start = Math.max(0, size - max)
-    const buf = Buffer.alloc(size - start)
-    const n = readSync(fd, buf, 0, buf.length, start)
-    const got = buf.subarray(0, n)
-    if (start === 0) return got
-    const nl = got.indexOf(0x0a)
-    return nl === -1 ? Buffer.alloc(0) : got.subarray(nl + 1)
+    const floor = Math.max(0, size - cap)
+    const parts: Buffer[] = []
+    let start = size
+    while (start > floor) {
+      const from = Math.max(floor, start - Math.max(1, chunk))
+      const buf = Buffer.alloc(start - from)
+      const got = buf.subarray(0, readSync(fd, buf, 0, buf.length, from))
+      parts.unshift(got)
+      start = from
+      if (start > floor && enough(whole(got, start))) break
+    }
+    return whole(Buffer.concat(parts), start)
   } catch {
     return null
   } finally {
     if (fd !== undefined) closeSync(fd)
   }
+}
+
+/** `buf`, read from `start`, without the fragment of a record before its first newline; whole when it starts the file. */
+function whole(buf: Buffer, start: number): Buffer {
+  if (start === 0) return buf
+  const nl = buf.indexOf(0x0a)
+  return nl === -1 ? Buffer.alloc(0) : buf.subarray(nl + 1)
 }
 
 const PRUNED_DIRS = ['sessions', 'state', 'reports']

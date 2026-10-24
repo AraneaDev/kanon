@@ -1526,6 +1526,17 @@ test('report names the plugin behind each hook injection, from the installed plu
   expect(out[at + 2]).toBe('  unattributed    UserPromptSubmit      ×1   0.4k chars')
 })
 
+test('a skill invoked early in a long run is still listed, however far back the transcript has to be read', async () => {
+  const { repo, env, home } = withTranscript('kanon-cli-long-')
+  // 24 MiB of this run's records after the skill: further back than the 16 MiB tail once read.
+  const filler = JSON.stringify({ type: 'user', timestamp: '2026-10-24T22:00:00.000Z', message: { content: 'y'.repeat(1000) } })
+  appendFileSync(join(home, 'transcript.jsonl'), `${filler}\n`.repeat(24 * 1024))
+  const out = await run(['report', '--session', 's', '--cwd', repo], env)
+  const lines = out.split('\n')
+  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 2)).toEqual(['SKILLS', '  example-plugin:plan'])
+  expect(out).not.toContain('earlier:run-skill')
+})
+
 test('report lists this run\'s skills once each, and its compactions', async () => {
   const { repo, env } = withTranscript('kanon-cli-skills-')
   const out = await run(['report', '--session', 's', '--cwd', repo], env)

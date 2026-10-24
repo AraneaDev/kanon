@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-762%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-766%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -445,8 +445,8 @@ and Kanon does not tell you whether a rule is a good one.
 
 A directive can also reach a session from a skill, an MCP server, an output style, or another
 plugin's hook. The report lists the hook text, skills and compactions it can read back from the
-transcript, as facts. It reads the transcript from its tail and only as far back as the current
-run, because one transcript spans every run of a session. Kanon does not model skills, servers,
+transcript, as facts. It reads the transcript backwards from its end until it reaches the start of
+the current run (at most 128 MiB), because one transcript spans every run of a session. Kanon does not model skills, servers,
 output styles or hooks as instruction files, and the reason is structural rather than a matter of
 effort: Claude Code fires a hook when an instruction file loads, and fires nothing when a skill's
 text or a server's instructions reach the context. Everything Kanon reports about instruction

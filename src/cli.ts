@@ -9,7 +9,7 @@ import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { digest, merge, SNAPSHOT_VERSION } from './drift'
 import { paneModel, MODEL_VERSION, type PaneModel } from './model'
-import { prune, readStart, readTail } from './limits'
+import { prune, readBack, readStart } from './limits'
 import { cleanLine, compactions, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
@@ -21,7 +21,7 @@ import { matches, renderWhose } from './whose'
 import { buildReport, driftable } from './report'
 import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, writeAcks, writeSnapshot, writeSteering, writeWarned, writeWatermark } from './state'
 import { acknowledge, namedDigests, steer, type Steered } from './steering'
-import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
+import { EMPTY_FACTS, reachesBefore, readTranscript, type TranscriptFacts } from './transcript'
 import type { Candidate, Classified, Event, Origin, Report } from './types'
 import { warning } from './warning'
 
@@ -231,8 +231,9 @@ function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home
  * What the session transcript says about the current run, or nothing.
  *
  * One transcript spans every run of a session, possibly in several roots, so
- * it is read by its tail, where the current run is, and cut at the run's
- * start. `events` are already this run's only, so their last start event is
+ * it is read backwards from its end, where the current run is, until a record
+ * older than the run's start shows the whole run has been read (readBack,
+ * capped at 128 MiB), and then cut at that start. `events` are already this run's only, so their last start event is
  * the boundary. Kanon's own `t` is truncated to the second, which puts it at
  * or before every transcript record of the same run, so no slack is needed.
  * No start event, or a missing or unreadable transcript, is no evidence about
@@ -243,7 +244,7 @@ function transcriptFacts(events: Event[]): TranscriptFacts {
   let since: Date | null = null
   for (const e of events) if (e.ev === 'start') since = new Date(e.t)
   if (path === null || since === null || Number.isNaN(since.getTime())) return EMPTY_FACTS
-  const buf = readTail(path)
+  const buf = readBack(path, (head) => reachesBefore(head.toString('utf8'), since))
   return buf === null ? EMPTY_FACTS : readTranscript(buf.toString('utf8'), since)
 }
 
