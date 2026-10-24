@@ -711,3 +711,64 @@ describe('focus', () => {
     expect(text(run({}).at(-1)!)).toContain(small.basis)
   })
 })
+
+/**
+ * Live, the wheel did nothing over the list and `n more ↓` could not be
+ * pressed: a long card had no way to show the rest of itself. Pressing it
+ * opens that one card full height, and the wheel and n/p scroll its rows.
+ */
+describe('a card opened on its own', () => {
+  const skills = Array.from({ length: 40 }, (_, i) => skill({ name: `skill-${String(i).padStart(2, '0')}` }))
+  const m: PaneModel = { ...small, skills }
+  const card = (scroll = 0, rows = 20, columns = 100) => run({ model: m, view: { kind: 'card', group: 'skills', scroll }, rows, columns })
+
+  it('makes the more row a button that opens its card', () => {
+    const more = run({ model: m, rows: 30 }).flatMap(r => r.segments).find(s => /more ↓/.test(s.text))
+    expect(more?.press).toEqual({ kind: 'card', group: 'skills' })
+  })
+
+  it('shows only that card, its rows from the top, where they are, and n and b', () => {
+    const rows = card().map(text)
+    expect(rows.some(t => t.includes('◇ Instructions'))).toBe(false)
+    expect(rows[1]).toStartWith('── ◇ Skills · 40 ')
+    expect(rows.some(t => t.includes('skill-00'))).toBe(true)
+    expect(rows.some(t => /rows 1–\d+ of 40/.test(t))).toBe(true)
+    const footer = card().at(-1)!
+    expect(footer.segments.filter(s => s.press !== undefined).map(s => s.hotkey)).toEqual(['n', 'b'])
+    expect(text(footer)).toContain('enter: open')
+  })
+
+  it('scrolls by its rows, held inside them', () => {
+    const later = card(30).map(text)
+    expect(later.some(t => t.includes('skill-39'))).toBe(true)
+    expect(later.some(t => t.includes('skill-00'))).toBe(false)
+    // Past the end it holds at the last full page, so 30 and 10,000 draw the same rows.
+    expect(card(10_000).map(text)).toEqual(later)
+    expect(card(10_000).at(-1)!.segments.map(s => s.hotkey).filter(Boolean)).toEqual(['p', 'b'])
+    const page = contentPage({ status: ready(m), view: { kind: 'card', group: 'skills' }, columns: 100, rows: 20, content: null })
+    expect(page).toBeGreaterThan(5)
+    expect(contentScroll({ status: ready(m), view: { kind: 'card', group: 'skills' }, columns: 100, rows: 20, content: null }, 10_000)).toBe(40 - page)
+  })
+
+  it('keeps its file names as buttons that open them', () => {
+    const presses = card().flatMap(r => r.segments).filter(s => s.press?.kind === 'open')
+    expect(presses[0]).toMatchObject({ text: 'skill-00', press: { kind: 'open', real: skills[0]!.real } })
+  })
+
+  it('reads no text, and falls back to the list for a card the model does not have', () => {
+    expect(textTarget({ status: ready(m), view: { kind: 'card', group: 'skills' }, columns: 140 })).toBeNull()
+    expect(run({ model: m, view: { kind: 'card', group: 'nope' } }).map(text).some(t => t.includes('◇ Instructions'))).toBe(true)
+  })
+
+  for (const columns of [40, 60, 100, 140, 200])
+    for (const height of [3, 8, 24])
+      it(`holds the width and height promises at ${columns}x${height}`, () => {
+        for (const scroll of [0, 15, 10_000]) {
+          const rows = card(scroll, height, columns)
+          for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(columns)
+          expect(rows.length).toBeLessThanOrEqual(height)
+          expect(rows.at(-1)!.key).toBe('footer')
+          expect(text(rows.at(-1)!)).toContain('b: back')
+        }
+      })
+})

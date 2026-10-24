@@ -121,6 +121,7 @@ export async function endTurn(io: Port, agentId: string | undefined, isAborted: 
 export async function act(io: Port, action: Action): Promise<void> {
   if (action.kind === 'open') return open(io, 'real' in action ? { real: action.real } : { hook: action.hook })
   if (action.kind === 'back') return back(io)
+  if (action.kind === 'card') return setView(io, { kind: 'card', group: action.group, scroll: 0 })
   if (action.kind === 'ack') return acknowledge(io, action.real)
   if (action.kind === 'next' || action.kind === 'previous') return page(io, action.kind === 'next' ? 1 : -1)
   setStatus(io, { kind: 'loading' })
@@ -133,14 +134,17 @@ export async function act(io: Port, action: Action): Promise<void> {
  * so what the person opens is what the file says now.
  */
 function open(io: Port, target: Target): void {
-  setView(io, { kind: 'detail', ...target, scroll: 0 })
+  // Opened from a card on its own, `b` comes back to that card where it was.
+  const from = mod.view.kind === 'card' ? { from: mod.view } : {}
+  setView(io, { kind: 'detail', ...target, scroll: 0, ...from })
   wantText(io, target, true)
 }
 
-/** `b`: back to the list in one step. The text goes with the detail; a wide pane's render asks for its preview's. */
+/** `b`: back in one step, to the card a file was opened from, else to the list. The text goes with the detail; a wide pane's render asks for its preview's. */
 function back(io: Port): void {
   wantText(io, null)
-  setView(io, { kind: 'list' })
+  const v = mod.view
+  setView(io, v.kind === 'detail' && v.from !== undefined ? v.from : { kind: 'list' })
 }
 
 /**
@@ -211,10 +215,10 @@ export function textFor(io: Port, input: Pick<LayoutInput, 'status' | 'view' | '
   return { loading: true }
 }
 
-/** `n` and `p`: a page of the text forward or back, a page being the rows of text the pane showed at its last render. */
+/** `n` and `p`: a page of the text, or of a card on its own, forward or back, a page being the rows the pane showed at its last render. */
 function page(io: Port, dir: 1 | -1): void {
   const v = mod.view
-  if (v.kind !== 'detail') return
+  if (v.kind === 'list') return
   scrollContent(io, (v.scroll ?? 0) + dir * contentPage(pagingInput()))
 }
 
@@ -222,12 +226,12 @@ function page(io: Port, dir: 1 | -1): void {
 const pagingInput = () => ({ status: mod.status, view: mod.view, content: mod.text.content, ...mod.drawn })
 
 /**
- * Moves the text to `to`, held inside it; false outside a detail. The wheel
- * and the page keys both land here, so they clamp alike.
+ * Moves the text, or a card on its own, to `to`, held inside it; false on
+ * the list. The wheel and the page keys both land here, so they clamp alike.
  */
 export function scrollContent(io: Port, to: number): boolean {
   const v = mod.view
-  if (v.kind !== 'detail') return false
+  if (v.kind === 'list') return false
   const scroll = contentScroll(pagingInput(), to)
   if (scroll !== (v.scroll ?? 0)) setView(io, { ...v, scroll })
   return true

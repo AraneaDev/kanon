@@ -640,3 +640,28 @@ test('a key Button is labelled with the bare word and carries its hotkey', async
   expect(await ui.find({ type: 'Button', text: /^[a-z]: / })).toBeUndefined()
   await ui.unmount()
 })
+
+test('n more opens its card on its own, the wheel scrolls it, and b from a file opened there comes back to it', async ($, on) => {
+  const skills = Array.from({ length: 60 }, (_, i) => {
+    const name = `skill-${String(i).padStart(2, '0')}`
+    return { scope: 'user', plugin: null, name, path: `~/.claude/skills/${name}/SKILL.md`, real: `/home/user/.claude/skills/${name}/SKILL.md`, invoked: false }
+  })
+  const model = JSON.stringify({ v: 2, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], hooks: [], skills, agentMemory: [], compactions: [] })
+  const w = world(on, { model: () => ran(model), show: () => ran(JSON.stringify({ v: 1, title: 'SKILL.md', lines: ['Do the thing.'], truncated: false })) })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  await ui.press({ key: (await ui.find({ type: 'Button', text: /more ↓/ }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /rows 1–\d+ of 60/ })).toBeDefined()
+  await $.ui.scroll({ ...SCROLL, by: 5 })
+  expect(await ui.find({ type: 'Text', text: /rows 6–\d+ of 60/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'skill-10' }))!.key! })
+  await w.clock.settle()
+  expect(await ui.find({ type: 'Text', text: /Do the thing\./ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'back' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /rows 6–\d+ of 60/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'back' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /◇ Instructions/ })).toBeDefined()
+  await ui.unmount()
+})
