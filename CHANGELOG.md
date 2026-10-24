@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.25](https://github.com/AraneaDev/kanon/compare/v0.0.24...v0.0.25) (2026-10-24)
+
+
+### Features
+
+* show every hook, skill and agent memory, by scope ([#63](https://github.com/AraneaDev/kanon/issues/63)) ([05b61d5](https://github.com/AraneaDev/kanon/commit/05b61d55005f422bcb7d609651f3920b1060413d))
+
+
+### Fixes
+
+* stop calling an example home directory gone ([#62](https://github.com/AraneaDev/kanon/issues/62)) ([c7e1ae9](https://github.com/AraneaDev/kanon/commit/c7e1ae917f98acde92a00dc0b5f828a3cae0d377))
+
 ## [0.0.24](https://github.com/AraneaDev/kanon/compare/v0.0.23...v0.0.24) (2026-10-24)
 
 
