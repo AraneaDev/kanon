@@ -402,8 +402,8 @@ function writtenAt(root: string, path: string, kind: Steered['kind'], deadline?:
  * when the truth is that nothing was checked. A cache that cannot be written
  * costs the hot path its notes, never this brief its verdicts.
  */
-function steering(root: string, files: Classified[], events: Event[]): Steered[] {
-  const steered = judgeSteering(root, files, events, transcriptFacts(events))
+function steering(root: string, files: Classified[], events: Event[], extra: Classified[] = []): Steered[] {
+  const steered = judgeSteering(root, files, events, transcriptFacts(events), extra)
   if (steered === null) {
     return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
   }
@@ -433,7 +433,13 @@ function judgeBudget(): number {
  * judging failed. Shared by the brief and the report so the two judge with
  * the same probe, the same home and the same memory directory.
  */
-function judgeSteering(root: string, files: Classified[], events: Event[], facts: TranscriptFacts): Steered[] | null {
+function judgeSteering(
+  root: string,
+  files: Classified[],
+  events: Event[],
+  facts: TranscriptFacts,
+  extra: Classified[] = [],
+): Steered[] | null {
   const transcript = arg('transcript') || transcriptOf(events)
   // One deadline bounds the judging and every git call inside it, so
   // discovery, judging and the cache write stay inside SessionStart's 5 s.
@@ -445,6 +451,7 @@ function judgeSteering(root: string, files: Classified[], events: Event[], facts
       // former, and resolving it against the latter would call real files gone.
       home: homedir(),
       instructions: files,
+      extra,
       memoryDir: transcript ? join(dirname(transcript), 'memory') : null,
       facts,
       probe: gitProbe(root, { deadline }),
@@ -468,8 +475,10 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
   // Everything that can load is judged into the cache, for the notice and
   // the report; the brief speaks only of what governs the session now --
   // the files above and the memories -- so its count and rows are those.
-  // `files` go first, so an observed load keeps its own classification.
-  const judged = steering(root, [...files, ...loadableFiles(candidates, root, home)], runEvents(session))
+  // `files` go first, so an observed load keeps its own classification; the
+  // other loadable files go after the memories, so a judging deadline that
+  // runs out never costs the brief one of its own rows.
+  const judged = steering(root, files, runEvents(session), loadableFiles(candidates, root, home))
   const shown = new Set(files.map((f) => realPath(f.path)))
   // Drift is no longer the brief's to tell: the report carries it, and the
   // brief names only what is gone or foreign.

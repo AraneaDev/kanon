@@ -23,6 +23,13 @@ export interface SteeringInput {
   home: string
   /** Observed or predicted instruction files, origin already classified. */
   instructions: Classified[]
+  /**
+   * Files judged for the cache that the brief never shows: path-scoped rules
+   * and nested CLAUDE.md files. Listed after the memories, so a deadline that
+   * runs out costs them their verdicts before it costs a memory the brief
+   * would have shown.
+   */
+  extra?: Classified[]
   /** `dirname(transcript)/memory`, or null when the transcript is unknown. */
   memoryDir: string | null
   facts: TranscriptFacts
@@ -146,6 +153,7 @@ export function steer(input: SteeringInput): Steered[] {
   // Memory lives under the Claude config dir, so `user` is its only origin.
   for (const l of input.facts.instructions) if (l.type === AUTO_MEMORY) add(l.path, 'memory', 'user')
   for (const m of memories) add(m, 'memory', 'user')
+  for (const c of input.extra ?? []) add(c.path, 'instruction', c.origin)
 
   const now = input.now ?? Date.now
   const deadline = input.deadline ?? Number.POSITIVE_INFINITY

@@ -246,6 +246,40 @@ describe('steer time bound and batching', () => {
     expect(items[0].digest).toBe(hashFile(join(root, 'CLAUDE.md')))
   })
 
+  /**
+   * Path-scoped rules and nested CLAUDE.md files are judged for the cache, but
+   * the brief never shows them. They go last, so a deadline that runs out
+   * costs them their verdicts and never a memory the brief would have shown.
+   */
+  test('extra candidates are listed after the memories', () => {
+    const { root, memoryDir, input } = setup()
+    mkdirSync(join(root, 'sub'), { recursive: true })
+    writeFileSync(join(root, 'sub', 'CLAUDE.md'), 'See `src/gone2.ts`.\n')
+    const items = steer(input({ extra: [cls(join(root, 'sub', 'CLAUDE.md'))] }))
+    expect(items.map((i) => i.path)).toEqual([
+      join(root, 'CLAUDE.md'),
+      join(memoryDir, 'MEMORY.md'),
+      join(memoryDir, 'a-first.md'),
+      join(memoryDir, 'notes.md'),
+      join(root, 'sub', 'CLAUDE.md'),
+    ])
+  })
+
+  test('a deadline that runs out costs the extra candidates before any memory', () => {
+    const { root, memoryDir, input } = setup()
+    mkdirSync(join(root, 'sub'), { recursive: true })
+    writeFileSync(join(root, 'sub', 'CLAUDE.md'), 'See `src/gone2.ts`.\n')
+    // A clock that ticks once per reading. steer() reads it once per item
+    // while collecting code lookups (5; none of these items has one, so the
+    // batch itself never reads it), then once per row: a deadline of 10 lets
+    // the first four rows through and stops the fifth.
+    let tick = 0
+    const items = steer(input({ extra: [cls(join(root, 'sub', 'CLAUDE.md'))], now: () => ++tick, deadline: 10 }))
+    const byPath = new Map(items.map((i) => [i.path, i]))
+    expect(byPath.get(join(memoryDir, 'notes.md'))?.verdict?.level).toBe('gone')
+    expect(byPath.get(join(root, 'sub', 'CLAUDE.md'))?.verdict).toBeNull()
+  })
+
   /** One grep per session start, however many items name things, is what keeps the hook inside its timeout. */
   test('every item\'s code lookups go to the probe in one occursInCode call', () => {
     const { memoryDir, input } = setup()
