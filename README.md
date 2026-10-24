@@ -14,7 +14,7 @@
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![Status](https://img.shields.io/badge/status-pre--release-orange)](#install)
 
-<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, one hook injection, one skill and no compactions" width="880">
+<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, two rows of hook injections (a prompt reminder injected twelve times collapses into one row), one skill and no compactions. The footer lists tab: move and enter: open" width="880">
 
 <sub>The Kanon pane, opened with <code>/kanon</code>. The pane is drawn by its own layout code from what the real CLI printed for a planted session. The chat beside it is a scripted exchange that shows what the gone flag is for.</sub>
 

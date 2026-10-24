@@ -11,5 +11,5 @@
   <text x="22" y="188" xml:space="preserve"><tspan fill="#b8c0cb"> </tspan><tspan fill="#b8c0cb"> </tspan><tspan fill="#b8c0cb">  </tspan><tspan fill="#63707f">state    </tspan><tspan fill="#63707f">not acknowledged</tspan><tspan fill="#b8c0cb">                                                                  </tspan><tspan fill="#b8c0cb"> </tspan></text>
   <text x="22" y="207" xml:space="preserve"><tspan fill="#b8c0cb"> </tspan></text>
   <text x="22" y="226" xml:space="preserve"><tspan fill="#b8c0cb"> </tspan></text>
-  <text x="22" y="245" xml:space="preserve"><tspan fill="#b8c0cb"> </tspan><tspan fill="#b8c0cb">a: acknowledge</tspan><tspan fill="#b8c0cb">  </tspan><tspan fill="#b8c0cb">b: back</tspan><tspan fill="#b8c0cb">                                                               </tspan><tspan fill="#63707f">observed </tspan></text>
+  <text x="22" y="245" xml:space="preserve"><tspan fill="#b8c0cb"> </tspan><tspan fill="#b8c0cb">a: acknowledge</tspan><tspan fill="#b8c0cb">  </tspan><tspan fill="#b8c0cb">v: view</tspan><tspan fill="#b8c0cb">  </tspan><tspan fill="#b8c0cb">b: back</tspan><tspan fill="#b8c0cb">                                                      </tspan><tspan fill="#63707f">observed </tspan></text>
 </svg>
