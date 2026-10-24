@@ -83,9 +83,9 @@ them all the same way and reports none of it. Kanon writes down what actually ha
   Claude Code's own config locations (`~/.claude/CLAUDE.md`, `.claude/rules/`, settings files),
   slash commands, URLs, globs and placeholders are never judged, and if `git` or `grep` fails or
   runs out of time the item gets no verdict rather than a false `gone`. Judging stops after about
-  three seconds so the brief always arrives; an item it did not reach is listed without a verdict. Files under `~/.claude` get path checks only,
-  project files and this project's memories get the full checks, and managed or foreign files are
-  not checked.
+  three seconds so the brief always arrives; an item it did not reach is listed without a
+  verdict. Files under `~/.claude` get path checks only, project files and this project's memories
+  get the full checks, and managed or foreign files are not checked.
 - **Speaks up mid-session.** An instruction file can load hours into a session, long after the
   session-start brief has gone out. When a foreign one does, Kanon names it at the next prompt.
 
@@ -150,8 +150,9 @@ it is empty. `STALE` lists every rule or memory with a verdict: `gone` when a pa
 longer exists, `may-be-stale` (printed as `may-stale` to fit the column) when a function, flag or
 script it names occurs nowhere any more or a file it names has commits since it was written (names
 come from inline code spans, `@imports` and bare path-shaped words, never from fenced code blocks),
-and `ok` once you have acknowledged it with `kanon ack`. `MEMORY` lists the project's memories. `INJECTED` totals the text each hook added to
-the context, per plugin and hook event, attributed through the installed plugins' `hooks.json`;
+and `ok` once you have acknowledged it with `kanon ack`. `MEMORY` lists the project's memories.
+`INJECTED` totals the text each hook added to the context, per plugin and hook event, attributed
+through the installed plugins' `hooks.json`;
 Kanon's own injections are listed like any other. `SKILLS` and `COMPACTION` name the skills invoked
 and each compaction, with its token counts before and after.
 
@@ -412,8 +413,9 @@ output styles or hooks as instruction files, and the reason is structural rather
 effort: Claude Code fires a hook when an instruction file loads, and fires nothing when a skill's
 text or a server's instructions reach the context. Everything Kanon reports about instruction
 files is either observed, or labelled as prediction it can be caught getting wrong. It has no such
-footing on those other surfaces, so it would be guessing with no way to learn it had guessed badly. `/kanon:whose` says so when a phrase turns up in no instruction file, which is the
-moment it matters.
+footing on those other surfaces, so it would be guessing with no way to learn it had guessed
+badly. `/kanon:whose` says so when a phrase turns up in no instruction file, which is the moment
+it matters.
 
 It never blocks. `ConfigChange` can block a configuration change and Kanon declines to.
 
