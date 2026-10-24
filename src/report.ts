@@ -91,6 +91,12 @@ export function buildReport(
   const loadedOrder: string[] = []
   const firstReason = new Map<string, string>()
   const claimedType = new Map<string, string>()
+  // The path as it was loaded, before realpath. A ~/.claude/CLAUDE.md linked
+  // in from a dotfiles repository has its realpath outside the config dir;
+  // only this spelling says it is the user's, and only this spelling matches
+  // the candidate discovery predicted. Losing it made the user's own file
+  // FOREIGN and questioned the model besides.
+  const given = new Map<string, string>()
   for (const e of events) {
     if (e.ev !== 'loaded') continue
     // Resolved through realpath so the report names the file's real location
@@ -100,6 +106,7 @@ export function buildReport(
     const p = realPath(resolve(root, e.path))
     if (!firstReason.has(p)) {
       firstReason.set(p, e.reason)
+      given.set(p, resolve(root, e.path))
       loadedOrder.push(p)
     }
     // The claim is captured independently of the reason, and deliberately
@@ -128,10 +135,13 @@ export function buildReport(
   const realHome = realPath(resolve(homeConfig))
   const within = (p: string, base: string): boolean => p === base || p.startsWith(base.endsWith(sep) ? base : base + sep)
   for (const t of transcriptLoads) {
-    const p = realPath(resolve(root, t.path))
-    if (!firstReason.has(p) && !within(p, realRoot) && !within(p, realHome)) continue
+    const spelled = resolve(root, t.path)
+    const p = realPath(spelled)
+    const admitted = within(p, realRoot) || within(p, realHome) || within(spelled, resolve(homeConfig))
+    if (!firstReason.has(p) && !admitted) continue
     if (!firstReason.has(p)) {
       firstReason.set(p, 'transcript')
+      given.set(p, spelled)
       loadedOrder.push(p)
     }
     if (t.type !== '' && !claimedType.has(p)) claimedType.set(p, t.type)
@@ -141,7 +151,7 @@ export function buildReport(
   const modelDisagrees: string[] = []
   const originDisagrees: OriginDisagreement[] = []
   for (const p of loadedOrder) {
-    const candidate = byPath.get(p)
+    const candidate = byPath.get(p) ?? byPath.get(given.get(p) ?? p)
     // A path running through a dependency directory (vendor/, node_modules/,
     // ...) is never enumerated as a candidate BY DESIGN -- subdirCandidates
     // deliberately skips those directories -- so it is expected to be
@@ -165,7 +175,8 @@ export function buildReport(
       modelDisagrees.push(p)
     }
 
-    const inferred = classify(p, root, homeConfig)
+    // classify() realpaths what it is given and checks both spellings.
+    const inferred = classify(given.get(p) ?? p, root, homeConfig)
     const origin = reconcile(p, inferred, claimedType.get(p), originDisagrees)
     const isForeign = origin === 'foreign'
     loaded.push({
@@ -179,7 +190,8 @@ export function buildReport(
     })
   }
 
-  const seen = new Set(loadedOrder)
+  // Both spellings: a candidate is predicted unresolved, a load is stored real.
+  const seen = new Set([...loadedOrder, ...given.values()])
   // Only a launch candidate that never loaded is a fault worth calling
   // missing. on-demand/path-scoped/excluded candidates are expected to stay
   // quiet unless something triggers them.

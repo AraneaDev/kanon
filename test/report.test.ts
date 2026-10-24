@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildReport } from '../src/report'
 import { normalise } from '../src/normalise'
@@ -457,4 +457,39 @@ test('an AutoMem MEMORY.md is left out of drift, and AGENTS.md is not', () => {
   expect(r.drift?.appeared).toEqual([])
   expect(r.autoMemory).toEqual([memory])
   expect(r.loaded.map((f) => f.path)).toEqual([agents, memory])
+})
+
+/**
+ * A ~/.claude/CLAUDE.md symlinked into a dotfiles repository is the common
+ * case. Its realpath sits outside the config dir, so classifying the realpath
+ * alone called the user's own file FOREIGN, and looking the candidate up by
+ * realpath alone missed the prediction and questioned the model as well.
+ */
+function symlinkedUserFile() {
+  const base = tmp('kanon-rep-link-')
+  const home = join(base, 'home', '.claude')
+  const dotfiles = join(base, 'dotfiles')
+  const root = join(base, 'repo')
+  mkdirSync(home, { recursive: true })
+  mkdirSync(dotfiles, { recursive: true })
+  mkdirSync(root, { recursive: true })
+  writeFileSync(join(dotfiles, 'CLAUDE.md'), '# Mine\n')
+  symlinkSync(join(dotfiles, 'CLAUDE.md'), join(home, 'CLAUDE.md'))
+  const candidates: Candidate[] = [{ path: join(home, 'CLAUDE.md'), label: 'launch', rule: 'user' }]
+  return { home, root, path: join(home, 'CLAUDE.md'), candidates }
+}
+
+test('a symlinked user CLAUDE.md loaded by event is user, and the model agrees', () => {
+  const { home, root, path, candidates } = symlinkedUserFile()
+  const r = buildReport(normalise([line(path)]), candidates, root, home, new Map())
+  expect(r.loaded.map((l) => l.origin)).toEqual(['user'])
+  expect(r.modelDisagrees).toEqual([])
+  expect(r.missing).toEqual([])
+})
+
+test('a symlinked user CLAUDE.md named only by the transcript is admitted as user', () => {
+  const { home, root, path, candidates } = symlinkedUserFile()
+  const r = buildReport([], candidates, root, home, new Map(), [], null, [{ path, type: 'User' }])
+  expect(r.loaded.map((l) => l.origin)).toEqual(['user'])
+  expect(r.modelDisagrees).toEqual([])
 })
