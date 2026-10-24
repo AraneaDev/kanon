@@ -1659,3 +1659,45 @@ test('a path_glob_match load of a gone path-scoped rule makes notice warn', asyn
   const out = await run(['notice', '--session', 's', '--cwd', repo], env)
   expect(out).toContain('names `scripts/deploy-api.sh`, which no longer exists')
 })
+
+test('model --json prints the pane contract for an unrecorded session as a prediction', async () => {
+  const { home, repo, env } = isolated('kanon-cli-model-')
+  writeFileSync(join(repo, 'CLAUDE.md'), 'Use `bun test`.\n')
+  const out = await run(['model', '--json', '--session', 'never-recorded', '--cwd', repo], env)
+  const m = JSON.parse(out)
+  expect(m.v).toBe(1)
+  expect(m.basis).toBe('predicted')
+  expect(m.root).toBe(sessionRoot(repo))
+  expect(m.instructions.map((i: { path: string }) => i.path)).toContain('CLAUDE.md')
+  // A model request is a read: it must not leave a steering cache behind.
+  expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
+})
+
+test('model --json uses the observed report when the session was recorded', async () => {
+  const { home, repo } = seeded()
+  const out = await run(['model', '--json', '--session', 's', '--cwd', repo], { KANON_HOME: home, CLAUDE_CONFIG_DIR: join(home, 'no-claude-dir') })
+  const m = JSON.parse(out)
+  expect(m.basis).toBe('observed')
+  const nested = m.instructions.find((i: { path: string }) => i.path === 'vendor/p/CLAUDE.md')
+  expect(nested.origin).toBe('foreign')
+  expect(nested.reason).toBe('nested_traversal')
+})
+
+test('model without --json prints usage', async () => {
+  const { home, repo } = seeded()
+  const out = await run(['model', '--cwd', repo], { KANON_HOME: home })
+  expect(out).toContain('usage: kanon')
+})
+
+test('model --json prints the error shape and exits 0 when it fails', async () => {
+  const { home, repo } = seeded()
+  // A directory where the session log should be makes collect() throw.
+  mkdirSync(join(home, 'sessions', 'broken.jsonl'), { recursive: true })
+  const proc = Bun.spawn(['bun', CLI, 'model', '--json', '--session', 'broken', '--cwd', repo], { env: { ...process.env, KANON_HOME: home }, stdout: 'pipe', stderr: 'pipe' })
+  const out = await new Response(proc.stdout).text()
+  expect(await proc.exited).toBe(0)
+  const e = JSON.parse(out)
+  expect(e.v).toBe(1)
+  expect(typeof e.error).toBe('string')
+  expect(e.error.length).toBeGreaterThan(0)
+})

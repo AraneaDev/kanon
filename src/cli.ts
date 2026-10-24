@@ -8,6 +8,7 @@ import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { digest, merge, SNAPSHOT_VERSION } from './drift'
+import { paneModel, MODEL_VERSION, type PaneModel } from './model'
 import { prune, readStart, readTail } from './limits'
 import { cleanLine, compactions, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
@@ -598,6 +599,41 @@ function runReport(session: string | undefined, cwd: string): void {
   if (flag('commit-state') && report.loaded.length > 0) commitSnapshot(report, session)
 }
 
+/**
+ * The pane's data as one JSON line. Built from the report's own functions,
+ * so the pane and `report` cannot judge differently, and it reads steering
+ * the way the interactive report does: the cache when there is one, else
+ * judged now. It never writes the cache. Any failure is one error object on
+ * stdout and exit 0: the pane parses stdout and shows the reason, and a
+ * nonzero exit would show it nothing.
+ */
+function runModel(cwd: string): void {
+  try {
+    console.log(JSON.stringify(buildModel(cwd)))
+  } catch (err) {
+    console.log(JSON.stringify({ v: MODEL_VERSION, error: err instanceof Error ? err.message : String(err) }))
+  }
+}
+
+function buildModel(cwd: string): PaneModel {
+  const sessionArg = arg('session')
+  const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
+  if (session !== undefined && existsSync(sessionFile(session))) {
+    const report = collect(session, cwd, true)
+    if (report.loaded.length > 0) return paneModel(report, 'observed', report.root, report.steered)
+  }
+  // Unobserved: predict, exactly as `brief` does, with every loadable file judged.
+  const home = claudeHome()
+  const root = sessionRoot(cwd)
+  const { candidates } = discover(cwd, home)
+  const files = launchFiles(candidates, root, home)
+  const launch = new Set(files.map((f) => f.path))
+  const extra = loadableFiles(candidates, root, home).filter((f) => !launch.has(f.path))
+  const events = runEvents(session)
+  const steered = readSteering(kanonHome(), root) ?? judgeSteering(root, files, events, transcriptFacts(events), extra) ?? []
+  return paneModel(null, 'predicted', root, steered)
+}
+
 function runBrief(session: string | undefined, cwd: string): void {
   // Unlike `alarm`, this always speaks: a session where Claude is told
   // nothing about what governs it is the failure this command exists to
@@ -873,6 +909,9 @@ function main(): void {
     // See above.
   }
 
+  // Before the session lookup, which can throw: `model` owns its failures.
+  if (command === 'model' && flag('json')) return runModel(cwd)
+
   const sessionArg = arg('session')
   const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
 
@@ -890,7 +929,7 @@ function main(): void {
     if (phrase !== undefined) return runWhose(phrase, session, cwd)
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn] [--session <id>] [--cwd <path>] [--path <file>] [--transcript <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn|model --json] [--session <id>] [--cwd <path>] [--path <file>] [--transcript <path>] [--hook] [--commit-state]')
 }
 
 try {
