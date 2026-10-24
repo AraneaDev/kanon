@@ -19,6 +19,7 @@
  * right half previews. Narrower, each file name is its own open button.
  */
 import type { PaneItem, PaneModel } from '../../src/model'
+import { stripControl } from './control'
 import { besideRows, cardInner, cardRows, gridColumns, moreRows, type Section } from './cards'
 import { MARK, mark, type Mark } from './marks'
 import { ACCENT, HEADING } from './palette'
@@ -73,8 +74,35 @@ export function layout(input: LayoutInput): Row[] {
   if (width === 0 || height === 0) return []
   const { status } = input
   if (status.kind === 'loading') return loadingRows(width, height, input.frame)
-  if (status.kind === 'error') return errorRows(status.reason, width, height)
-  return readyRows(status.model, input.view, width, height, input.feedback)
+  if (status.kind === 'error') return errorRows(stripControl(status.reason), width, height)
+  return readyRows(shown(status.model), input.view, width, height, input.feedback)
+}
+
+/**
+ * The model with every string the pane draws stripped of control characters
+ * (see `control.ts`): paths, origins, kinds, reasons, evidence, plugin, hook and skill names,
+ * compaction triggers and times, the basis. Stripped here, once, so no
+ * display point can miss it. `real` is left exactly as given: it is the
+ * action's key, never drawn, and `kanon ack` must receive it unchanged.
+ */
+function shown(model: PaneModel): PaneModel {
+  const item = (i: PaneItem): PaneItem => ({
+    ...i,
+    path: stripControl(i.path),
+    origin: stripControl(i.origin) as PaneItem['origin'],
+    kind: stripControl(i.kind) as PaneItem['kind'],
+    reason: i.reason === null ? null : stripControl(i.reason),
+    verdict: i.verdict === null ? null : { ...i.verdict, evidence: stripControl(i.verdict.evidence) },
+  })
+  return {
+    ...model,
+    basis: stripControl(model.basis) as PaneModel['basis'],
+    instructions: model.instructions.map(item),
+    memory: model.memory.map(item),
+    injected: model.injected.map(i => ({ ...i, plugin: stripControl(i.plugin), hookName: stripControl(i.hookName) })),
+    skills: model.skills.map(stripControl),
+    compactions: model.compactions.map(c => ({ ...c, t: stripControl(c.t), trigger: stripControl(c.trigger) })),
+  }
 }
 
 function loadingRows(width: number, height: number, frame: number): Row[] {

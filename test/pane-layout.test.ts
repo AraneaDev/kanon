@@ -296,3 +296,47 @@ describe('the text budget', () => {
     }
   })
 })
+
+describe('text Kanon did not write', () => {
+  // eslint-disable-next-line no-control-regex
+  const CONTROL = /[\u0000-\u001F\u007F-\u009F]/
+  const EVIL_REAL = '/home/user/app/\x1b[31mevil\r.md'
+  const evil: PaneModel = {
+    ...small,
+    instructions: [
+      item({
+        path: '\x1b[31mevil\r.md',
+        real: EVIL_REAL,
+        origin: 'foreign',
+        reason: 'nested\x1b[2K_traversal',
+        verdict: { level: 'gone', evidence: 'names \x1b[31mscripts/x.sh\r, which \x07is gone' },
+      }),
+    ],
+    injected: [{ plugin: 'ex\x1bample', hookName: 'Session\rStart', chars: 10 }],
+    skills: ['sk\x1b[0mill'],
+    compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'au\rto', preTokens: 1, postTokens: 1 }],
+  }
+
+  for (const columns of [40, 100, 160]) {
+    for (const view of [LIST, { kind: 'detail', real: EVIL_REAL } as View]) {
+      it(`reaches no row with a control character, and widths hold (${columns}, ${view.kind})`, () => {
+        const rows = run({ model: evil, columns, view })
+        for (const r of rows) {
+          expect(CONTROL.test(text(r))).toBe(false)
+          expect(rowWidth(r)).toBeLessThanOrEqual(columns)
+        }
+      })
+    }
+  }
+
+  it('keeps the realpath exact in the action a button carries', () => {
+    const rows = run({ model: evil, columns: 160 })
+    const actions = rows.flatMap(r => r.segments.flatMap(s => (s.press !== undefined && 'real' in s.press ? [s.press.real] : [])))
+    expect(actions).toContain(EVIL_REAL)
+  })
+
+  it('strips an error reason', () => {
+    const rows = layout({ status: { kind: 'error', reason: 'boom\x1b[2K\rfine' }, view: LIST, columns: 60, rows: 10, feedback: null, frame: 0 })
+    for (const r of rows) expect(CONTROL.test(text(r))).toBe(false)
+  })
+})
