@@ -13,8 +13,13 @@ function base(): Report {
     config: [],
     modelDisagrees: [],
     originDisagrees: [],
+    autoMemory: [],
     skipped: [],
     drift: null,
+    steered: [],
+    injections: [],
+    skills: [],
+    compactions: [],
   }
 }
 
@@ -181,4 +186,33 @@ test('stripControl removes DEL and other C0 controls', () => {
 
 test('stripControl leaves ordinary text, including accents and emoji, alone', () => {
   expect(stripControl('Gebruik een komma — of niet 🙂')).toBe('Gebruik een komma — of niet 🙂')
+})
+
+// --- the steering sections ----------------------------------------------------
+
+test('the steering sections strip back to the plain report byte for byte', () => {
+  const r = base()
+  r.steered = [
+    { path: '/repo/memory/a.md', kind: 'memory', origin: 'user', digest: 'd', verdict: { level: 'gone', evidence: 'names `x`, which no longer exists' }, acknowledged: false },
+    { path: '/repo/.claude/rules/b.md', kind: 'instruction', origin: 'project', digest: 'd', verdict: { level: 'may-be-stale', evidence: '`y` changed after this was written' }, acknowledged: false },
+    { path: '/repo/memory/c.md', kind: 'memory', origin: 'user', digest: 'd', verdict: { level: 'gone', evidence: 'e' }, acknowledged: true },
+  ]
+  r.injections = [{ hookName: 'SessionStart', chars: 8600, command: null, plugin: 'a-plugin-with-a-long-name' }]
+  r.skills = [{ name: 'superpowers:brainstorming', path: '' }]
+  r.compactions = [{ t: '2026-10-24T21:40:00Z', trigger: 'auto', preTokens: 968_000, postTokens: 25_000 }]
+  // eslint-disable-next-line no-control-regex
+  expect(render(r, COLOUR).replace(/\x1b\[[0-9;]*m/g, '')).toBe(render(r))
+})
+
+/** `gone` is a claim Claude must not act on; `may-stale` is worth a second look. */
+test('a gone flag is painted as a warning and a may-stale flag as a note, padded first', () => {
+  const r = base()
+  r.steered = [
+    { path: '/repo/memory/a.md', kind: 'memory', origin: 'user', digest: 'd', verdict: { level: 'gone', evidence: 'e' }, acknowledged: false },
+    { path: '/repo/memory/b.md', kind: 'memory', origin: 'user', digest: 'd', verdict: { level: 'may-be-stale', evidence: 'e' }, acknowledged: false },
+  ]
+  const out = render(r, COLOUR)
+  expect(out).toContain(`${ESC}[1m${ESC}[33mgone       ${ESC}[0m${ESC}[0m`)
+  expect(out).toContain(`${ESC}[2mmay-stale  ${ESC}[0m`)
+  expect(out).toContain(`${ESC}[1mSTALE${ESC}[0m`)
 })

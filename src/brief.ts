@@ -1,6 +1,8 @@
-import { driftIsEmpty, type Drift, type FileDigest } from './drift'
+import { stripControl } from './colour'
 import { short } from './paths'
-import type { Candidate, Classified, Origin } from './types'
+import type { Steered } from './steering'
+import { ackCommand } from './warning'
+import type { Candidate, Classified } from './types'
 
 /**
  * Whether the brief is speaking from layer one or layer two.
@@ -22,18 +24,18 @@ export interface BriefInput {
   /** Launch candidates that never loaded. Only meaningful when observed. */
   missing: Candidate[]
   /**
-   * What changed since the last session in this root, or null when there is
-   * no baseline. `vanished` only ever names a file genuinely absent from
-   * disk -- see `diff()`'s own comment in drift.ts for why that rule holds
-   * on both bases alike, not just the predicted one.
+   * Everything that steers the session, instructions and memories, with
+   * Kanon's verdict on each. The header counts it; only unacknowledged
+   * `gone` verdicts become rows. Drift is not here: it is the report's to
+   * tell, and the brief stays short enough to read at every session start.
    */
-  drift: Drift | null
+  steered: Steered[]
+  /** Absolute path to `src/cli.ts`, so the ack command in the notes runs as printed. */
+  cli: string
 }
 
 /** Reads the first directive-looking line of a file, or null. */
 export type Excerpt = (path: string) => string | null
-
-const ORIGIN_ORDER: Origin[] = ['managed', 'user', 'project', 'local', 'foreign']
 
 /**
  * The longest brief Kanon emits. Claude Code caps a hook's additionalContext
@@ -45,23 +47,20 @@ const ORIGIN_ORDER: Origin[] = ['managed', 'user', 'project', 'local', 'foreign'
  */
 export const BRIEF_MAX = 9_500
 
-/** Wide enough for the longest tag (`project`, `FOREIGN`, `missing`) plus a gap. */
+/** Wide enough for the longest tag (`FOREIGN`, `missing`) plus a gap. */
 const TAG_WIDTH = 9
 
-/**
- * How many non-foreign files are listed before the tail collapses to a
- * count. The brief is prepended to every session, so an unusually large
- * instruction set must not cost a screen. Foreign files are never part of
- * the tail: they are the reason the brief exists.
- */
-const LIST_LIMIT = 10
+/** Where a row's second line (an excerpt, the evidence) starts. */
+const INDENT = ' '.repeat(2 + TAG_WIDTH)
 
-function label(origin: Origin): string {
-  return origin === 'foreign' ? 'FOREIGN' : origin
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
+/** `6 instruction files and 3 memories`, leaving out a kind there is none of. */
+function counts(steered: Steered[]): { text: string; total: number } {
+  const instructions = steered.filter((s) => s.kind === 'instruction').length
+  const memories = steered.length - instructions
+  const parts: string[] = []
+  if (instructions > 0) parts.push(`${instructions} instruction file${instructions === 1 ? '' : 's'}`)
+  if (memories > 0) parts.push(`${memories} ${memories === 1 ? 'memory' : 'memories'}`)
+  return { text: parts.join(' and '), total: steered.length }
 }
 
 function row(tag: string, path: string, note = ''): string {
@@ -105,84 +104,53 @@ export function wrap(text: string, width = WRAP_WIDTH): string[] {
  * Two jobs, in the order they matter. First, trust calibration: Claude holds
  * every instruction file's text merged into one context with no attribution,
  * so it cannot otherwise tell a directive the user wrote from one a
- * dependency shipped. Naming every file against its origin, and quoting what
- * the foreign ones demand, restores that attribution. Second, delivery: an
- * alarming finding is the user's to know about, and Claude is the only thing
- * here that can tell them.
+ * dependency shipped, or a memory that still holds from one whose subject
+ * has gone. Naming the foreign files, quoting what they demand, and naming
+ * each item that points at something no longer there restores that. Second,
+ * delivery: an alarming finding is the user's to know about, and Claude is
+ * the only thing here that can tell them.
  *
- * Every file is named. A count on its own ("3 files govern you") cannot
- * answer the question the brief exists for, which is always about a
- * particular rule and where it came from.
+ * The user's own files are counted, not listed. They are not news, the
+ * brief is prepended to every session, and /kanon has the full list for the
+ * moment someone asks which rule came from where.
  */
 export function brief(input: BriefInput, excerpt: Excerpt = () => null): string {
-  const { root, basis, files } = input
+  const { root, basis, files, steered } = input
   // Prediction cannot observe an absence. SessionStart fires before any
   // instruction file loads, so every launch candidate would look missing
   // there simply because nothing has loaded yet.
   const missing = basis === 'observed' ? input.missing : []
 
-  if (files.length === 0) {
+  if (files.length === 0 && steered.length === 0) {
     return `KANON  no instruction files ${basis === 'observed' ? 'were recorded for' : 'are predicted for'} this session (${basis}).`
   }
 
-  const ordered = ORIGIN_ORDER.flatMap((o) => files.filter((f) => f.origin === o))
-  const foreign = ordered.filter((f) => f.origin === 'foreign')
-  const rest = ordered.filter((f) => f.origin !== 'foreign')
-  const shown = rest.slice(0, LIST_LIMIT)
-  const hidden = rest.length - shown.length
+  const foreign = files.filter((f) => f.origin === 'foreign')
+  // `may-be-stale` never reaches the brief: it is a hint for the report and
+  // the Read note, not something to interrupt a session start with. An
+  // acknowledged item stays quiet until it or a file it names changes.
+  const gone = steered.filter((s) => s.verdict?.level === 'gone' && !s.acknowledged)
 
-  const verb = files.length === 1 ? 'governs' : 'govern'
-  const header = `KANON  ${plural(files.length, 'instruction file')} ${verb} this session (${basis})`
+  const { text: count, total } = counts(steered)
+  const lead = `KANON  ${count} ${total === 1 ? 'steers' : 'steer'} this session (${basis}) · `
+  if (gone.length === 0 && foreign.length === 0 && missing.length === 0) return `${lead}nothing gone, nothing foreign`
+  const header = `${lead}full list: /kanon`
+
   // Rows are kept as units so the size cap can drop whole ones: an excerpt
-  // goes with its FOREIGN row, `files` counts the files a unit names, and
-  // `keep` ranks what the cap gives up last (see `Keep`).
+  // or evidence line goes with its row, and `keep` ranks what the cap gives
+  // up last (see `Keep`).
   const units: Unit[] = []
-  const add = (keep: Keep, files: number, ...lines: string[]) => units.push({ lines, files, keep })
-
-  for (const f of shown) add(Keep.Ordinary, 1, row(label(f.origin), short(f.path, root)))
-  // Not `plural(hidden, 'more')`: that helper appends an "s" for any count
-  // but one ("4 mores"), which shipped in 0.0.10 and is real prose the
-  // drift tail below got right from the start -- kept consistent with it
-  // here rather than leaving the file contradict itself.
-  if (hidden > 0) add(Keep.Ordinary, hidden, row('', `... and ${hidden} more, run /kanon for the full list`))
-
+  for (const s of gone) {
+    // The evidence quotes a name taken from a file Kanon did not write.
+    units.push({ keep: Keep.Gone, kind: 'gone', lines: [row('gone', stripControl(short(s.path, root))), `${INDENT}${stripControl(s.verdict!.evidence)}`] })
+  }
   for (const f of foreign) {
     const quote = excerpt(f.path)
     const line = row('FOREIGN', short(f.path, root), f.gitTracked === false ? '   (untracked)' : '')
-    if (quote) add(Keep.Foreign, 1, line, `${' '.repeat(2 + TAG_WIDTH)}"${quote}"`)
-    else add(Keep.Foreign, 1, line)
+    units.push({ keep: Keep.Foreign, kind: 'foreign', lines: quote ? [line, `${INDENT}"${quote}"`] : [line] })
   }
-
-  for (const c of missing) add(Keep.Missing, 1, row('missing', short(c.path, root), '   (expected, did not load)'))
-
-  const drift = input.drift
-  if (drift !== null && !driftIsEmpty(drift)) {
-    const rows: Array<[string, FileDigest]> = [
-      ...drift.appeared.map((f) => ['appeared', f] as [string, FileDigest]),
-      ...drift.changed.map((f) => ['changed', f] as [string, FileDigest]),
-      ...drift.vanished.map((f) => ['vanished', f] as [string, FileDigest]),
-    ]
-    // Foreign first, and never collapsed: a dependency's file arriving or
-    // being rewritten is the single most valuable thing this block can say.
-    const foreignRows = rows.filter(([, f]) => f.origin === 'foreign')
-    const otherRows = rows.filter(([, f]) => f.origin !== 'foreign')
-    const shownRows = otherRows.slice(0, LIST_LIMIT)
-    const hiddenRows = otherRows.length - shownRows.length
-
-    add(Keep.Structure, 0, '', '  compared with what has governed this repository before:')
-    for (const [tag, f] of [...foreignRows, ...shownRows]) {
-      add(f.origin === 'foreign' ? Keep.Foreign : Keep.Ordinary, 1, row(tag, short(f.path, root)))
-    }
-    // Not `plural(hiddenRows, 'more')`: that helper appends an "s" for any
-    // count but one ("4 mores"), which is fine where an existing test only
-    // checks a loose substring but is wrong prose on its own -- "more" does
-    // not pluralize.
-    if (hiddenRows > 0) add(Keep.Ordinary, hiddenRows, row('', `... and ${hiddenRows} more, run /kanon for the full list`))
-  }
-
-  if (foreign.length === 0 && missing.length === 0) {
-    const clean = drift === null || driftIsEmpty(drift) ? [row('', 'nothing foreign, nothing missing')] : []
-    return fit(header, units, clean)
+  for (const c of missing) {
+    units.push({ keep: Keep.Missing, kind: 'missing', lines: [row('missing', short(c.path, root), '   (expected, did not load)')] })
   }
 
   const notes: string[] = []
@@ -197,51 +165,79 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
       `The user may believe the missing ${missing.length === 1 ? 'file governs' : 'files govern'} you. ${missing.length === 1 ? 'It does' : 'They do'} not.`,
     )
   }
-  notes.push('Tell the user about the above in your first response.')
-  return fit(header, units, ['', ...wrap(notes.join(' '))])
+  // Names its subject rather than saying "the above": the gone rows sit above
+  // too, and they are the ones Claude must not raise up front.
+  if (foreign.length > 0 || missing.length > 0) {
+    const subject =
+      foreign.length > 0 && missing.length > 0
+        ? 'the FOREIGN and missing files'
+        : foreign.length > 0
+          ? `the FOREIGN ${foreign.length === 1 ? 'file' : 'files'}`
+          : `the missing ${missing.length === 1 ? 'file' : 'files'}`
+    notes.push(`Tell the user about ${subject} in your first response.`)
+  }
+  // Gone items are raised at the moment of reliance, not up front: most of
+  // them will never matter to this session, and a first response that opens
+  // with a list of stale notes is noise the user learns to skip.
+  if (gone.length > 0) {
+    notes.push(
+      `Before you rely on a gone item, ask the user whether it still holds, naming the item and what is gone. If they say it does, record that with the command below, then offer to update or delete the item so the warning does not return. Do not raise gone items before you need them.`,
+    )
+  }
+  // The ack command goes on a line of its own, outside the wrap, which would
+  // otherwise split it at any of its spaces.
+  const ack = gone.length > 0 ? [`  ${ackCommand(input.cli, root, '<path>')}`] : []
+  return fit(header, units, ['', ...wrap(notes.join(' ')), ...ack])
 }
 
 /**
  * What the size cap gives up last, lowest first. FOREIGN rows outrank
- * everything a cut could take, because the notes warn about them by name:
- * dropping them first would leave a warning about files Claude cannot see.
- * Structure (the drift block's heading) is never what makes a brief fit.
+ * everything, because a dependency's directive is already in Claude's
+ * context and the notes warn about each one by name. Gone rows come next:
+ * they are only asked about at the moment of reliance, so losing a few to
+ * the cap costs less. The header and the notes are the never-cut structure
+ * and sit outside the ranks entirely: fit() only ever drops units.
  */
 const enum Keep {
-  Ordinary = 0,
-  Missing = 1,
+  Missing = 0,
+  Gone = 1,
   Foreign = 2,
-  Structure = 3,
 }
 
 interface Unit {
   lines: string[]
-  files: number
   keep: Keep
+  kind: 'gone' | 'foreign' | 'missing'
 }
 
 /**
  * Join the brief, dropping whole rows until it fits BRIEF_MAX: the lowest
  * `keep` first, and within a rank the last row first. The header and the
  * tail (the notes telling Claude what to do) always survive. The overflow
- * row says how many FOREIGN files went, so a cut is never silent about them.
+ * row says how many FOREIGN and gone rows went, so a cut is never silent
+ * about them.
  */
 function fit(header: string, units: Unit[], tail: string[]): string {
-  const more = (files: number, foreign: number) =>
-    files === 0 ? [] : [row('', `... and ${files} more${foreign > 0 ? ` (${foreign} FOREIGN)` : ''}, run /kanon for the full list`)]
-  const join = (kept: Unit[], extra: string[]) => [header, ...kept.flatMap((u) => u.lines), ...extra, ...tail].join('\n')
+  const dropped = { gone: 0, foreign: 0, missing: 0 }
+  const more = () => {
+    const n = dropped.gone + dropped.foreign + dropped.missing
+    if (n === 0) return []
+    const named = [
+      ...(dropped.foreign > 0 ? [`${dropped.foreign} FOREIGN`] : []),
+      ...(dropped.gone > 0 ? [`${dropped.gone} gone`] : []),
+    ]
+    return [row('', `... and ${n} more${named.length > 0 ? ` (${named.join(', ')})` : ''}, run /kanon for the full list`)]
+  }
+  const join = (kept: Unit[]) => [header, ...kept.flatMap((u) => u.lines), ...more(), ...tail].join('\n')
 
   const kept = [...units]
-  let text = join(kept, [])
-  let files = 0
-  let foreign = 0
+  let text = join(kept)
   while (text.length > BRIEF_MAX && kept.length > 0) {
     let victim = kept.length - 1
     for (let i = kept.length - 1; i >= 0; i--) if (kept[i]!.keep < kept[victim]!.keep) victim = i
-    const [gone] = kept.splice(victim, 1)
-    files += gone!.files
-    if (gone!.keep === Keep.Foreign) foreign += gone!.files
-    text = join(kept, more(files, foreign))
+    const [cut] = kept.splice(victim, 1)
+    dropped[cut!.kind] += 1
+    text = join(kept)
   }
   return text
 }

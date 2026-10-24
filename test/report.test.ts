@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildReport } from '../src/report'
 import { normalise } from '../src/normalise'
@@ -386,4 +386,110 @@ test('a file gone from disk whose entry is still present is not yet reported as 
   const report = buildReport([], [], dir, '/home/.claude', new Map(), [], previous)
 
   expect(report.drift?.vanished).toEqual([])
+})
+
+test('a transcript load of AGENTS.md is loaded with reason transcript and origin project, not missing', () => {
+  const candidates: Candidate[] = [{ path: '/repo/AGENTS.md', label: 'launch', rule: 'ancestor-walk' }]
+  const r = buildReport([], candidates, ROOT, HOME, new Map(), [], null, [{ path: '/repo/AGENTS.md', type: 'Project' }])
+  expect(r.loaded.map((f) => [f.path, f.reason, f.origin])).toEqual([['/repo/AGENTS.md', 'transcript', 'project']])
+  expect(r.missing).toEqual([])
+  expect(r.modelDisagrees).toEqual([])
+})
+
+test('an AutoMem load of MEMORY.md is loaded as user and never questions the model', () => {
+  const memory = '/home/x/.claude/projects/x/memory/MEMORY.md'
+  const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: memory, type: 'AutoMem' }])
+  expect(r.loaded.map((f) => [f.path, f.reason, f.origin])).toEqual([[memory, 'transcript', 'user']])
+  expect(r.modelDisagrees).toEqual([])
+  expect(r.originDisagrees).toEqual([])
+})
+
+test('a file in both the events and the transcript appears once, with the event reason', () => {
+  const candidates: Candidate[] = [{ path: '/repo/CLAUDE.md', label: 'launch', rule: 'ancestor-walk' }]
+  const r = buildReport(normalise([line('/repo/CLAUDE.md')]), candidates, ROOT, HOME, new Map(), [], null, [
+    { path: '/repo/CLAUDE.md', type: 'Project' },
+  ])
+  expect(r.loaded.map((f) => [f.path, f.reason])).toEqual([['/repo/CLAUDE.md', 'session_start']])
+})
+
+test('a transcript load the model never predicted still questions the model', () => {
+  const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: '/repo/odd.md', type: 'Project' }])
+  expect(r.modelDisagrees).toEqual(['/repo/odd.md'])
+})
+
+test('a transcript-only load outside root and homeConfig is not admitted', () => {
+  const r = buildReport([], [], ROOT, HOME, new Map(), [], null, [{ path: '/elsewhere/CLAUDE.md', type: 'Project' }])
+  expect(r.loaded).toEqual([])
+  expect(r.modelDisagrees).toEqual([])
+})
+
+test('an event load outside root is still reported, whatever the transcript says', () => {
+  const r = buildReport(normalise([line('/elsewhere/CLAUDE.md')]), [], ROOT, HOME, new Map(), [], null, [
+    { path: '/elsewhere/CLAUDE.md', type: 'Project' },
+  ])
+  expect(r.loaded.map((f) => [f.path, f.reason])).toEqual([['/elsewhere/CLAUDE.md', 'session_start']])
+})
+
+/**
+ * Auto-memory rewrites MEMORY.md as it learns, so a digest of it would read
+ * `changed` in nearly every session. It stays out of drift on both sides;
+ * AGENTS.md, which arrives the same way, stays in.
+ */
+test('an AutoMem MEMORY.md is left out of drift, and AGENTS.md is not', () => {
+  const dir = tmp('kanon-report-automem-')
+  const root = join(dir, 'repo')
+  const home = join(dir, 'claude')
+  mkdirSync(root, { recursive: true })
+  mkdirSync(join(home, 'projects', 'x', 'memory'), { recursive: true })
+  const agents = join(root, 'AGENTS.md')
+  const memory = join(home, 'projects', 'x', 'memory', 'MEMORY.md')
+  writeFileSync(agents, 'new agents\n')
+  writeFileSync(memory, 'new memory\n')
+  const previous = [
+    { path: agents, origin: 'project' as const, sha256: 'old', lastSeen: '2026-08-27T00:00:00Z', state: 'present' as const },
+    { path: memory, origin: 'user' as const, sha256: 'old', lastSeen: '2026-08-27T00:00:00Z', state: 'present' as const },
+  ]
+  const r = buildReport([], [], root, home, new Map(), [], previous, [
+    { path: agents, type: 'Project' },
+    { path: memory, type: 'AutoMem' },
+  ])
+  expect(r.drift?.changed.map((f) => f.path)).toEqual([agents])
+  expect(r.drift?.appeared).toEqual([])
+  expect(r.autoMemory).toEqual([memory])
+  expect(r.loaded.map((f) => f.path)).toEqual([agents, memory])
+})
+
+/**
+ * A ~/.claude/CLAUDE.md symlinked into a dotfiles repository is the common
+ * case. Its realpath sits outside the config dir, so classifying the realpath
+ * alone called the user's own file FOREIGN, and looking the candidate up by
+ * realpath alone missed the prediction and questioned the model as well.
+ */
+function symlinkedUserFile() {
+  const base = tmp('kanon-rep-link-')
+  const home = join(base, 'home', '.claude')
+  const dotfiles = join(base, 'dotfiles')
+  const root = join(base, 'repo')
+  mkdirSync(home, { recursive: true })
+  mkdirSync(dotfiles, { recursive: true })
+  mkdirSync(root, { recursive: true })
+  writeFileSync(join(dotfiles, 'CLAUDE.md'), '# Mine\n')
+  symlinkSync(join(dotfiles, 'CLAUDE.md'), join(home, 'CLAUDE.md'))
+  const candidates: Candidate[] = [{ path: join(home, 'CLAUDE.md'), label: 'launch', rule: 'user' }]
+  return { home, root, path: join(home, 'CLAUDE.md'), candidates }
+}
+
+test('a symlinked user CLAUDE.md loaded by event is user, and the model agrees', () => {
+  const { home, root, path, candidates } = symlinkedUserFile()
+  const r = buildReport(normalise([line(path)]), candidates, root, home, new Map())
+  expect(r.loaded.map((l) => l.origin)).toEqual(['user'])
+  expect(r.modelDisagrees).toEqual([])
+  expect(r.missing).toEqual([])
+})
+
+test('a symlinked user CLAUDE.md named only by the transcript is admitted as user', () => {
+  const { home, root, path, candidates } = symlinkedUserFile()
+  const r = buildReport([], candidates, root, home, new Map(), [], null, [{ path, type: 'User' }])
+  expect(r.loaded.map((l) => l.origin)).toEqual(['user'])
+  expect(r.modelDisagrees).toEqual([])
 })

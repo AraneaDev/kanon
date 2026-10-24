@@ -1,7 +1,8 @@
 #!/bin/sh
-# Cold path. Emits the brief Claude reads at the start of a session: which
-# instruction files govern it, which of them are foreign, and what the user
-# expected that never arrived.
+# Cold path. Emits the brief Claude reads at the start of a session: how many
+# instruction files and memories steer it, which of them name something that
+# is gone, which are foreign, and what the user expected that never arrived.
+# It also writes the steering cache the hot-path hooks read.
 #
 # Unlike the alarm this replaced, it always speaks. This hook can fire before
 # the first InstructionsLoaded is recorded, in which case the CLI falls back
@@ -28,7 +29,12 @@ root=${CLAUDE_PLUGIN_ROOT:-}
 payload=$(cat 2>/dev/null) || exit 0
 sid=$(printf '%s' "$payload" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 cwd=$(printf '%s' "$payload" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+# The memory directory sits beside the transcript, so the brief needs its
+# path to judge memories. An absent field passes an empty string, which the
+# CLI reads as "not given"; it then looks for the path the recorded
+# SessionStart named, and failing that judges instruction files alone.
+transcript=$(printf '%s' "$payload" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 [ -z "$sid" ] && exit 0
 command -v bun >/dev/null 2>&1 || exit 0
-bun "$root/src/cli.ts" brief --session "$sid" --cwd "${cwd:-$PWD}" --hook 2>/dev/null
+bun "$root/src/cli.ts" brief --session "$sid" --cwd "${cwd:-$PWD}" --transcript "$transcript" --hook 2>/dev/null
 exit 0

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 
 import { diff, digest, type Drift, type SnapshotEntry } from './drift'
 import { classify, hasDependencySegment } from './origin'
@@ -82,6 +82,7 @@ export function buildReport(
   importedBy: Map<string, string>,
   skipped: Skipped[] = [],
   previous: SnapshotEntry[] | null = null,
+  transcriptLoads: Array<{ path: string; type: string }> = [],
 ): Report {
   const byPath = new Map(candidates.map((c) => [c.path, c]))
 
@@ -90,6 +91,12 @@ export function buildReport(
   const loadedOrder: string[] = []
   const firstReason = new Map<string, string>()
   const claimedType = new Map<string, string>()
+  // The path as it was loaded, before realpath. A ~/.claude/CLAUDE.md linked
+  // in from a dotfiles repository has its realpath outside the config dir;
+  // only this spelling says it is the user's, and only this spelling matches
+  // the candidate discovery predicted. Losing it made the user's own file
+  // FOREIGN and questioned the model besides.
+  const given = new Map<string, string>()
   for (const e of events) {
     if (e.ev !== 'loaded') continue
     // Resolved through realpath so the report names the file's real location
@@ -99,6 +106,7 @@ export function buildReport(
     const p = realPath(resolve(root, e.path))
     if (!firstReason.has(p)) {
       firstReason.set(p, e.reason)
+      given.set(p, resolve(root, e.path))
       loadedOrder.push(p)
     }
     // The claim is captured independently of the reason, and deliberately
@@ -112,18 +120,52 @@ export function buildReport(
     if (e.memoryType !== null && !claimedType.has(p)) claimedType.set(p, e.memoryType)
   }
 
+  // The transcript's `instructions` attachment names files that never fire
+  // InstructionsLoaded: AGENTS.md and the auto-memory MEMORY.md among them.
+  // They are observations like any event, so they count as loaded, but an
+  // event wins: it was recorded as the load happened, with its real reason.
+  //
+  // A transcript-only load is admitted only under the root or the Claude
+  // config dir. The files the transcript adds are a project's AGENTS.md and
+  // the auto-memory, which live there; a genuinely foreign file fires
+  // InstructionsLoaded anyway, so this backstop loses nothing. What it stops
+  // is a load from another run in another root, which would otherwise read as
+  // FOREIGN: the worst output this tool has.
+  const realRoot = realPath(resolve(root))
+  const realHome = realPath(resolve(homeConfig))
+  const within = (p: string, base: string): boolean => p === base || p.startsWith(base.endsWith(sep) ? base : base + sep)
+  for (const t of transcriptLoads) {
+    const spelled = resolve(root, t.path)
+    const p = realPath(spelled)
+    const admitted = within(p, realRoot) || within(p, realHome) || within(spelled, resolve(homeConfig))
+    if (!firstReason.has(p) && !admitted) continue
+    if (!firstReason.has(p)) {
+      firstReason.set(p, 'transcript')
+      given.set(p, spelled)
+      loadedOrder.push(p)
+    }
+    if (t.type !== '' && !claimedType.has(p)) claimedType.set(p, t.type)
+  }
+
   const loaded: Classified[] = []
   const modelDisagrees: string[] = []
   const originDisagrees: OriginDisagreement[] = []
   for (const p of loadedOrder) {
-    const candidate = byPath.get(p)
+    const candidate = byPath.get(p) ?? byPath.get(given.get(p) ?? p)
     // A path running through a dependency directory (vendor/, node_modules/,
     // ...) is never enumerated as a candidate BY DESIGN -- subdirCandidates
     // deliberately skips those directories -- so it is expected to be
     // unmodelled, not a failure of the reachability model. Only flag a miss
     // that the model actually got wrong: an unexpected path outside any
     // dependency directory, or one explicitly marked unreachable.
-    if ((!candidate || candidate.label === 'unreachable') && !hasDependencySegment(p, root)) {
+    //
+    // Auto-memory is exempt: layer two does not model memory at all, so a
+    // MEMORY.md it never predicted says nothing about how far to trust it.
+    if (
+      (!candidate || candidate.label === 'unreachable') &&
+      !hasDependencySegment(p, root) &&
+      claimedType.get(p) !== AUTO_MEMORY
+    ) {
       // Kanon's candidate model was wrong about this path. That is a fault
       // in layer two, the prediction, not in layer one: origin
       // classification needs no prediction at all, so the file still gets
@@ -133,7 +175,8 @@ export function buildReport(
       modelDisagrees.push(p)
     }
 
-    const inferred = classify(p, root, homeConfig)
+    // classify() realpaths what it is given and checks both spellings.
+    const inferred = classify(given.get(p) ?? p, root, homeConfig)
     const origin = reconcile(p, inferred, claimedType.get(p), originDisagrees)
     const isForeign = origin === 'foreign'
     loaded.push({
@@ -147,7 +190,8 @@ export function buildReport(
     })
   }
 
-  const seen = new Set(loadedOrder)
+  // Both spellings: a candidate is predicted unresolved, a load is stored real.
+  const seen = new Set([...loadedOrder, ...given.values()])
   // Only a launch candidate that never loaded is a fault worth calling
   // missing. on-demand/path-scoped/excluded candidates are expected to stay
   // quiet unless something triggers them.
@@ -161,7 +205,26 @@ export function buildReport(
   // Drift is computed from what actually loaded, never from candidates, so
   // it can never inherit layer two's fallibility. `existsSync` is injected
   // rather than called inside diff() so that diff stays pure.
-  const drift: Drift | null = previous === null ? null : diff(previous, digest(loaded), existsSync)
+  const autoMemory = loadedOrder.filter((p) => claimedType.get(p) === AUTO_MEMORY)
+  const drift: Drift | null = previous === null ? null : diff(previous, digest(driftable(loaded, autoMemory)), existsSync)
 
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift }
+  // What else steered the session is filled in by cli.ts, which holds the
+  // transcript and the steering cache; this function stays about loads.
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift, autoMemory, steered: [], injections: [], skills: [], compactions: [] }
+}
+
+/** Claude Code's own word for a MEMORY.md load. */
+const AUTO_MEMORY = 'AutoMem'
+
+/**
+ * The loads that drift is measured on: every one but the auto-memory.
+ * Claude Code rewrites MEMORY.md as it learns, so its digest would read
+ * `changed` in nearly every session and bury the changes a person made. The
+ * memory section and STALE still show it. Shared by the diff here and the
+ * snapshot commit in cli.ts, so the two sides of the comparison never
+ * disagree about what is in it. AGENTS.md arrives the same way and stays in.
+ */
+export function driftable(loaded: Classified[], autoMemory: string[]): Classified[] {
+  const skip = new Set(autoMemory)
+  return loaded.filter((c) => !skip.has(c.path))
 }

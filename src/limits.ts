@@ -48,6 +48,33 @@ export function readStart(path: string, max = MAX_FILE_BYTES): Buffer | null {
   }
 }
 
+/**
+ * The last `max` bytes of a file, following symlinks, or null when it cannot
+ * be read. A transcript grows for the whole life of a session and the current
+ * run sits at its end, so this is the part worth reading. When the read
+ * starts mid-file, everything up to the first newline is a fragment of a
+ * record and is dropped rather than handed to a parser as if it were whole.
+ */
+export function readTail(path: string, max = 16 * 1024 * 1024): Buffer | null {
+  let fd: number | undefined
+  try {
+    fd = openSync(path, 'r')
+    // fstat, not stat, for the same reason as readStart.
+    const size = fstatSync(fd).size
+    const start = Math.max(0, size - max)
+    const buf = Buffer.alloc(size - start)
+    const n = readSync(fd, buf, 0, buf.length, start)
+    const got = buf.subarray(0, n)
+    if (start === 0) return got
+    const nl = got.indexOf(0x0a)
+    return nl === -1 ? Buffer.alloc(0) : got.subarray(nl + 1)
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
 const PRUNED_DIRS = ['sessions', 'state', 'reports']
 
 /**

@@ -140,3 +140,36 @@ test('a loaded path that no longer exists is still classified rather than throwi
   const dir = tmp('kanon-o-')
   expect(classify(join(dir, 'gone', 'CLAUDE.md'), dir, '/home/x/.claude')).toBe('project')
 })
+
+/**
+ * A config dir kept in a dotfiles repository and linked into place. The
+ * loaded path is realpathed, so comparing it with the unresolved config dir
+ * called the user's own CLAUDE.md FOREIGN, the worst output Kanon has.
+ */
+test('a file under a symlinked config dir is user scope', () => {
+  const dir = tree()
+  const real = join(dir, 'dotfiles', 'claude')
+  mkdirSync(real, { recursive: true })
+  writeFileSync(join(real, 'CLAUDE.md'), '')
+  symlinkSync(real, join(dir, 'home-claude'))
+  expect(classify(join(dir, 'home-claude', 'CLAUDE.md'), join(dir, 'repo'), join(dir, 'home-claude'))).toBe('user')
+})
+
+test('a CLAUDE.md symlinked into another directory is user scope', () => {
+  const dir = tree()
+  mkdirSync(join(dir, 'dotfiles'), { recursive: true })
+  mkdirSync(join(dir, 'home-claude'), { recursive: true })
+  writeFileSync(join(dir, 'dotfiles', 'CLAUDE.md'), '')
+  symlinkSync(join(dir, 'dotfiles', 'CLAUDE.md'), join(dir, 'home-claude', 'CLAUDE.md'))
+  expect(classify(join(dir, 'home-claude', 'CLAUDE.md'), join(dir, 'repo'), join(dir, 'home-claude'))).toBe('user')
+})
+
+test('an auto-memory MEMORY.md under a symlinked config dir, named by its real path, is user scope', () => {
+  const dir = tree()
+  const real = join(dir, 'dotfiles', 'claude')
+  mkdirSync(join(real, 'projects', '-home-user-repo', 'memory'), { recursive: true })
+  const memory = join(real, 'projects', '-home-user-repo', 'memory', 'MEMORY.md')
+  writeFileSync(memory, '')
+  symlinkSync(real, join(dir, 'home-claude'))
+  expect(classify(memory, join(dir, 'repo'), join(dir, 'home-claude'))).toBe('user')
+})

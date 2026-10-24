@@ -282,3 +282,39 @@ test('a symlinked subdirectory is not followed by the ordinary walk either', () 
 
   expect(subdirCandidates(repo)).toEqual([])
 })
+
+// Observed with `claude -p` on 2026-10-24: a directory holding both files
+// loaded CLAUDE.md alone, and one holding only AGENTS.md loaded AGENTS.md.
+test('AGENTS.md is predicted in a directory with no CLAUDE.md', () => {
+  const dir = tmp('kanon-d-agents-')
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  writeFileSync(join(repo, 'AGENTS.md'), 'Prefer short answers.\n')
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+  const agents = discover(repo, home).candidates.find((c) => c.path === join(repo, 'AGENTS.md'))
+  expect(agents?.label).toBe('launch')
+  expect(agents?.rule).toBe('ancestor-walk')
+})
+
+test('AGENTS.md is not predicted beside a CLAUDE.md', () => {
+  const { repo, home } = project()
+  writeFileSync(join(repo, 'AGENTS.md'), 'Prefer short answers.\n')
+  const paths = discover(repo, home).candidates.map((c) => c.path)
+  expect(paths).toContain(join(repo, 'CLAUDE.md'))
+  expect(paths).not.toContain(join(repo, 'AGENTS.md'))
+})
+
+test('a .claude/CLAUDE.md alone also keeps AGENTS.md from being predicted', () => {
+  const dir = tmp('kanon-d-agents-dot-')
+  const repo = join(dir, 'repo')
+  mkdirSync(join(repo, '.git'), { recursive: true })
+  mkdirSync(join(repo, '.claude'), { recursive: true })
+  writeFileSync(join(repo, '.claude', 'CLAUDE.md'), '# Project\n')
+  writeFileSync(join(repo, 'AGENTS.md'), 'Prefer short answers.\n')
+  const home = join(dir, 'home', '.claude')
+  mkdirSync(home, { recursive: true })
+  const paths = discover(repo, home).candidates.map((c) => c.path)
+  expect(paths).toContain(join(repo, '.claude', 'CLAUDE.md'))
+  expect(paths).not.toContain(join(repo, 'AGENTS.md'))
+})

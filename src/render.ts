@@ -1,6 +1,7 @@
-import { PLAIN, type Paint } from './colour'
+import { PLAIN, stripControl, type Paint } from './colour'
 import { driftIsEmpty, type FileDigest } from './drift'
 import { short } from './paths'
+import type { Steered } from './steering'
 import type { Classified, Report, Skipped } from './types'
 
 // Column widths pinned to the worked example in the original design write-up
@@ -9,6 +10,10 @@ import type { Classified, Report, Skipped } from './types'
 // at a fixed offset regardless of tag or path length.
 const TAG_WIDTH = 11
 const PATH_WIDTH = 37
+// The INJECTED columns: a plugin name and a hook name, which are both wider
+// than a tag and far narrower than a path.
+const PLUGIN_WIDTH = 16
+const HOOK_WIDTH = 22
 
 /**
  * Pad a value to a fixed column width, but never let it fuse into the next
@@ -60,6 +65,65 @@ function loadedLine(c: Classified, root: string, paint: Paint): string {
  */
 function driftLine(tag: string, f: FileDigest, root: string, paint: Paint): string {
   return `  ${paint.tag(pad(tag, TAG_WIDTH), 'drift')}${paint.path(pad(short(f.path, root), PATH_WIDTH))}${paint.reason(f.origin === 'foreign' ? 'FOREIGN' : f.origin)}`
+}
+
+/**
+ * One STALE row. `gone` is the warning tone because Claude is told to ask
+ * before relying on the item; `may-stale` is a note because it is worth a
+ * second look and nothing more; an acknowledged item recedes like `quiet`,
+ * a fact about the session rather than a fault. The evidence quotes a name
+ * out of a file Kanon did not write, so it is stripped of control
+ * characters before it reaches a terminal.
+ */
+function staleLine(s: Steered, root: string, paint: Paint): string {
+  const path = paint.path(pad(short(s.path, root), PATH_WIDTH))
+  if (s.acknowledged) return `  ${paint.tag(pad('ok', TAG_WIDTH), 'quiet')}${path}${paint.reason('acknowledged')}`
+  const gone = s.verdict!.level === 'gone'
+  const tag = gone ? paint.warning(pad('gone', TAG_WIDTH)) : paint.note(pad('may-stale', TAG_WIDTH))
+  return `  ${tag}${path}${paint.reason(stripControl(s.verdict!.evidence))}`
+}
+
+/**
+ * INJECTED rows: one per plugin and hook, characters summed, in order of
+ * first sighting. Kanon's own injection is listed like anyone else's. A
+ * plugin name is a directory name in the plugin cache and a hook name is the
+ * transcript's word, neither written by Kanon, so both are stripped too.
+ */
+function injectedLines(report: Report, paint: Paint): string[] {
+  const totals = new Map<string, { plugin: string; hookName: string; chars: number }>()
+  for (const i of report.injections) {
+    const key = JSON.stringify([i.plugin, i.hookName])
+    const row = totals.get(key) ?? { plugin: i.plugin, hookName: i.hookName, chars: 0 }
+    row.chars += i.chars
+    totals.set(key, row)
+  }
+  return [...totals.values()].map(
+    (r) => `  ${pad(stripControl(r.plugin), PLUGIN_WIDTH)}${pad(stripControl(r.hookName), HOOK_WIDTH)}${paint.note(`${(r.chars / 1000).toFixed(1)}k chars`)}`,
+  )
+}
+
+const kTokens = (n: number): string => `${Math.round(n / 1000)}k`
+
+/**
+ * Everything besides the instruction files that steered the session, each
+ * section omitted when it has nothing to say.
+ */
+function steeringSections(report: Report, paint: Paint): string[] {
+  const { root } = report
+  const out: string[] = []
+  const section = (heading: string, lines: string[]): void => {
+    if (lines.length === 0) return
+    out.push('', paint.heading(heading), ...lines)
+  }
+  section('STALE', report.steered.filter((s) => s.verdict !== null).map((s) => staleLine(s, root, paint)))
+  section('MEMORY', report.steered.filter((s) => s.kind === 'memory').map((s) => `  ${paint.path(short(s.path, root))}`))
+  section('INJECTED', injectedLines(report, paint))
+  section('SKILLS', report.skills.map((s) => `  ${stripControl(s.name)}`))
+  section(
+    'COMPACTION',
+    report.compactions.map((c) => `  ${c.t.slice(11, 16)}  ${stripControl(c.trigger) || 'unknown'}  ${paint.note(`${kTokens(c.preTokens)} -> ${kTokens(c.postTokens)} tokens`)}`),
+  )
+  return out
 }
 
 /**
@@ -140,9 +204,11 @@ export function render(report: Report, paint: Paint = PLAIN): string {
   if (report.loaded.length === 0) out.push(`  ${paint.note('nothing recorded')}`)
   for (const c of report.loaded) out.push(loadedLine(c, root, paint))
 
-  // Directly after LOADED, because it annotates the same set. Omitted
-  // entirely when there is no baseline: silence, rather than a claim that
-  // nothing changed.
+  out.push(...steeringSections(report, paint))
+
+  // After LOADED and what else steered the session, because it annotates
+  // the loaded set. Omitted entirely when there is no baseline: silence,
+  // rather than a claim that nothing changed.
   if (report.drift !== null && !driftIsEmpty(report.drift)) {
     out.push('')
     out.push(paint.heading('DRIFT'))

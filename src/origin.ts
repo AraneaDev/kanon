@@ -66,7 +66,15 @@ export function classify(path: string, root: string, homeConfig: string): Origin
   const p = realPath(resolve(path))
 
   if (p === managedPath()) return 'managed'
-  if (isUnder(p, homeConfig)) return 'user'
+  // Both sides resolved, and both unresolved. A config dir linked in from a
+  // dotfiles repository puts the realpathed file outside the config dir as
+  // spelled, and a CLAUDE.md linked from elsewhere puts its realpath outside
+  // the config dir however it is spelled: either way the user's own file
+  // read as FOREIGN. The unresolved pair covers the second, the resolved
+  // pair the first and an auto-memory file Claude Code names by real path.
+  const home = resolve(homeConfig)
+  const given = resolve(path)
+  if (isUnder(p, home) || isUnder(p, realPath(home)) || isUnder(given, home) || isUnder(given, realPath(home))) return 'user'
   if (hasDependencySegment(p, root)) return 'foreign'
   if (!isUnder(p, root)) return 'foreign'
   if (basename(p) === 'CLAUDE.local.md') return 'local'

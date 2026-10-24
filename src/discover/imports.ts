@@ -4,7 +4,12 @@ import { dirname, isAbsolute, resolve } from 'node:path'
 import { tooLarge } from '../limits'
 import type { SkipReason } from '../types'
 
-const IMPORT = /([([{]|^|\s)@([^\s`]+)/g
+export const IMPORT = /([([{]|^|\s)@([^\s`]+)/g
+
+/** An IMPORT match's target with trailing sentence punctuation removed. */
+export function importTarget(raw: string | undefined): string {
+  return raw ? raw.replace(/[.,;:!?\)}\]'"]+$/, '') : ''
+}
 
 /** Import targets in a file, with code spans and fenced blocks removed first. */
 export function parseImports(text: string): string[] {
@@ -15,11 +20,8 @@ export function parseImports(text: string): string[] {
 
   const out: string[] = []
   for (const m of stripped.matchAll(IMPORT)) {
-    let target = m[2]
-    if (target) {
-      target = target.replace(/[.,;:!?\)}\]'"]+$/, '')
-      if (target) out.push(target)
-    }
+    const target = importTarget(m[2])
+    if (target) out.push(target)
   }
   return out
 }
