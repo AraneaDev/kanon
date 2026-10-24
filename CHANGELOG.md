@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.21](https://github.com/AraneaDev/kanon/compare/v0.0.20...v0.0.21) (2026-10-24)
+
+
+### Features
+
+* a Kanon pane beside the chat, opened with /kanon ([#54](https://github.com/AraneaDev/kanon/issues/54)) ([4f7b57f](https://github.com/AraneaDev/kanon/commit/4f7b57f0dc7879ad354954dab5f59b91cc142eb4))
+* see everything that steers a session and flag what is stale ([#53](https://github.com/AraneaDev/kanon/issues/53)) ([34853ae](https://github.com/AraneaDev/kanon/commit/34853ae8fad33f4688bb13b6fe6e4ed7058c5b01))
+
+
+### Fixes
+
+* correct ConfigChange fields, NUL-damaged logs, brief size and oversized files ([#51](https://github.com/AraneaDev/kanon/issues/51)) ([610f212](https://github.com/AraneaDev/kanon/commit/610f212e7e7bafcaefbd78d4bb9488f02cce41fc))
+
+
+### Refactoring
+
+* give each CLI command its own function ([#48](https://github.com/AraneaDev/kanon/issues/48)) ([81a5d06](https://github.com/AraneaDev/kanon/commit/81a5d0653a9a0f57c1df452c9112ce59582e5561))
+
 ## [0.0.20](https://github.com/AraneaDev/kanon/compare/v0.0.19...v0.0.20) (2026-09-16)
 
 
