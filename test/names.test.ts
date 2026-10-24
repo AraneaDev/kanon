@@ -158,6 +158,24 @@ describe('extractNames', () => {
     expect(paths('See `../a.md` and ../x/y.md.')).toEqual(['../a.md', '../x/y.md'])
   })
 
+  /** `backend/core|routers|services/` lists alternatives; `bitbucket.org:org/` is an ssh remote. */
+  test('a segment with a pipe or a colon is not a path', () => {
+    expect(paths('Under `backend/core|routers|services/`, remote `bitbucket.org:org/` and `a/b:c.ts`.')).toEqual([])
+  })
+
+  /** `package.json/tsconfig.json/Cargo.toml` and `.crt/.key` are lists of files, not one path. */
+  test('segments that each carry a file extension, or each start with a dot, are a list', () => {
+    expect(paths('Read `package.json/tsconfig.json/Cargo.toml`, keep `.crt/.key` out, and `a.md/b.ts` too.')).toEqual([])
+  })
+
+  test('a path with one dotted segment among plain ones is still a path', () => {
+    expect(paths('See `etc/conf.d/default.conf`, `.claude/rules/` and `.github/workflows/ci.yml`.')).toEqual([
+      'etc/conf.d/default.conf',
+      '.claude/rules/',
+      '.github/workflows/ci.yml',
+    ])
+  })
+
   test('ordinary names are still taken', () => {
     expect(paths('Use `src/a.ts`, `~/.kanon/state/`, `/home/user/x.md` and `CLAUDE.md`.')).toEqual([
       'src/a.ts',

@@ -50,6 +50,16 @@ function notAPath(t: string): boolean {
   // `**/*.md`, `src/[ab].ts`: a glob, which matches files rather than
   // naming one. A rule describing path-scoped frontmatter was called gone.
   if (/[*?[\]]/.test(t)) return true
+  // `backend/core|routers|services/` lists alternatives, `bitbucket.org:org/`
+  // is an ssh remote: no segment of a path here holds a pipe or a colon.
+  if (parts.some((p) => /[|:]/.test(p))) return true
+  // `package.json/tsconfig.json/Cargo.toml`, `.crt/.key`: several file names
+  // or extensions run together with slashes, a list rather than one path.
+  // Every segment has to qualify, so `.claude/rules/` and `etc/conf.d/x`
+  // stay paths; the extension has to be a known one for the same reason.
+  const fileName = (p: string) => p.lastIndexOf('.') > 0 && FILE_EXT.has(p.slice(p.lastIndexOf('.') + 1).toLowerCase())
+  const dotName = (p: string) => p.startsWith('.') && p !== '.' && p !== '..'
+  if (parts.length >= 2 && (parts.every(fileName) || parts.every(dotName))) return true
   if (t.startsWith('/')) {
     // `/kanon`, `/mcp`, `/kanon:report`: a slash command.
     if (parts.length <= 1) return true

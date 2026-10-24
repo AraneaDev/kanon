@@ -223,7 +223,29 @@ describe('judge', () => {
   test('an extensionless name under a tracked directory is still judged', () => {
     const { probe } = fake({ tracked: ['src/a.ts', 'lib/deep/x.ts'] })
     expect(judge(item('see `src/gone`'), ROOT, HOME, probe)?.evidence).toBe('names `src/gone`, which no longer exists')
-    expect(judge(item('see `deep/gone`'), ROOT, HOME, probe)?.evidence).toBe('names `deep/gone`, which no longer exists')
+  })
+
+  /** `pane/band/notes` is prose, and some `docs/x/pane/` existing deeper in the tree does not make it a path. */
+  test('an extensionless name is judged only when its first segment is a top-level tracked directory', () => {
+    const { probe } = fake({ tracked: ['src/a.ts', 'lib/deep/x.ts', 'docs/x/pane/a.md'] })
+    expect(judge(item('see `deep/gone` and `pane/band/notes`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  /** `docs/adr/0001` names `docs/adr/0001-something.md` by its number. */
+  test('a tracked file whose name starts with the named one and a dash or dot matches it', () => {
+    const { probe } = fake({ tracked: ['docs/adr/0001-something.md', 'src/parser.ts'] })
+    expect(judge(item('see `docs/adr/0001` and `src/parser`'), ROOT, HOME, probe)).toBeNull()
+  })
+
+  test('the prefix match still needs the whole segment and the same directory', () => {
+    const { probe } = fake({ tracked: ['docs/adr/00012.md', 'other/0001-x.md'] })
+    expect(judge(item('see `docs/adr/0001`'), ROOT, HOME, probe)?.level).toBe('gone')
+  })
+
+  /** `../x/y.ts` written from a subdirectory names the tracked `x/y.ts`, as `./x/y.ts` does. */
+  test('a parent-relative name gets the tracked-suffix leniency', () => {
+    const { probe } = fake({ tracked: ['x/y.ts'] })
+    expect(judge(item('see `../x/y.ts`'), ROOT, HOME, probe)).toBeNull()
   })
 
   test('a name with an extension is judged whatever its first segment', () => {

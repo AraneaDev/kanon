@@ -80,33 +80,52 @@ function judgeDisk(names: Name[], home: string, probe: Probe): Verdict | null {
   return null
 }
 
+/** A relative name as written from somewhere in the tree: `./` and `../` say where from, not what. */
+function unanchored(text: string): string {
+  return text.replace(/^(?:\.\.?\/)+/, '')
+}
+
 /**
  * Whether tracked path `p` matches relative name `text` by whole trailing
  * segments: `a/b.ts` matches `a/b.ts` and `x/a/b.ts`, never `xa/b.ts`. A
  * trailing-slash name is a directory and matches any tracked path inside a
- * directory of that name, wherever it sits.
+ * directory of that name, wherever it sits. A leading `./` or `../` is
+ * dropped first, so `../x/y.ts` written from a subdirectory finds `x/y.ts`.
+ *
+ * A file name also matches a tracked file that extends it with a dash or a
+ * dot in the same directory: `docs/adr/0001` is how a note names
+ * `docs/adr/0001-something.md`, and `src/parser` names `src/parser.ts`.
  */
 function tracks(p: string, text: string): boolean {
-  const t = text.replace(/^(?:\.\/)+/, '')
+  const t = unanchored(text)
   if (t.endsWith('/')) return p.startsWith(t) || p.includes(`/${t}`)
-  return p === t || p.endsWith(`/${t}`)
+  if (p === t || p.endsWith(`/${t}`)) return true
+  const cut = t.lastIndexOf('/')
+  const dir = t.slice(0, cut + 1)
+  const base = t.slice(cut + 1)
+  const pCut = p.lastIndexOf('/')
+  const pDir = p.slice(0, pCut + 1)
+  const pBase = p.slice(pCut + 1)
+  if (!base || !(pBase.startsWith(`${base}-`) || pBase.startsWith(`${base}.`))) return false
+  return pDir === dir || pDir.endsWith(`/${dir}`) || dir === ''
 }
 
 /**
  * Whether an extensionless slashed name sits under a directory this repo
- * tracks. `lexer/parser/AST`, `vitest/config`, `fix/some-branch` and
- * `Owner/Repo` are shaped like paths but are a list of words, a module
- * specifier, a branch and a repository, and each was reported gone. A path
- * into this tree starts at one of its directories, so an extensionless
- * name whose first segment is none of them is not judged. A name with an
- * extension or a trailing slash claims a file or directory and is always
- * judged.
+ * tracks at its top level. `lexer/parser/AST`, `vitest/config`,
+ * `fix/some-branch` and `Owner/Repo` are shaped like paths but are a list of
+ * words, a module specifier, a branch and a repository, and each was
+ * reported gone. A path into this tree starts at one of its top-level
+ * directories, so an extensionless name whose first segment is none of them
+ * is not judged; `pane/band/notes` once was, because a `docs/x/pane/`
+ * existed somewhere deeper. A name with an extension or a trailing slash
+ * claims a file or directory and is always judged.
  */
 function underTrackedDir(text: string, tracked: string[]): boolean {
-  const t = text.replace(/^(?:\.\/)+/, '')
+  const t = unanchored(text)
   const parts = t.split('/')
   if (!t.includes('/') || t.endsWith('/') || /\.[A-Za-z0-9]{1,5}$/.test(parts[parts.length - 1]!)) return true
-  return tracked.some((p) => tracks(p, `${parts[0]}/`))
+  return tracked.some((p) => p.startsWith(`${parts[0]}/`))
 }
 
 interface Survey {
