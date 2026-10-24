@@ -339,11 +339,22 @@ export function markHooks(hooks: Hook[], injections: ReadonlyArray<Ran>): Marked
   return byScope([...marked, ...others.values()].sort((a, b) => chars(b) - chars(a)))
 }
 
-/** Invoked when the transcript names it, by name or by the file it ran from. */
+/**
+ * Invoked when the transcript names it, by name or by the file it ran from.
+ * An invoked skill no directory explains (one built into Claude Code, a
+ * plugin since removed) closes the list as `other`, as an unexplained
+ * injection does, so the report never lists less than the run used.
+ */
 export function markSkills(skills: Skill[], invoked: ReadonlyArray<{ name: string; path: string }>): MarkedSkill[] {
   const names = new Set(invoked.map((s) => s.name))
   const paths = new Set(invoked.filter((s) => s.path !== '').map((s) => realPath(s.path)))
-  return skills.map((s) => ({ ...s, invoked: names.has(s.name) || paths.has(realPath(s.path)) }))
+  const marked = skills.map((s) => ({ ...s, invoked: names.has(s.name) || paths.has(realPath(s.path)) }))
+  const listed = new Set(skills.map((s) => s.name))
+  const listedPaths = new Set(skills.map((s) => realPath(s.path)))
+  const others = invoked
+    .filter((s) => !listed.has(s.name) && !(s.path !== '' && listedPaths.has(realPath(s.path))))
+    .map((s): MarkedSkill => ({ scope: 'other', plugin: null, name: s.name, path: s.path, invoked: true }))
+  return [...marked, ...others]
 }
 
 export function inventoried(inv: Inventory, injections: ReadonlyArray<Ran>, invoked: ReadonlyArray<{ name: string; path: string }>): Inventoried {

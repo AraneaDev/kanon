@@ -245,4 +245,8 @@ describe('marks', () => {
     ]
     expect(markSkills(skills, [{ name: 'a', path: '' }, { name: 'renamed', path: join(base, 'b', 'SKILL.md') }]).map((s) => s.invoked)).toEqual([true, true, false])
   })
+
+  test('an invoked skill the inventory does not list closes the list as other', () => {
+    expect(markSkills([], [{ name: 'run', path: '' }])).toEqual([{ scope: 'other', plugin: null, name: 'run', path: '', invoked: true }])
+  })
 })

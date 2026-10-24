@@ -1,3 +1,4 @@
+import type { MarkedHook } from '../src/inventory'
 import { expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -437,49 +438,81 @@ test('MEMORY lists every memory that steers the session, and no instruction file
   expect(lines.length).toBe(at + 3)
 })
 
-test('INJECTED collapses each plugin and hook to one row with its count and total, the most characters first', () => {
+test('HOOKS lists every hook by scope, with what each injected', () => {
   const r = base()
-  r.injections = [
-    { hookName: 'SessionStart', chars: 5000, command: 'a', plugin: 'superpowers' },
-    { hookName: 'PreToolUse:Read', chars: 400, command: null, plugin: 'unattributed' },
-    { hookName: 'SessionStart', chars: 3600, command: 'b', plugin: 'superpowers' },
-    { hookName: 'SessionStart', chars: 1200, command: 'c', plugin: 'kanon' },
+  const hook = (over: Partial<MarkedHook>): MarkedHook => ({ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', source: '/s', injected: null, ...over })
+  r.inventory.hooks = [
+    hook({}),
+    hook({ scope: 'project', event: 'PreToolUse', matcher: 'Read', command: '/repo/tools/guard.sh', injected: { count: 2, chars: 8600, index: 3 } }),
+    hook({ scope: 'plugin', plugin: 'superpowers', event: 'SessionStart', command: '"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start', injected: { count: 1, chars: 3400, index: 0 } }),
+    hook({ scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', command: '', injected: { count: 6, chars: 300, index: 9 } }),
   ]
   const lines = render(r).split('\n')
-  const at = lines.indexOf('INJECTED')
-  expect(lines.slice(at, at + 4)).toEqual([
-    'INJECTED',
-    '  superpowers     SessionStart          ×2   8.6k chars',
-    '  kanon           SessionStart          ×1   1.2k chars',
-    '  unattributed    PreToolUse:Read       ×1   0.4k chars',
+  const at = lines.indexOf('HOOKS')
+  expect(lines.slice(at, at + 5)).toEqual([
+    'HOOKS',
+    '  user            Stop                  echo done',
+    '  project         PreToolUse:Read       tools/guard.sh                       ×2   8.6k chars',
+    '  superpowers     SessionStart          "hooks/run-hook.cmd" session-start   ×1   3.4k chars',
+    '  unattributed    UserPromptSubmit                                           ×6   0.3k chars',
   ])
 })
 
-test('SKILLS names each skill invoked, and COMPACTION each compaction with its tokens', () => {
+test('a plugin hook command is written from its plugin root, in either spelling', () => {
   const r = base()
-  r.skills = [{ name: 'superpowers:brainstorming', path: '/x/SKILL.md' }]
+  r.inventory.hooks = [{ scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "$CLAUDE_PLUGIN_ROOT/hooks/scripts/turn.sh"', source: '/s', injected: null }]
+  expect(render(r)).toContain('  p               Stop                  sh "hooks/scripts/turn.sh"')
+})
+
+test('a hook command under the home directory is written from ~', () => {
+  const r = base()
+  r.inventory.hooks = [{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: `bun ${homedir()}/x.mjs`, source: '/s', injected: null }]
+  expect(render(r)).toContain('  user            Stop                  bun ~/x.mjs')
+})
+
+test('SKILLS lists every skill by scope, the invoked ones marked', () => {
+  const r = base()
+  r.inventory.skills = [
+    { scope: 'user', plugin: null, name: 'nl-taal', path: '/h/s/SKILL.md', invoked: false },
+    { scope: 'plugin', plugin: 'superpowers', name: 'superpowers:brainstorming', path: '/p/SKILL.md', invoked: true },
+  ]
+  const lines = render(r).split('\n')
+  const at = lines.indexOf('SKILLS')
+  expect(lines.slice(at, at + 3)).toEqual(['SKILLS', '  user            nl-taal', '  superpowers     superpowers:brainstorming  invoked'])
+})
+
+test('COMPACTION names each compaction with its tokens', () => {
+  const r = base()
   r.compactions = [{ t: '2026-10-24T21:40:12.000Z', trigger: 'auto', preTokens: 968_000, postTokens: 25_000 }]
   const lines = render(r).split('\n')
-  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 2)).toEqual(['SKILLS', '  superpowers:brainstorming'])
   expect(lines.slice(lines.indexOf('COMPACTION'), lines.indexOf('COMPACTION') + 2)).toEqual(['COMPACTION', '  21:40  auto  968k -> 25k tokens'])
+})
+
+test('MEMORY adds each agent memory after the project memory', () => {
+  const r = base()
+  r.steered = [item('/repo/memory/MEMORY.md', 'memory', null)]
+  r.inventory.agentMemory = [{ scope: 'project', agent: 'rev', path: '/repo/.claude/agent-memory/rev/MEMORY.md' }]
+  const lines = render(r).split('\n')
+  const at = lines.indexOf('MEMORY')
+  expect(lines.slice(at, at + 3)).toEqual(['MEMORY', '  memory/MEMORY.md', '  .claude/agent-memory/rev/MEMORY.md  agent rev, project'])
 })
 
 test('each steering section is omitted when it has nothing to say', () => {
   const r = base()
   r.steered = [item('/repo/CLAUDE.md', 'instruction', null)]
   const out = render(r)
-  for (const heading of ['STALE', 'MEMORY', 'INJECTED', 'SKILLS', 'COMPACTION']) expect(out).not.toContain(heading)
+  for (const heading of ['STALE', 'MEMORY', 'HOOKS', 'SKILLS', 'COMPACTION']) expect(out).not.toContain(heading)
 })
 
 test('the steering sections sit after LOADED and before DRIFT, in a fixed order', () => {
   const r = base()
   r.steered = [item('/repo/memory/a.md', 'memory', { level: 'gone', evidence: 'e' })]
-  r.injections = [{ hookName: 'SessionStart', chars: 10, command: null, plugin: 'unattributed' }]
-  r.skills = [{ name: 's', path: '' }]
+  r.inventory.hooks = [{ scope: 'other', plugin: 'unattributed', event: 'SessionStart', matcher: null, command: '', source: '', injected: { count: 1, chars: 10, index: 0 } }]
+  r.inventory.skills = [{ scope: 'other', plugin: null, name: 's', path: '', invoked: true }]
   r.compactions = [{ t: '2026-10-24T21:40:00Z', trigger: 'manual', preTokens: 1000, postTokens: 1000 }]
   r.drift = { appeared: [{ path: '/repo/new.md', origin: 'project', sha256: 'a' }], vanished: [], changed: [] }
   const lines = render(r).split('\n')
-  const order = ['LOADED', 'STALE', 'MEMORY', 'INJECTED', 'SKILLS', 'COMPACTION', 'DRIFT'].map((h) => lines.indexOf(h))
+  const order = ['LOADED', 'STALE', 'MEMORY', 'HOOKS', 'SKILLS', 'COMPACTION', 'DRIFT'].map((h) => lines.indexOf(h))
   expect(order.every((i) => i > -1)).toBe(true)
   expect([...order].sort((a, b) => a - b)).toEqual(order)
 })

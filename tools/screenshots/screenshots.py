@@ -192,6 +192,22 @@ def write(path, text):
     path.write_text(text)
 
 
+def installed(claude, plugins, hooks=None):
+    """Install and enable plugins the way Claude Code records them, with user settings hooks.
+
+    Claude Code runs a plugin only when installed_plugins.json lists it and
+    enabledPlugins sets it to true; the inventory reads both, so a planted
+    plugin cache alone would list no plugin at all.
+    """
+    import json
+    write(claude / "plugins" / "installed_plugins.json", json.dumps({"version": 2, "plugins": {
+        key: [{"scope": "user", "installPath": str(path)}] for key, path in plugins.items()}}))
+    settings = {"enabledPlugins": {key: True for key in plugins}}
+    if hooks:
+        settings["hooks"] = hooks
+    write(claude / "settings.json", json.dumps(settings))
+
+
 def plant(name):
     """A repository and a ~/.claude, built fresh under WORK.
 
@@ -407,6 +423,13 @@ def steering(home, repo, claude):
           json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": other}]}]}}))
     kanon_hooks = (ROOT / "hooks" / "hooks.json").read_text()
     write(claude / "plugins" / "cache" / "aranea" / "kanon" / "1.0.0" / "hooks" / "hooks.json", kanon_hooks)
+    installed(claude, {"example-plugin@example-market": claude / "plugins" / "cache" / "example-market" / "example-plugin" / "1.0.0",
+                       "kanon@aranea": claude / "plugins" / "cache" / "aranea" / "kanon" / "1.0.0"},
+              hooks={"Stop": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/notify.sh"}]}]})
+    write(claude / "plugins" / "cache" / "example-market" / "example-plugin" / "1.0.0" / "skills" / "brainstorming" / "SKILL.md",
+          "---\nname: brainstorming\n---\nAsk before building.\n")
+    write(claude / "skills" / "house-style" / "SKILL.md", "---\nname: house-style\n---\nWrite in the first person.\n")
+    write(repo / ".claude" / "agent-memory" / "reviewer" / "MEMORY.md", "- Check the changelog on every release.\n")
     commands = {}
     for event, groups in json.loads(kanon_hooks)["hooks"].items():
         for group in groups:
