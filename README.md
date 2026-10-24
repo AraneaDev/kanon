@@ -18,6 +18,10 @@
 
 <sub>Origins are coloured by how much they should worry you: FOREIGN is the only one in red, <code>missing</code> and the drift tags are amber, <code>quiet</code> is a fact about the session and stays dim. A real run of the CLI against a planted repository, captured by <code>tools/screenshots/</code>. The drift rows come from a genuine diff against a snapshot the CLI wrote itself, not from a planted one.</sub>
 
+<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, one hook injection, one skill and no compactions" width="880">
+
+<sub>The Kanon pane, opened with <code>/kanon</code>. The pane is drawn by its own layout code from what the real CLI printed for a planted session. The chat beside it is a scripted exchange that shows what the gone flag is for.</sub>
+
 </div>
 
 ---
@@ -289,6 +293,10 @@ the previewed item), `a` (acknowledge a flagged item, the same record `kanon ack
 and `r` (retry). On a terminal wider than 130 columns the detail of the previewed item sits beside the
 list. The pane refreshes when a turn ends.
 
+<p align="center">
+  <img src="assets/pane-detail.svg" alt="The Kanon pane with one memory opened in place: release-flow.md, marked gone. It shows the path, the origin user, the reason not observed, the evidence that it names scripts/release.sh which no longer exists, and the state not acknowledged. The footer offers a: acknowledge and b: back" width="640">
+</p>
+
 The pane runs `kanon model --json` and lays out what comes back, so it never re-implements Kanon.
 Text Kanon did not write, such as a file name or a line from a rule, has its control characters
 stripped before it is drawn.
@@ -474,6 +482,7 @@ The screenshots above are generated, not taken by hand:
 ```bash
 bash tools/screenshots/make.sh          # every shot
 bash tools/screenshots/make.sh report   # just one
+bash tools/screenshots/make.sh pane     # the two pane images
 ```
 
 Each shot plants a repository and a session log, runs the real CLI against it, and paints whatever
@@ -481,6 +490,13 @@ came back through a terminal emulator. Nothing is mocked up or retouched, so a c
 `render.ts` prints changes the images or makes them wrong. No Claude Code session is started and no
 token is spent. Generating the shots makes no network request either, though the first run installs
 pyte and pillow from PyPI to get there.
+
+The pane images are SVG and take a different route, because the pane only runs inside Claude Code
+and no terminal emulator can capture it. The pane shot runs `kanon brief` and `kanon model --json` on
+the planted session, then `tools/screenshots/pane-svg.ts` lays that model out with the pane's own
+`layout()` and writes each row as SVG text. Every row in the pane is one `layout()` returned. The chat
+column in the hero image is the one scripted part: the first line is the real brief, and the exchange
+under it is written for the picture.
 
 ## License
 
