@@ -3,7 +3,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFile
 import { join } from 'node:path'
 import { hashFile, SNAPSHOT_VERSION } from '../src/drift'
 import { sessionRoot } from '../src/origin'
-import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, steeringPath, writeAcks, writeSnapshot, writeSteering, writeWatermark } from '../src/state'
+import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, snapshotPath, steeringPath, writeAcks, writeSnapshot, writeSteering, writeWatermark } from '../src/state'
 import type { Steered } from '../src/steering'
 import { tmp } from './tmp'
 
@@ -1579,4 +1579,44 @@ test('a steering cache that cannot be parsed never stops the report', async () =
   expect(code).toBe(0)
   expect(out).toContain('LOADED')
   expect(out).toContain('STALE')
+})
+
+// --- time bounds: SessionEnd never judges -----------------------------------
+
+/**
+ * SessionEnd shares a short budget with the snapshot write, so `report
+ * --commit-state` reads the brief's cache or leaves STALE out; it never runs
+ * the judgement itself. An interactive report of the same session does.
+ */
+test('report --commit-state with no steering cache does not judge staleness', async () => {
+  const { home, repo, env, transcript } = withGoneMemory('kanon-cli-end-nojudge-')
+  recordStart(home, repo, transcript)
+  const ending = await run(['report', '--session', 's', '--cwd', repo, '--commit-state'], env)
+  expect(ending).toContain('LOADED')
+  expect(ending).not.toContain('which no longer exists')
+  expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
+  // The snapshot is still committed.
+  expect(existsSync(snapshotPath(home, sessionRoot(repo)))).toBe(true)
+  const byHand = await run(['report', '--session', 's', '--cwd', repo], env)
+  expect(byHand).toContain('which no longer exists')
+})
+
+test('report --commit-state still shows STALE from the cache when there is one', async () => {
+  const { home, repo, env, memory, transcript } = withGoneMemory('kanon-cli-end-cache-')
+  recordStart(home, repo, transcript)
+  const real = realpathSync(memory)
+  writeSteering(home, sessionRoot(repo), [{ path: real, kind: 'memory', origin: 'user', digest: hashFile(real), verdict: GONE, acknowledged: false }])
+  const out = await run(['report', '--session', 's', '--cwd', repo, '--commit-state'], env)
+  expect(out).toContain('which no longer exists')
+})
+
+/** A judging budget of zero still writes a cache: the rows are listed, unjudged. */
+test('brief with an exhausted judging budget still speaks and caches unjudged rows', async () => {
+  const { home, repo, env, transcript } = withGoneMemory('kanon-cli-budget-')
+  const out = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], { ...env, KANON_JUDGE_BUDGET_MS: '0' }))
+  expect(out).toContain('KANON  1 instruction file and 1 memory steer this session (predicted)')
+  expect(out).not.toContain('which no longer exists')
+  const cached = readSteering(home, sessionRoot(repo))
+  expect(cached?.length).toBe(2)
+  expect(cached?.every((s) => s.verdict === null)).toBe(true)
 })

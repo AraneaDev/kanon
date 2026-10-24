@@ -38,7 +38,7 @@ export interface Item {
  * one repository, so only paths on disk say anything; managed and foreign
  * files are not the user's to correct.
  */
-export function scopeOf(item: Item): Scope {
+export function scopeOf(item: Pick<Item, 'kind' | 'origin'>): Scope {
   if (item.kind === 'memory') return 'repo'
   switch (item.origin) {
     case 'project':
@@ -109,8 +109,15 @@ function underTrackedDir(text: string, tracked: string[]): boolean {
   return tracked.some((p) => tracks(p, `${parts[0]}/`))
 }
 
-function judgeRepo(item: Item, names: Name[], root: string, home: string, probe: Probe): Verdict | null {
-  // Where each checkable relative path was found, or null when it was not.
+interface Survey {
+  /** Where each checkable relative path was found, or null when it was not. */
+  found: Map<string, string | null>
+  /** Names only a code search can settle. */
+  lookups: string[]
+  checkable: Name[]
+}
+
+function survey(item: Pick<Item, 'path'>, names: Name[], root: string, home: string, probe: Probe): Survey {
   const found = new Map<string, string | null>()
   const lookups: string[] = []
   const checkable: Name[] = []
@@ -135,6 +142,21 @@ function judgeRepo(item: Item, names: Name[], root: string, home: string, probe:
     }
     checkable.push(n)
   }
+  return { found, lookups, checkable }
+}
+
+/** The names judge() would hand to occursInCode for this item, so a caller can batch them. */
+export function codeLookups(item: Omit<Item, 'written'>, root: string, home: string, probe: Probe): string[] {
+  if (scopeOf(item) !== 'repo') return []
+  try {
+    return [...new Set(survey(item, namesOf(item.text, root, home), root, home, probe).lookups)]
+  } catch {
+    return []
+  }
+}
+
+function judgeRepo(item: Item, names: Name[], root: string, home: string, probe: Probe): Verdict | null {
+  const { found, lookups, checkable } = survey(item, names, root, home, probe)
 
   const unique = [...new Set(lookups)]
   const inCode = unique.length ? probe.occursInCode(unique) : new Set<string>()
@@ -256,6 +278,11 @@ function isWellKnown(text: string, root: string, home: string): boolean {
   return isShorthand(text) || WELL_KNOWN_LOCATIONS.some((w) => locate(w, root, home) === at)
 }
 
+/** The names in an item's text that are claims, leaving out Claude Code's own locations. */
+function namesOf(text: string, root: string, home: string): Name[] {
+  return extractNames(text).filter((n) => !(n.kind === 'path' && isWellKnown(n.text, root, home)))
+}
+
 /**
  * Judge one item from the names it mentions. `gone` means a named path is
  * absent where it should be; `may-be-stale` means a named function, flag or
@@ -265,7 +292,7 @@ function isWellKnown(text: string, root: string, home: string): boolean {
 export function judge(item: Item, root: string, home: string, probe: Probe): Verdict | null {
   const scope = scopeOf(item)
   if (scope === 'none') return null
-  const names = extractNames(item.text).filter((n) => !(n.kind === 'path' && isWellKnown(n.text, root, home)))
+  const names = namesOf(item.text, root, home)
   if (!names.length) return null
   // A probe that throws (git missing, an unreadable file, a malformed
   // package.json) is a tooling failure, not evidence. Reporting `gone` on it

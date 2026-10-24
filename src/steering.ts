@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { hashFile } from './drift'
 import { extractNames } from './names'
 import { realPath } from './paths'
-import { judge, nameCandidates, type Probe, type Verdict } from './stale'
+import { codeLookups, judge, nameCandidates, type Probe, type Verdict } from './stale'
 import type { TranscriptFacts } from './transcript'
 import type { Classified, Origin } from './types'
 
@@ -31,6 +31,15 @@ export interface SteeringInput {
   written: (path: string, kind: Steered['kind']) => Date
   read: (path: string) => string | null
   acks: Ack[]
+  /**
+   * Epoch ms after which no item is judged: those not reached keep a null
+   * verdict but are still listed. Absent means no limit. The SessionStart
+   * hook is killed at 5 s, and a killed hook prints no brief, so the CLI
+   * always passes one.
+   */
+  deadline?: number
+  /** The clock the deadline is read against; tests substitute their own. */
+  now?: () => number
 }
 
 /**
@@ -138,25 +147,64 @@ export function steer(input: SteeringInput): Steered[] {
   for (const l of input.facts.instructions) if (l.type === AUTO_MEMORY) add(l.path, 'memory', 'user')
   for (const m of memories) add(m, 'memory', 'user')
 
-  return entries.map((e) => row(e, input))
+  const now = input.now ?? Date.now
+  const deadline = input.deadline ?? Number.POSITIVE_INFINITY
+  const texts = entries.map((e) => readText(e, input))
+
+  // Every item's code lookups go to git as one grep. One grep per item was
+  // 8-10 s on a large repository, twice the hook's timeout.
+  const union = new Set<string>()
+  entries.forEach((e, i) => {
+    const text = texts[i]
+    if (text === null || now() >= deadline) return
+    for (const n of codeLookups({ ...e, text }, input.root, input.home, input.probe)) union.add(n)
+  })
+  const probe = union.size && now() < deadline ? batched(input.probe, [...union]) : input.probe
+
+  return entries.map((e, i) => row(e, texts[i]!, { ...input, probe }, now() < deadline))
 }
 
-function row(e: Entry, input: SteeringInput): Steered {
-  const out: Steered = { ...e, digest: null, verdict: null, acknowledged: false }
-  let text: string | null
+/**
+ * A probe whose occursInCode answers from one lookup made up front. A name
+ * outside that lookup was never searched, and unknown reads as found.
+ */
+function batched(probe: Probe, names: string[]): Probe {
+  let inCode: Set<string>
   try {
-    text = input.read(e.path)
-    if (text === null) return out
+    inCode = probe.occursInCode(names)
+  } catch {
+    inCode = new Set(names)
+  }
+  const asked = new Set(names)
+  return { ...probe, occursInCode: (ns) => new Set(ns.filter((n) => inCode.has(n) || !asked.has(n))) }
+}
+
+/** An item's text, or null when it cannot be read. Never throws. */
+function readText(e: Entry, input: SteeringInput): string | null {
+  try {
+    return input.read(e.path)
+  } catch {
+    return null
+  }
+}
+
+function row(e: Entry, text: string | null, input: SteeringInput, inTime: boolean): Steered {
+  const out: Steered = { ...e, digest: null, verdict: null, acknowledged: false }
+  if (text === null) return out
+  try {
     out.digest = hashFile(e.path)
   } catch {
     return out
   }
   // Each in its own guard, verdict first: a bad ack or a failing `written`
   // must never cost the other, and a lost verdict is the costlier loss.
-  try {
-    out.verdict = judge({ ...e, written: input.written(e.path, e.kind), text }, input.root, input.home, input.probe)
-  } catch {
-    // No verdict is the honest answer to a tooling failure.
+  // Past the deadline the verdict stays null: unjudged, not cleared.
+  if (inTime) {
+    try {
+      out.verdict = judge({ ...e, written: input.written(e.path, e.kind), text }, input.root, input.home, input.probe)
+    } catch {
+      // No verdict is the honest answer to a tooling failure.
+    }
   }
   try {
     out.acknowledged = isAcknowledged(out, input.acks, namedDigests(text, e.path, input.root, input.home))

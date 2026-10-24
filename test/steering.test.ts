@@ -230,3 +230,38 @@ describe('namedDigests', () => {
     })
   })
 })
+
+describe('steer time bound and batching', () => {
+  /** Past the deadline nothing more is judged, but every item is still listed, so the cache still has rows. */
+  test('a deadline already passed leaves every verdict null and still returns the model', () => {
+    const { root, memoryDir, input } = setup()
+    const items = steer(input({ deadline: 0 }))
+    expect(items.map((i) => i.path)).toEqual([
+      join(root, 'CLAUDE.md'),
+      join(memoryDir, 'MEMORY.md'),
+      join(memoryDir, 'a-first.md'),
+      join(memoryDir, 'notes.md'),
+    ])
+    expect(items.every((i) => i.verdict === null)).toBe(true)
+    expect(items[0].digest).toBe(hashFile(join(root, 'CLAUDE.md')))
+  })
+
+  /** One grep per session start, however many items name things, is what keeps the hook inside its timeout. */
+  test('every item\'s code lookups go to the probe in one occursInCode call', () => {
+    const { memoryDir, input } = setup()
+    writeFileSync(join(memoryDir, 'b.md'), 'Call `alphaFn` first.\n')
+    writeFileSync(join(memoryDir, 'c.md'), 'Then `betaFn`, and pass `--gamma`.\n')
+    const calls: string[][] = []
+    const probe: Probe = {
+      ...diskProbe,
+      occursInCode: (names) => {
+        calls.push([...names].sort())
+        return new Set(names.filter((n) => n !== 'betaFn'))
+      },
+    }
+    const items = steer(input({ probe }))
+    expect(calls).toEqual([['--gamma', 'alphaFn', 'betaFn']])
+    expect(items.find((i) => i.path.endsWith('b.md'))?.verdict).toBeNull()
+    expect(items.find((i) => i.path.endsWith('c.md'))?.verdict).toEqual({ level: 'may-be-stale', evidence: 'names `betaFn`, which no longer occurs in the code' })
+  })
+})

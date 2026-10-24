@@ -174,7 +174,7 @@ function latestSessionFor(cwd: string): string | undefined {
  * `report` prints; `brief`, `whose` and `alarm` read loads alone and do not
  * pay for a plugin-cache walk or a staleness judgement they would discard.
  */
-function collect(session: string, cwd: string, withSteering = false): Report {
+function collect(session: string, cwd: string, withSteering = false, mayJudge = true): Report {
   const file = sessionFile(session)
   const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : []
   // Only this run's lines: a resumed session reuses its id, so the file can
@@ -188,7 +188,7 @@ function collect(session: string, cwd: string, withSteering = false): Report {
   // One run-scoped read of the transcript serves every section built from it.
   const facts = transcriptFacts(events)
   const report = buildReport(events, candidates, root, home, importedBy, skipped, previous?.files ?? null, facts.instructions)
-  return withSteering ? { ...report, ...steeredBy(report, events, facts, home) } : report
+  return withSteering ? { ...report, ...steeredBy(report, events, facts, home, mayJudge) } : report
 }
 
 /**
@@ -199,11 +199,16 @@ function collect(session: string, cwd: string, withSteering = false): Report {
  * is one, since that holds the user's acks as `kanon ack` last left them;
  * otherwise it is judged here exactly as the brief judges it, and not
  * cached, because writing the hot path's state is the brief's job.
+ *
+ * Except at SessionEnd (`mayJudge` false): its budget is shared with the
+ * report write and the snapshot commit, and a judgement that overran it got
+ * the hook killed before either was written. With no cache there, STALE is
+ * left out rather than computed.
  */
-function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home: string): Pick<Report, 'steered' | 'injections' | 'skills' | 'compactions'> {
+function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home: string, mayJudge: boolean): Pick<Report, 'steered' | 'injections' | 'skills' | 'compactions'> {
   let steered: Steered[] = []
   try {
-    steered = readSteering(kanonHome(), report.root) ?? judgeSteering(report.root, report.loaded, events, facts) ?? []
+    steered = readSteering(kanonHome(), report.root) ?? (mayJudge ? judgeSteering(report.root, report.loaded, events, facts) : null) ?? []
   } catch {
     // No stale flags is the honest answer to a failure to judge.
   }
@@ -356,10 +361,10 @@ function runEvents(session: string | undefined): Event[] {
  * never in this repository's history, so it costs no git spawn. A stat that
  * fails throws, and steer() turns that into no verdict.
  */
-function writtenAt(root: string, path: string, kind: Steered['kind']): Date {
+function writtenAt(root: string, path: string, kind: Steered['kind'], deadline?: number): Date {
   const rel = relative(root, path)
   const inRoot = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
-  const commit = kind === 'instruction' && inRoot ? lastCommit(root, path) : null
+  const commit = kind === 'instruction' && inRoot ? lastCommit(root, path, deadline) : null
   return commit ?? statSync(path).mtime
 }
 
@@ -393,12 +398,28 @@ function steering(root: string, files: Classified[], events: Event[]): Steered[]
 }
 
 /**
+ * How long judging may run, from its start: about 3 s of SessionStart's 5,
+ * leaving the rest for Bun's start, discovery and the cache write. Items not
+ * reached by then are listed unjudged. KANON_JUDGE_BUDGET_MS overrides it so
+ * a test can exhaust it; it is not a user setting.
+ */
+const JUDGE_BUDGET_MS = 3000
+function judgeBudget(): number {
+  const v = Number(process.env.KANON_JUDGE_BUDGET_MS)
+  const set = process.env.KANON_JUDGE_BUDGET_MS !== undefined && process.env.KANON_JUDGE_BUDGET_MS !== ''
+  return set && Number.isFinite(v) && v >= 0 ? v : JUDGE_BUDGET_MS
+}
+
+/**
  * The steering model for a root, judged now and not cached, or null when
  * judging failed. Shared by the brief and the report so the two judge with
  * the same probe, the same home and the same memory directory.
  */
 function judgeSteering(root: string, files: Classified[], events: Event[], facts: TranscriptFacts): Steered[] | null {
   const transcript = arg('transcript') || transcriptOf(events)
+  // One deadline bounds the judging and every git call inside it, so
+  // discovery, judging and the cache write stay inside SessionStart's 5 s.
+  const deadline = Date.now() + judgeBudget()
   try {
     return steer({
       root,
@@ -408,10 +429,11 @@ function judgeSteering(root: string, files: Classified[], events: Event[], facts
       instructions: files,
       memoryDir: transcript ? join(dirname(transcript), 'memory') : null,
       facts,
-      probe: gitProbe(root),
-      written: (path, kind) => writtenAt(root, path, kind),
+      probe: gitProbe(root, { deadline }),
+      written: (path, kind) => writtenAt(root, path, kind, deadline),
       read: readBounded,
       acks: readAcks(kanonHome(), root),
+      deadline,
     })
   } catch {
     return null
@@ -522,7 +544,8 @@ function runReport(session: string | undefined, cwd: string): void {
     console.log(`kanon: no recorded session found for ${cwd}`)
     return
   }
-  const report = collect(session, cwd, true)
+  // SessionEnd passes --commit-state, and SessionEnd never judges.
+  const report = collect(session, cwd, true, !flag('commit-state'))
   // Two renderings of one report, and the plain one is the record. Colour
   // is a property of the terminal it is being printed to, never of the
   // report itself, so the file on disk -- read back later, by anything --

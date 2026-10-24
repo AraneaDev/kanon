@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gitProbe, lastCommit } from '../src/probe'
+import { judge } from '../src/stale'
 import { tmp } from './tmp'
 
 function git(root: string, args: string[], date?: string): void {
@@ -213,5 +214,66 @@ describe('gitProbe.ignored', () => {
   /** Not knowing is never evidence: outside a repository every name reads as ignored, so none is gone. */
   test('reads every name as ignored outside a repository', () => {
     expect(gitProbe(tmp('kanon-nogit-')).ignored(['build/'])).toEqual(new Set(['build/']))
+  })
+})
+
+/**
+ * A git that hangs on `grep` and is real for everything else, so one slow
+ * spawn can be timed out without slowing the rest of the probe.
+ */
+function slowGrepGit(): string {
+  const bin = tmp('kanon-slowgit-')
+  const path = join(bin, 'git')
+  writeFileSync(path, '#!/bin/sh\ncase " $* " in *" grep "*) sleep 5 ;; esac\nexec git "$@"\n')
+  chmodSync(path, 0o755)
+  return path
+}
+
+describe('gitProbe.occursInCode literal matching', () => {
+  /** The names go to git as one escaped alternation; every regex character in them must stay literal. */
+  test('regex metacharacters in names match only themselves', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'axb\nfoo(x|y)\nback\\slash\n' }, '2026-01-01T00:00:00Z')
+    const got = gitProbe(root).occursInCode(['a.b', 'foo(x|y)', 'x|q', 'back\\slash', '[ab]', 'a+', '^foo', 'y)$'])
+    expect(got).toEqual(new Set(['foo(x|y)', 'back\\slash']))
+  })
+
+  test('more names than one alternation holds are all answered', () => {
+    const root = repo()
+    const names = Array.from({ length: 600 }, (_, i) => `name${i}x`)
+    commit(root, { 'a.ts': names.filter((_, i) => i % 2 === 0).join('\n') + '\n' }, '2026-01-01T00:00:00Z')
+    expect(gitProbe(root).occursInCode(names)).toEqual(new Set(names.filter((_, i) => i % 2 === 0)))
+  })
+})
+
+describe('gitProbe time bounds', () => {
+  /** A timed-out grep is a tooling failure, and unknown must read as found, never as gone. */
+  test('a grep that exceeds its timeout reads every name as found, quickly', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'export const x = 1\n' }, '2026-01-01T00:00:00Z')
+    const started = Date.now()
+    const got = gitProbe(root, { git: slowGrepGit(), timeouts: { grep: 100, other: 1000 } }).occursInCode(['ghostThing'])
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(got).toEqual(new Set(['ghostThing']))
+  })
+
+  test('a judged item whose grep times out is not gone', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'export const x = 1\n' }, '2026-01-01T00:00:00Z')
+    const probe = gitProbe(root, { git: slowGrepGit(), timeouts: { grep: 100, other: 1000 } })
+    const item = { path: join(root, 'CLAUDE.md'), origin: 'project' as const, kind: 'instruction' as const, written: new Date('2026-01-01'), text: 'See `ghost.ts`.\n' }
+    expect(judge(item, root, '/home/user', probe)).toBeNull()
+  })
+
+  /** Past the deadline nothing is spawned, and every answer is the unknown one. */
+  test('past its deadline the probe answers unknown without spawning git', () => {
+    const root = repo()
+    commit(root, { 'a.ts': 'export const x = 1\n' }, '2026-01-01T00:00:00Z')
+    const probe = gitProbe(root, { deadline: 0 })
+    expect(probe.trackedPaths()).toBeNull()
+    expect(probe.occursInCode(['absent'])).toEqual(new Set(['absent']))
+    expect(probe.ignored(['build/'])).toEqual(new Set(['build/']))
+    expect(probe.changedSince(['a.ts'], new Date('2025-01-01'))).toEqual([])
+    expect(lastCommit(root, 'a.ts', 0)).toBeNull()
   })
 })
