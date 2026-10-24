@@ -1522,8 +1522,8 @@ test('report names the plugin behind each hook injection, from the installed plu
   const out = (await run(['report', '--session', 's', '--cwd', repo], env)).split('\n')
   const at = out.indexOf('INJECTED')
   expect(at).toBeGreaterThan(-1)
-  expect(out[at + 1]).toBe(`  example-plugin  SessionStart          ${(chars / 1000).toFixed(1)}k chars`)
-  expect(out[at + 2]).toBe('  unattributed    UserPromptSubmit      0.4k chars')
+  expect(out[at + 1]).toBe(`  example-plugin  SessionStart          ×1   ${(chars / 1000).toFixed(1)}k chars`)
+  expect(out[at + 2]).toBe('  unattributed    UserPromptSubmit      ×1   0.4k chars')
 })
 
 test('report lists this run\'s skills once each, and its compactions', async () => {

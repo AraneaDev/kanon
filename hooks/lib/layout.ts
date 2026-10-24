@@ -244,6 +244,7 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
   })
 
   const pw = Math.min(NAME_MAX, Math.max(0, ...model.injected.map(i => cells(i.plugin))))
+  const cw = Math.max(0, ...model.injected.map(i => cells(times(i.count))))
   const hw = Math.min(NAME_MAX, Math.max(0, ...model.injected.map(i => cells(i.hookName))))
   const tw = Math.min(NAME_MAX, Math.max(0, ...model.compactions.map(c => cells(c.trigger))))
   return [
@@ -251,7 +252,7 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
     itemGroup('memory', 'Memory', model.memory, false),
     plainGroup('injected', 'Injected by hooks', model.injected, (inj, width) => {
       const names: Segment[] = [{ text: padEnd(fit(inj.plugin, pw), pw + 2) }, { text: padEnd(fit(inj.hookName, hw), hw + 2), dim: true }]
-      const detail: Segment[] = [{ text: kilo(inj.chars), color: HEADING }, { text: ' chars', dim: true }]
+      const detail: Segment[] = [{ text: padEnd(times(inj.count), cw + 2), dim: true }, { text: kilo(inj.chars), color: HEADING }, { text: ' chars', dim: true }]
       // Narrow gives up the kind detail before the names: they are the row.
       return tier === 'narrow' && segmentsWidth(names) + segmentsWidth(detail) + 2 > width ? names : [...names, ...detail]
     }),
@@ -269,6 +270,9 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
     }),
   ]
 }
+
+/** How many injections a collapsed row stands for: `×88`. */
+const times = (n: number): string => `×${grouped(n)}`
 
 /** `42` below a thousand, `9.1k` from there: in thousands, under 50 would read `0.0k`. */
 const kilo = (n: number): string => (n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`)

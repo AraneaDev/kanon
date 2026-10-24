@@ -34,7 +34,7 @@ const small: PaneModel = {
     item({ path: 'node_modules/pkg/CLAUDE.md', real: '/home/user/app/node_modules/pkg/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal' }),
   ],
   memory: [gone],
-  injected: [{ plugin: 'example', hookName: 'SessionStart', chars: 9100 }],
+  injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars: 9100, index: 0 }],
   skills: [],
   compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 160000, postTokens: 40000 }],
 }
@@ -62,7 +62,7 @@ describe('the list', () => {
       ' ',
       `── ◇ Injected by hooks · 1 ${dash(71)}──`,
       blank(100),
-      '    example  SessionStart  9.1k chars'.padEnd(100),
+      '    example  SessionStart  ×1  9.1k chars'.padEnd(100),
       ' ',
       `── ◇ Skills ${dash(83)} 0 ──`,
       ' ',
@@ -82,9 +82,20 @@ describe('the list', () => {
       [1000, '1.0k chars'],
       [9100, '9.1k chars'],
     ] as const) {
-      const rows = run({ model: { ...small, injected: [{ plugin: 'example', hookName: 'SessionStart', chars }] } })
-      expect(rows.map(text)).toContain(`    example  SessionStart  ${shown}`.padEnd(100))
+      const rows = run({ model: { ...small, injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars, index: 0 }] } })
+      expect(rows.map(text)).toContain(`    example  SessionStart  ×1  ${shown}`.padEnd(100))
     }
+  })
+
+  it('draws a collapsed injection as one row with its count, the count column as wide as the widest', () => {
+    const injected = [
+      { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 88, chars: 3520, index: 97 },
+      { plugin: 'example', hookName: 'SessionStart', count: 1, chars: 900, index: 0 },
+    ]
+    const rows = run({ model: { ...small, injected } }).map(text)
+    expect(rows).toContain(`── ◇ Injected by hooks · 2 ${dash(71)}──`)
+    expect(rows).toContain('    unattributed  UserPromptSubmit  ×88  3.5k chars'.padEnd(100))
+    expect(rows).toContain('    example       SessionStart      ×1   900 chars'.padEnd(100))
   })
 
   it('makes each file name a button that opens it, with no marker and no o outside the wide tier', () => {
@@ -243,7 +254,7 @@ function big(n: number): PaneModel {
     ...small,
     instructions,
     memory,
-    injected: Array.from({ length: Math.min(n, 10) }, (_, i) => ({ plugin: `plugin-${i}`, hookName: 'SessionStart', chars: 1000 * i })),
+    injected: Array.from({ length: Math.min(n, 10) }, (_, i) => ({ plugin: `plugin-${i}`, hookName: 'SessionStart', count: 1, chars: 1000 * i, index: i })),
     skills: Array.from({ length: Math.min(n, 5) }, (_, i) => `example:skill-${i}`),
     compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 1000, postTokens: 100 }],
   }
@@ -324,7 +335,7 @@ describe('text Kanon did not write', () => {
         verdict: { level: 'gone', evidence: 'names \x1b[31mscripts/x.sh\r, which \x07is gone' },
       }),
     ],
-    injected: [{ plugin: 'ex\x1bample', hookName: 'Session\rStart', chars: 10 }],
+    injected: [{ plugin: 'ex\x1bample', hookName: 'Session\rStart', count: 1, chars: 10, index: 0 }],
     skills: ['sk\x1b[0mill'],
     compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'au\rto', preTokens: 1, postTokens: 1 }],
   }

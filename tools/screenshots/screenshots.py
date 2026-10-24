@@ -429,7 +429,8 @@ def steering(home, repo, claude):
     records = (
         injected("2026-08-27T09:14:03.000Z", "SessionStart", other, "You have example-plugin. " * 344)
         + injected("2026-08-27T09:14:03.000Z", "SessionStart", kanon_start, "KANON  6 instruction files and 4 memories steer this session. " * 5)
-        + injected("2026-08-27T09:20:00.000Z", "UserPromptSubmit", None, "Remember the house style. " * 12)
+        # One short reminder on every prompt: six injections that collapse into one row.
+        + [r for m in range(6) for r in injected(f"2026-08-27T09:2{m}:00.000Z", "UserPromptSubmit", None, "Remember the house style. " * 2)]
         + injected("2026-08-27T09:31:00.000Z", "PreToolUse:Read", kanon_read, "KANON  a memory names a file that no longer exists. " * 4)
         + [
             {"type": "attachment", "timestamp": "2026-08-27T09:40:00.000Z",
@@ -479,7 +480,8 @@ def pane_session(home, repo, claude):
 
     Smaller than steering() on purpose. The pane shot is about one finding,
     a memory that names a script which no longer exists, so the transcript
-    holds one hook injection and one skill and nothing else, and the memory
+    holds one SessionStart injection, one short reminder a prompt hook
+    injected twelve times (collapsed to one row), and one skill, and the memory
     directory holds the gone memory, one that may be stale, and the index.
     Every value is invented; the record shapes follow test/fixtures/transcript/.
     """
@@ -505,6 +507,12 @@ def pane_session(home, repo, claude):
         {"type": "attachment", "timestamp": "2026-08-27T09:40:00.000Z",
          "attachment": {"type": "invoked_skills", "skills": [
              {"name": "example-plugin:brainstorming", "path": "/home/you/.claude/skills/brainstorming/SKILL.md"}]}},
+    ] + [
+        # A reminder injected on every prompt: twelve of them collapse into one row.
+        {"type": "attachment", "timestamp": f"2026-08-27T09:{20 + m}:00.000Z",
+         "attachment": {"type": "hook_additional_context", "hookName": "UserPromptSubmit",
+                        "content": ["Remember the house style. " * 2]}}
+        for m in range(12)
     ]
     write(transcript, "".join(json.dumps(r) + "\n" for r in records))
 

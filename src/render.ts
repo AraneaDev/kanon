@@ -1,5 +1,6 @@
 import { PLAIN, stripControl, type Paint } from './colour'
 import { driftIsEmpty, type FileDigest } from './drift'
+import { groupInjections } from './model'
 import { short } from './paths'
 import type { Steered } from './steering'
 import type { Classified, Report, Skipped } from './types'
@@ -14,6 +15,8 @@ const PATH_WIDTH = 37
 // than a tag and far narrower than a path.
 const PLUGIN_WIDTH = 16
 const HOOK_WIDTH = 22
+// `×88` and two spaces; a count of five digits still keeps one.
+const COUNT_WIDTH = 5
 
 /**
  * Pad a value to a fixed column width, but never let it fuse into the next
@@ -84,21 +87,16 @@ function staleLine(s: Steered, root: string, paint: Paint): string {
 }
 
 /**
- * INJECTED rows: one per plugin and hook, characters summed, in order of
- * first sighting. Kanon's own injection is listed like anyone else's. A
- * plugin name is a directory name in the plugin cache and a hook name is the
- * transcript's word, neither written by Kanon, so both are stripped too.
+ * INJECTED rows: one per plugin and hook, with how many injections it made
+ * and their characters together, the most characters first (groupInjections,
+ * shared with the pane). Kanon's own injection is listed like anyone else's.
+ * A plugin name is a directory name in the plugin cache and a hook name is
+ * the transcript's word, neither written by Kanon, so both are stripped too.
  */
 function injectedLines(report: Report, paint: Paint): string[] {
-  const totals = new Map<string, { plugin: string; hookName: string; chars: number }>()
-  for (const i of report.injections) {
-    const key = JSON.stringify([i.plugin, i.hookName])
-    const row = totals.get(key) ?? { plugin: i.plugin, hookName: i.hookName, chars: 0 }
-    row.chars += i.chars
-    totals.set(key, row)
-  }
-  return [...totals.values()].map(
-    (r) => `  ${pad(stripControl(r.plugin), PLUGIN_WIDTH)}${pad(stripControl(r.hookName), HOOK_WIDTH)}${paint.note(`${(r.chars / 1000).toFixed(1)}k chars`)}`,
+  return groupInjections(report.injections).map(
+    (r) =>
+      `  ${pad(stripControl(r.plugin), PLUGIN_WIDTH)}${pad(stripControl(r.hookName), HOOK_WIDTH)}${pad(`×${r.count}`, COUNT_WIDTH)}${paint.note(`${(r.chars / 1000).toFixed(1)}k chars`)}`,
   )
 }
 

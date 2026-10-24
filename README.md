@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-760%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-762%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -234,10 +234,10 @@ MEMORY
   ~/.claude/projects/-home-you-project/memory/release-flow.md
 
 INJECTED
-  example-plugin  SessionStart          8.6k chars
-  kanon           SessionStart          0.3k chars
-  unattributed    UserPromptSubmit      0.3k chars
-  kanon           PreToolUse:Read       0.2k chars
+  example-plugin  SessionStart          ×1   8.6k chars
+  unattributed    UserPromptSubmit      ×6   0.3k chars
+  kanon           SessionStart          ×1   0.3k chars
+  kanon           PreToolUse:Read       ×1   0.2k chars
 
 SKILLS
   example-plugin:brainstorming
@@ -271,7 +271,8 @@ longer exists, `may-be-stale` (printed as `may-stale` to fit the column) when a 
 script it names occurs nowhere any more or a file it names has commits since it was written (names
 come from inline code spans, `@imports` and bare path-shaped words, never from fenced code blocks),
 and `ok` once you have acknowledged it with `kanon ack`. `MEMORY` lists the project's memories.
-`INJECTED` totals the text each hook added to the context, per plugin and hook event, attributed
+`INJECTED` collapses the text hooks added to the context into one row per plugin and hook event,
+with how many times it happened and the characters in total, the largest first, attributed
 through the installed plugins' `hooks.json`;
 Kanon's own injections are listed like any other. `SKILLS` and `COMPACTION` name the skills invoked
 and each compaction, with its token counts before and after.
