@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.26](https://github.com/AraneaDev/kanon/compare/v0.0.25...v0.0.26) (2026-10-24)
+
+
+### Fixes
+
+* let a long card scroll, opened from its n more row ([#66](https://github.com/AraneaDev/kanon/issues/66)) ([2f00e2b](https://github.com/AraneaDev/kanon/commit/2f00e2bcdf383393474fb9635c4731c5ee4fb935))
+
 ## [0.0.25](https://github.com/AraneaDev/kanon/compare/v0.0.24...v0.0.25) (2026-10-24)
 
 
