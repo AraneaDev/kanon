@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.23](https://github.com/AraneaDev/kanon/compare/v0.0.22...v0.0.23) (2026-10-24)
+
+
+### Fixes
+
+* make the pane's keys work and read right ([#57](https://github.com/AraneaDev/kanon/issues/57)) ([0b80c90](https://github.com/AraneaDev/kanon/commit/0b80c90336d08f5146dbbd603776efcf5719e1fc))
+
 ## [0.0.22](https://github.com/AraneaDev/kanon/compare/v0.0.21...v0.0.22) (2026-10-24)
 
 
