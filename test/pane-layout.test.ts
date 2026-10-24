@@ -72,7 +72,7 @@ describe('the list', () => {
     ])
     expect(rows.slice(19, 39).every(r => text(r) === ' ')).toBe(true)
     expect(rows).toHaveLength(40)
-    expect(text(rows[39]!)).toBe(`${blank(91)}observed `)
+    expect(text(rows[39]!)).toBe(` tab: move  enter: open${blank(68)}observed `)
   })
 
   it('counts an injection under 1,000 characters as itself, and from 1,000 in thousands with one decimal', () => {
@@ -142,6 +142,18 @@ describe('the list', () => {
     const line = rows.map(text).find(t => t.includes('CLAUDE.md'))!
     expect(line).toContain('…/')
     expect(line.trimEnd().endsWith('CLAUDE.md')).toBe(true)
+  })
+
+  it('says in the list footer which keys work, at every tier: tab and enter, then o and a in the wide tier', () => {
+    expect(text(run({ columns: 60 }).at(-1)!)).toBe(` tab: move  enter: open${blank(28)}observed `)
+    expect(text(run({ columns: 100 }).at(-1)!)).toStartWith(' tab: move  enter: open ')
+    const wide = run({ columns: 140, model: { ...small, instructions: [small.instructions[0]!] } }).at(-1)!
+    expect(text(wide)).toStartWith(' tab: move  enter: open  o: open  a: acknowledge ')
+    // tab and enter are the engine's keys, drawn as text in a key's colours; o and a are the pane's buttons.
+    expect(wide.segments.filter(s => s.press !== undefined).map(s => s.hotkey)).toEqual(['o', 'a'])
+    expect(wide.segments.find(s => s.text === 'tab')?.color).toBe('suggestion')
+    // A list with nothing to open names no key for opening it.
+    expect(text(run({ model: { ...small, instructions: [], memory: [] } }).at(-1)!)).not.toContain('enter')
   })
 
   it('puts feedback in the footer and keeps its keys', () => {

@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-766%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-767%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -82,7 +82,8 @@ Compaction. Four glyphs carry the findings:
 | `!` | foreign |
 | `✓` | acknowledged |
 
-Each file name is a button that opens its detail in place. The keys are `o` (on a wide terminal, open
+Each file name is a button that opens its detail in place: `tab` moves between them and `enter`
+opens the one you are on, and the footer always lists the keys that work. The others are `o` (on a wide terminal, open
 the previewed item), `a` (acknowledge a flagged item, the same record `kanon ack` writes), `b` (back)
 and `r` (retry). On a terminal wider than 130 columns the detail of the previewed item sits beside the
 list. The pane refreshes when a turn ends.

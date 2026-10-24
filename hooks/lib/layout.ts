@@ -135,12 +135,13 @@ function readyRows(model: PaneModel, view: View, width: number, height: number, 
   // Only there is there a marker, an `o` that opens the previewed item, and an `a` for it;
   // narrower, each file name is its own open button.
   const previewed = tier === 'wide' ? (opened ?? items.find(flagged) ?? null) : null
-  const keys =
+  const keys: Segment[][] =
     opened !== null
-      ? detailKeys(opened)
-      : previewed !== null
-        ? [button({ kind: 'open', real: previewed.real }, 'open', 'o'), ...ackKey(previewed)]
-        : []
+      ? detailKeys(opened).map(k => [k])
+      : [
+          ...(items.length > 0 ? LIST_KEYS : []),
+          ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
+        ]
   const footer = footerRow(keys, model.basis, feedback, width)
   if (height === 1) return [footer]
 
@@ -167,8 +168,8 @@ function readyRows(model: PaneModel, view: View, width: number, height: number, 
  * replaces the basis rather than the keys, so a key stays pressable through
  * its two seconds; when both do not fit, the feedback wins.
  */
-function footerRow(keys: Segment[], basis: string, feedback: string | null, width: number): Row {
-  const left: Segment[] = [{ text: ' ' }, ...keys.flatMap((k, i) => (i === 0 ? [k] : [{ text: '  ' }, k]))]
+function footerRow(keys: Segment[][], basis: string, feedback: string | null, width: number): Row {
+  const left: Segment[] = [{ text: ' ' }, ...keys.flatMap((k, i) => (i === 0 ? k : [{ text: '  ' }, ...k]))]
   if (feedback !== null) {
     const right: Segment[] = [{ text: `${feedback} `, color: HEADING }]
     if (width - segmentsWidth(left) - segmentsWidth(right) >= 1) return spread('footer', left, right, width)
@@ -176,6 +177,21 @@ function footerRow(keys: Segment[], basis: string, feedback: string | null, widt
   }
   return spread('footer', left, [{ text: `${basis} `, dim: true }], width)
 }
+
+/**
+ * A key the engine handles rather than a Button of the pane's, drawn the way
+ * a plain Button draws its hotkey (the key in the accent, then its label) so
+ * the footer reads as one set of keys. Text, not a Button: pressing the words
+ * would do nothing.
+ */
+const engineKey = (key: string, label: string): Segment[] => [{ text: key, color: ACCENT }, { text: `: ${label}` }]
+
+/**
+ * The list's own keys. Tab walks the focus over the file names and Enter
+ * presses the one it is on; nothing in the pane said so, and a footer that
+ * read only `observed` left the person guessing what could be pressed.
+ */
+const LIST_KEYS: Segment[][] = [engineKey('tab', 'move'), engineKey('enter', 'open')]
 
 /** `a: acknowledge`, for an item with a verdict not yet acknowledged; else nothing. */
 const ackKey = (item: PaneItem): Segment[] => (item.verdict !== null && !item.acknowledged ? [button({ kind: 'ack', real: item.real }, 'acknowledge', 'a')] : [])
