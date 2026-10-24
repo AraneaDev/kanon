@@ -1,3 +1,4 @@
+import { EMPTY_INVENTORIED } from './inventory'
 import { existsSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 
@@ -210,7 +211,7 @@ export function buildReport(
 
   // What else steered the session is filled in by cli.ts, which holds the
   // transcript and the steering cache; this function stays about loads.
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift, autoMemory, steered: [], injections: [], skills: [], compactions: [] }
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift, autoMemory, steered: [], injections: [], skills: [], compactions: [], inventory: EMPTY_INVENTORIED }
 }
 
 /** Claude Code's own word for a MEMORY.md load. */

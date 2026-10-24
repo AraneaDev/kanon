@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { contentPage, contentScroll, injectionKey, layout, rowWidth, textTarget, type LayoutInput, type Row, type Status, type View } from '../hooks/lib/layout'
-import type { PaneItem, PaneModel } from '../src/model'
+import { contentPage, contentScroll, hookKey, layout, rowWidth, textTarget, type LayoutInput, type Row, type Status, type View } from '../hooks/lib/layout'
+import type { PaneHook, PaneItem, PaneModel, PaneSkill } from '../src/model'
 
 const text = (row: Row): string => row.segments.map(s => s.text).join('')
 const dash = (n: number): string => '─'.repeat(n)
@@ -24,8 +24,30 @@ const gone = item({
   verdict: { level: 'gone', evidence: 'names scripts/deploy.sh, which no longer exists' },
 })
 
+const hook = (over: Partial<PaneHook> = {}): PaneHook => ({
+  scope: 'plugin',
+  plugin: 'example',
+  event: 'SessionStart',
+  matcher: null,
+  command: 'hooks/start.sh',
+  source: '~/.claude/plugins/cache/market/example/1.0.0/hooks/hooks.json',
+  injected: { count: 1, chars: 9100, index: 0 },
+  shared: false,
+  ...over,
+})
+const START = hook()
+
+const skill = (over: Partial<PaneSkill> & Pick<PaneSkill, 'name'>): PaneSkill => ({
+  scope: 'user',
+  plugin: null,
+  path: `~/.claude/skills/${over.name}/SKILL.md`,
+  real: `/home/user/.claude/skills/${over.name}/SKILL.md`,
+  invoked: false,
+  ...over,
+})
+
 const small: PaneModel = {
-  v: 1,
+  v: 2,
   root: '/home/user/app',
   basis: 'observed',
   ruleset: 'test',
@@ -34,8 +56,9 @@ const small: PaneModel = {
     item({ path: 'node_modules/pkg/CLAUDE.md', real: '/home/user/app/node_modules/pkg/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal' }),
   ],
   memory: [gone],
-  injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars: 9100, index: 0 }],
+  hooks: [START],
   skills: [],
+  agentMemory: [],
   compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 160000, postTokens: 40000 }],
 }
 
@@ -60,9 +83,9 @@ describe('the list', () => {
       blank(100),
       '    ▲ ~/.claude/projects/-home-user-app/memory/notes.md'.padEnd(100),
       ' ',
-      `── ◇ Injected by hooks · 1 ${dash(71)}──`,
+      `── ◇ Hooks · 1 ${dash(83)}──`,
       blank(100),
-      '    example  SessionStart  ×1  9.1k chars'.padEnd(100),
+      '    example  SessionStart  ×1  9.1k chars  hooks/start.sh'.padEnd(100),
       ' ',
       `── ◇ Skills ${dash(83)} 0 ──`,
       ' ',
@@ -82,20 +105,55 @@ describe('the list', () => {
       [1000, '1.0k chars'],
       [9100, '9.1k chars'],
     ] as const) {
-      const rows = run({ model: { ...small, injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars, index: 0 }] } })
-      expect(rows.map(text)).toContain(`    example  SessionStart  ×1  ${shown}`.padEnd(100))
+      const rows = run({ model: { ...small, hooks: [hook({ injected: { count: 1, chars, index: 0 } })] } })
+      expect(rows.map(text)).toContain(`    example  SessionStart  ×1  ${shown}  hooks/start.sh`.padEnd(100))
     }
   })
 
-  it('draws a collapsed injection as one row with its count, the count column as wide as the widest', () => {
-    const injected = [
-      { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 88, chars: 3520, index: 97 },
-      { plugin: 'example', hookName: 'SessionStart', count: 1, chars: 900, index: 0 },
+  it('lines hooks up in columns: who, event with its matcher, what it injected, the command', () => {
+    const hooks = [
+      hook({ scope: 'user', plugin: null, event: 'PreToolUse', matcher: 'Bash', command: '~/.claude/hooks/guard.sh', injected: null }),
+      hook({ injected: { count: 1, chars: 900, index: 0 } }),
+      hook({ scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', command: '', source: '', injected: { count: 88, chars: 3520, index: 97 } }),
     ]
-    const rows = run({ model: { ...small, injected } }).map(text)
-    expect(rows).toContain(`── ◇ Injected by hooks · 2 ${dash(71)}──`)
+    const rows = run({ model: { ...small, hooks } }).map(text)
+    expect(rows).toContain(`── ◇ Hooks · 3 ${dash(83)}──`)
+    expect(rows).toContain('    user          PreToolUse:Bash                    ~/.claude/hooks/guard.sh'.padEnd(100))
+    expect(rows).toContain('    example       SessionStart      ×1   900 chars   hooks/start.sh'.padEnd(100))
     expect(rows).toContain('    unattributed  UserPromptSubmit  ×88  3.5k chars'.padEnd(100))
-    expect(rows).toContain('    example       SessionStart      ×1   900 chars'.padEnd(100))
+  })
+
+  it('lists every skill with where it comes from, the invoked ones marked', () => {
+    const skills = [skill({ name: 'house-style' }), skill({ scope: 'plugin', plugin: 'example', name: 'example:brainstorming', invoked: true })]
+    const rows = run({ model: { ...small, skills } }).map(text)
+    expect(rows).toContain(`── ◇ Skills · 2 ${dash(82)}──`)
+    expect(rows).toContain('    user     house-style'.padEnd(100))
+    expect(rows).toContain('    example  example:brainstorming  invoked'.padEnd(100))
+  })
+
+  it('lists each agent memory under Memory, after the project memory, with its agent and scope', () => {
+    const agentMemory = [{ scope: 'project' as const, agent: 'reviewer', path: '.claude/agent-memory/reviewer/MEMORY.md', real: '/home/user/app/.claude/agent-memory/reviewer/MEMORY.md' }]
+    const rows = run({ model: { ...small, agentMemory } }).map(text)
+    const at = rows.findIndex(t => t.startsWith('── ◇ Memory · 2 '))
+    expect(at).toBeGreaterThan(-1)
+    expect(rows.slice(at + 2, at + 4)).toEqual([
+      '    ▲ ~/.claude/projects/-home-user-app/memory/notes.md'.padEnd(100),
+      '    ◦ reviewer · project  .claude/agent-memory/reviewer/MEMORY.md'.padEnd(100),
+    ])
+  })
+
+  it('makes a hook event, a skill name and an agent memory file name buttons that open them', () => {
+    const skills = [skill({ name: 'house-style' })]
+    const agentMemory = [{ scope: 'user' as const, agent: 'reviewer', path: '~/.claude/agent-memory/reviewer/MEMORY.md', real: '/home/user/.claude/agent-memory/reviewer/MEMORY.md' }]
+    const presses = run({ model: { ...small, skills, agentMemory } }).flatMap(r => r.segments).filter(s => s.press?.kind === 'open')
+    expect(presses.map(s => [s.text, s.press])).toEqual([
+      ['CLAUDE.md', { kind: 'open', real: '/home/user/app/node_modules/pkg/CLAUDE.md' }],
+      ['CLAUDE.md', { kind: 'open', real: '/home/user/app/CLAUDE.md' }],
+      ['notes.md', { kind: 'open', real: NOTES }],
+      ['MEMORY.md', { kind: 'open', real: '/home/user/.claude/agent-memory/reviewer/MEMORY.md' }],
+      ['SessionStart', { kind: 'open', hook: hookKey(START) }],
+      ['house-style', { kind: 'open', real: '/home/user/.claude/skills/house-style/SKILL.md' }],
+    ])
   })
 
   it('makes each file name a button that opens it, with no marker and no o outside the wide tier', () => {
@@ -152,8 +210,9 @@ describe('the list', () => {
     // tab and enter are the engine's keys, drawn as text in a key's colours; o and a are the pane's buttons.
     expect(wide.segments.filter(s => s.press !== undefined).map(s => s.hotkey)).toEqual(['o', 'a'])
     expect(wide.segments.find(s => s.text === 'tab')?.color).toBe('suggestion')
-    // A list with nothing to open names no key for opening it; an injection alone can be opened.
-    expect(text(run({ model: { ...small, instructions: [], memory: [], injected: [] } }).at(-1)!)).not.toContain('enter')
+    // A list with nothing to open names no key for opening it; a hook or a skill alone can be opened.
+    expect(text(run({ model: { ...small, instructions: [], memory: [], hooks: [] } }).at(-1)!)).not.toContain('enter')
+    expect(text(run({ model: { ...small, instructions: [], memory: [], hooks: [], skills: [skill({ name: 's' })] } }).at(-1)!)).toContain('enter')
     expect(text(run({ model: { ...small, instructions: [], memory: [] } }).at(-1)!)).toContain('enter: open')
   })
 
@@ -292,7 +351,7 @@ describe('the detail view', () => {
   })
 
   it('has no v anywhere: no key, no word, no action', () => {
-    for (const view of [LIST, { kind: 'detail', real: NOTES } as View, { kind: 'detail', injection: injectionKey(small.injected[0]!) } as View])
+    for (const view of [LIST, { kind: 'detail', real: NOTES } as View, { kind: 'detail', hook: hookKey(START) } as View])
       for (const columns of [60, 100, 140]) {
         const rows = run({ view, columns, content: textOf(numbered(100)) })
         const segments = rows.flatMap(r => r.segments)
@@ -334,7 +393,13 @@ describe('the wide preview', () => {
     expect(at(LIST, 100)).toBeNull()
     expect(at({ kind: 'detail', real: NOTES }, 60)).toEqual({ real: NOTES })
     expect(at({ kind: 'detail', real: NOTES }, 140)).toEqual({ real: NOTES })
-    expect(at({ kind: 'detail', injection: injectionKey(small.injected[0]!) }, 100)).toEqual({ injection: injectionKey(small.injected[0]!) })
+    expect(at({ kind: 'detail', hook: hookKey(START) }, 100)).toEqual({ hook: hookKey(START) })
+    // A hook that injected nothing has no text to read.
+    const quietHook = hook({ injected: null })
+    expect(textTarget({ status: ready({ ...small, hooks: [quietHook] }), view: { kind: 'detail', hook: hookKey(quietHook) }, columns: 100 })).toBeNull()
+    // A skill and an agent memory are read as files.
+    const withSkill = { ...small, skills: [skill({ name: 's' })] }
+    expect(textTarget({ status: ready(withSkill), view: { kind: 'detail', real: withSkill.skills[0]!.real }, columns: 100 })).toEqual({ real: withSkill.skills[0]!.real })
     // An item no longer in the model falls back to the list, and so does its text.
     expect(at({ kind: 'detail', real: '/home/user/app/missing.md' }, 100)).toBeNull()
     expect(at({ kind: 'detail', real: '/home/user/app/missing.md' }, 140)).toEqual({ real: '/home/user/app/node_modules/pkg/CLAUDE.md' })
@@ -388,8 +453,11 @@ function big(n: number): PaneModel {
     ...small,
     instructions,
     memory,
-    injected: Array.from({ length: Math.min(n, 10) }, (_, i) => ({ plugin: `plugin-${i}`, hookName: 'SessionStart', count: 1, chars: 1000 * i, index: i })),
-    skills: Array.from({ length: Math.min(n, 5) }, (_, i) => `example:skill-${i}`),
+    hooks: Array.from({ length: Math.min(n, 25) }, (_, i) =>
+      hook({ plugin: `plugin-${i}`, command: `hooks/scripts/a-rather-long-script-name-${i}.sh --with flags`, injected: i % 3 === 0 ? null : { count: i, chars: 1000 * i, index: i } }),
+    ),
+    skills: Array.from({ length: Math.min(n, 60) }, (_, i) => skill({ scope: i % 2 ? 'user' : 'plugin', plugin: i % 2 ? null : 'example', name: `example:skill-${i}`, invoked: i % 7 === 0 })),
+    agentMemory: Array.from({ length: Math.min(n, 3) }, (_, i) => ({ scope: 'project' as const, agent: `agent-${i}`, path: `.claude/agent-memory/agent-${i}/MEMORY.md`, real: `/home/user/app/.claude/agent-memory/agent-${i}/MEMORY.md` })),
     compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 1000, postTokens: 100 }],
   }
 }
@@ -402,7 +470,13 @@ describe('the width sweep', () => {
     memory: model.memory.filter(i => i.verdict !== null).map(i => i.real),
   }
   const many = { title: 'CLAUDE.md', lines: Array.from({ length: 300 }, (_, i) => `${'long words here '.repeat(i % 12)}${i}`), truncated: true }
-  const views: View[] = [LIST, { kind: 'detail', real: '/home/user/.claude/projects/app/memory/gone.md' }, { kind: 'detail', injection: injectionKey(model.injected[3]!) }]
+  const views: View[] = [
+    LIST,
+    { kind: 'detail', real: '/home/user/.claude/projects/app/memory/gone.md' },
+    { kind: 'detail', hook: hookKey(model.hooks[4]!) },
+    { kind: 'detail', real: model.skills[3]!.real },
+    { kind: 'detail', real: model.agentMemory[1]!.real },
+  ]
   const contents = [many, { loading: true as const }, { error: 'kanon could not read the file' }]
   /** The field rows of a detail: everything its card holds above the rule. */
   const fields = (view: View): string[] =>
@@ -439,7 +513,7 @@ describe('a short, narrow pane', () => {
   /** 15 plain instructions, one foreign, one may be stale; 15 plain memories, one gone. */
   const crowded: PaneModel = (() => {
     const m = big(15)
-    return { ...m, injected: m.injected.slice(0, 1), skills: m.skills.slice(0, 2) }
+    return { ...m, hooks: m.hooks.slice(0, 1), skills: m.skills.slice(0, 2) }
   })()
   const rows = layout({ status: ready(crowded), view: LIST, columns: 41, rows: 9, feedback: null, frame: 0 })
 
@@ -487,13 +561,20 @@ describe('text Kanon did not write', () => {
         verdict: { level: 'gone', evidence: 'names \x1b[31mscripts/x.sh\r, which \x07is gone' },
       }),
     ],
-    injected: [{ plugin: 'ex\x1bample', hookName: 'Session\rStart', count: 1, chars: 10, index: 0 }],
-    skills: ['sk\x1b[0mill'],
+    hooks: [hook({ plugin: 'ex\x1bample', event: 'Session\rStart', matcher: 'Ba\x07sh', command: 'rm\x1b[2K -rf', source: '/x/\x1bhooks.json' })],
+    skills: [skill({ name: 'sk\x1b[0mill', path: '~/.claude/skills/\x1bx/SKILL.md' })],
+    agentMemory: [{ scope: 'user', agent: 're\rviewer', path: '~/.claude/agent-memory/\x1bx/MEMORY.md', real: '/home/user/.claude/agent-memory/x/MEMORY.md' }],
     compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'au\rto', preTokens: 1, postTokens: 1 }],
   }
 
   for (const columns of [40, 100, 160]) {
-    for (const view of [LIST, { kind: 'detail', real: EVIL_REAL } as View]) {
+    for (const view of [
+      LIST,
+      { kind: 'detail', real: EVIL_REAL } as View,
+      { kind: 'detail', hook: hookKey(evil.hooks[0]!) } as View,
+      { kind: 'detail', real: evil.skills[0]!.real } as View,
+      { kind: 'detail', real: evil.agentMemory[0]!.real } as View,
+    ]) {
       it(`reaches no row with a control character, and widths hold (${columns}, ${view.kind})`, () => {
         const rows = run({ model: evil, columns, view })
         for (const r of rows) {
@@ -517,45 +598,99 @@ describe('text Kanon did not write', () => {
 })
 
 
-describe('the injection detail', () => {
-  const prompt = { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 88, chars: 3520, index: 97 }
-  const once = { plugin: 'example', hookName: 'SessionStart', count: 1, chars: 900, index: 0 }
-  const model: PaneModel = { ...small, injected: [prompt, once] }
+describe('a card cut short', () => {
+  it('keeps the hooks that injected and the skills that ran, still in scope order', () => {
+    const quiet = Array.from({ length: 12 }, (_, i) => hook({ scope: 'user', plugin: null, event: `Quiet${i}`, injected: null }))
+    const loud = hook({ plugin: 'zed', event: 'Loud' })
+    const skills = [...Array.from({ length: 12 }, (_, i) => skill({ name: `quiet-${i}` })), skill({ scope: 'plugin', plugin: 'zed', name: 'zed:ran', invoked: true })]
+    const m: PaneModel = { ...small, instructions: [], memory: [], compactions: [], hooks: [...quiet, loud], skills }
+    const rows = run({ model: m, rows: 22 }).map(text)
+    const at = (needle: string) => rows.findIndex(t => t.includes(needle))
+    expect(at('Loud')).toBeGreaterThan(-1)
+    expect(at('zed:ran')).toBeGreaterThan(-1)
+    // The quiet rows that are kept come first, as their scope does.
+    expect(at('Quiet0')).toBeGreaterThan(-1)
+    expect(at('Quiet0')).toBeLessThan(at('Loud'))
+    expect(rows.some(t => t.includes('more ↓'))).toBe(true)
+  })
+})
+
+describe('the hook, skill and agent memory details', () => {
+  const prompt = hook({ scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', command: '', source: '', injected: { count: 88, chars: 3520, index: 97 } })
+  const once = hook({ injected: { count: 1, chars: 900, index: 0 } })
+  const quiet = hook({ scope: 'user', plugin: null, event: 'PreToolUse', matcher: 'Bash', command: '~/.claude/hooks/guard.sh', source: '~/.claude/settings.json', injected: null })
+  const model: PaneModel = { ...small, hooks: [prompt, once, quiet] }
   const said = { title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false }
 
-  it('makes each injected row a button on its plugin name that opens its detail', () => {
-    const presses = run({ model }).flatMap(r => r.segments).filter(s => s.press?.kind === 'open' && 'injection' in s.press)
-    expect(presses.map(s => [s.text, s.press])).toEqual([
-      ['unattributed', { kind: 'open', injection: injectionKey(prompt) }],
-      ['example', { kind: 'open', injection: injectionKey(once) }],
-    ])
-  })
-
-  it('names the plugin, the hook, how often and how much, which one it shows, then its text, with b to go back', () => {
-    const rows = run({ model, view: { kind: 'detail', injection: injectionKey(prompt) }, rows: 12, content: said })
+  it('names who, how often and how much, which one it shows, then its text, with b to go back', () => {
+    const rows = run({ model, view: { kind: 'detail', hook: hookKey(prompt) }, rows: 12, content: said })
     expect(rows.map(text)).toEqual([
       ' ',
-      `── ◇ UserPromptSubmit · injection ${dash(64)}──`,
+      `── ◇ UserPromptSubmit · hook ${dash(69)}──`,
       blank(100),
-      '    plugin   unattributed'.padEnd(100),
-      '    hook     UserPromptSubmit'.padEnd(100),
+      '    from     unattributed'.padEnd(100),
       '    injected 88 times'.padEnd(100),
       '    size     3,520 chars in total'.padEnd(100),
       '    shown    most recent of 88'.padEnd(100),
       `  ${dash(96)}  `,
       '   Remember the house style.'.padEnd(100),
       ' ',
+      ' ',
       footerText('b: back'),
     ])
     expect(rows.at(-1)!.segments.filter(s => s.press !== undefined).map(s => [s.hotkey, s.press])).toEqual([['b', { kind: 'back' }]])
-    const single = run({ model, view: { kind: 'detail', injection: injectionKey(once) }, rows: 12, content: said }).map(text)
+  })
+
+  it('names a configured hook’s command and the file it was set in', () => {
+    const single = run({ model, view: { kind: 'detail', hook: hookKey(once) }, rows: 14, content: said }).map(text)
+    expect(single).toContain('    from     example'.padEnd(100))
+    expect(single).toContain('    command  hooks/start.sh'.padEnd(100))
+    expect(single).toContain('    source   ~/.claude/plugins/cache/market/example/1.0.0/hooks/hooks.json'.padEnd(100))
     expect(single).toContain('    injected once'.padEnd(100))
     expect(single).toContain('    size     900 chars'.padEnd(100))
     expect(single.some(t => t.includes('most recent'))).toBe(false)
   })
 
-  it('falls back to the list when the injection is no longer in the model', () => {
-    const rows = run({ model, view: { kind: 'detail', injection: injectionKey({ plugin: 'gone', hookName: 'Stop' }) } })
+  it('says a hook that injected nothing added nothing, with its matcher in the title', () => {
+    const rows = run({ model, view: { kind: 'detail', hook: hookKey(quiet) }, rows: 14, content: null }).map(text)
+    expect(rows[1]).toStartWith('── ◇ PreToolUse:Bash · hook ')
+    expect(rows).toContain('    injected nothing this run'.padEnd(100))
+    expect(rows.some(t => t.includes('size'))).toBe(false)
+    expect(rows).toContain('   It added nothing to the context this run.'.padEnd(100))
+    expect(rows.some(t => t.includes('Reading'))).toBe(false)
+  })
+
+  it('opens a skill with where it comes from, its file, whether it ran, then its text', () => {
+    const s = skill({ scope: 'plugin', plugin: 'example', name: 'example:brainstorming', invoked: true })
+    const rows = run({ model: { ...small, skills: [s] }, view: { kind: 'detail', real: s.real }, rows: 14, content: { title: 'SKILL.md', lines: ['Ask before building.'], truncated: false } }).map(text)
+    expect(rows[1]).toStartWith('── ◇ example:brainstorming · skill ')
+    expect(rows).toContain('    from     example'.padEnd(100))
+    expect(rows).toContain('    path     ~/.claude/skills/example:brainstorming/SKILL.md'.padEnd(100))
+    expect(rows).toContain('    invoked  this run'.padEnd(100))
+    expect(rows).toContain('   Ask before building.'.padEnd(100))
+  })
+
+  it('opens an agent memory with its agent and scope', () => {
+    const m = { scope: 'project' as const, agent: 'reviewer', path: '.claude/agent-memory/reviewer/MEMORY.md', real: '/home/user/app/.claude/agent-memory/reviewer/MEMORY.md' }
+    const rows = run({ model: { ...small, agentMemory: [m] }, view: { kind: 'detail', real: m.real }, rows: 14, content: null }).map(text)
+    expect(rows[1]).toStartWith('── ◇ MEMORY.md · agent memory ')
+    expect(rows).toContain('    agent    reviewer'.padEnd(100))
+    expect(rows).toContain('    scope    project'.padEnd(100))
+    expect(rows).toContain('    path     .claude/agent-memory/reviewer/MEMORY.md'.padEnd(100))
+  })
+
+  it('says a hook whose command another plugin shares cannot be told apart, rather than that it added nothing', () => {
+    const shared = hook({ plugin: 'one', command: 'sh "s.sh"', injected: null, shared: true })
+    const m = { ...small, hooks: [shared] }
+    expect(run({ model: m }).map(text)).toContain('    one  SessionStart  shared  sh "s.sh"'.padEnd(100))
+    const rows = run({ model: m, view: { kind: 'detail', hook: hookKey(shared) }, rows: 14, content: null }).map(text)
+    expect(rows).toContain('    injected cannot be told apart'.padEnd(100))
+    expect(rows.some(t => t.includes('It added nothing'))).toBe(false)
+    expect(rows.some(t => t.includes('runs the same command'))).toBe(true)
+  })
+
+  it('falls back to the list when the hook is no longer in the model', () => {
+    const rows = run({ model, view: { kind: 'detail', hook: hookKey(hook({ event: 'Stop' })) } })
     expect(rows.map(text).some(t => t.includes('◇ Instructions'))).toBe(true)
   })
 })

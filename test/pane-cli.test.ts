@@ -32,7 +32,7 @@ describe('cliArgv', () => {
 })
 
 describe('parseModel', () => {
-  const model = { v: 1, root: CWD, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], injected: [], skills: [], compactions: [] }
+  const model = { v: 2, root: CWD, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], hooks: [], skills: [], agentMemory: [], compactions: [] }
 
   test('a model line is ready', () => {
     const status = parseModel(`${JSON.stringify(model)}\n`)

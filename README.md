@@ -7,14 +7,14 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-813%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-906%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![Status](https://img.shields.io/badge/status-pre--release-orange)](#install)
 
-<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, two rows of hook injections (a prompt reminder injected twelve times collapses into one row), one skill and no compactions. The footer lists tab: move and enter: open" width="880">
+<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, and one memory a reviewer subagent keeps, three hooks (a settings hook that injected nothing, a plugin's SessionStart hook, and a prompt reminder injected twelve times, collapsed into one row), two skills with the invoked one marked, and no compactions. The footer lists tab: move and enter: open" width="880">
 
 <sub>The Kanon pane, opened with <code>/kanon</code>. The pane is drawn by its own layout code from what the real CLI printed for a planted session. The chat beside it is a scripted exchange that shows what the gone flag is for.</sub>
 
@@ -72,8 +72,12 @@ itself: it opens when you run the command, and it does not remember having been 
 can draw, as in `claude -p` or the SDK, `/kanon` prints the report instead. Desktop sessions that run
 in WSL load no plugins, so the pane is not there either.
 
-The pane groups what steers the session: Instructions, Memory, Injected by hooks, Skills and
-Compaction. Four glyphs carry the findings:
+The pane groups what steers the session: Instructions, Memory, Hooks, Skills and Compaction.
+Memory ends with the memory each subagent keeps. Hooks lists every hook configured for the session
+and Skills every skill you can invoke, both in scope order (managed, user, project, local, then each
+plugin), with where each comes from in the first column. A hook that added text carries how many
+times and how many characters; a skill this run used is marked `invoked`. Four glyphs carry the
+findings:
 
 | Glyph | Meaning |
 | --- | --- |
@@ -82,11 +86,11 @@ Compaction. Four glyphs carry the findings:
 | `!` | foreign |
 | `✓` | acknowledged |
 
-Each file name is a button that opens it in place, and so is the plugin name on each row under
-Injected by hooks. `tab` moves between them and `enter` opens the one you are on; the footer always
+Each file name is a button that opens it in place, and so are a hook's event and a skill's name.
+`tab` moves between them and `enter` opens the one you are on; the footer always
 lists the keys that work. An opened item shows its details at the top (path, origin, reason, verdict,
-evidence and state, or for an injected row its plugin, hook, size and which of its injections you are
-looking at) and its text under them: the file itself, or the most recent of the row's injections.
+evidence and state; for a hook where it comes from, its command, the file it is set in, and what it
+injected) and its text under them: the file itself, or the most recent of the hook's injections.
 When the text is longer than the room left, `n` and `p` page it forward and back and the mouse wheel
 scrolls it, while the details stay where they are. `b` goes back to the list. The other keys are `o`
 (on a wide terminal, open the previewed item), `a` (acknowledge a flagged item, the same record
@@ -111,8 +115,8 @@ bun '<plugin>/src/cli.ts' show --cwd '<repo>' --path CLAUDE.md                # 
 bun '<plugin>/src/cli.ts' show --cwd '<repo>' --session <id> --injection <n>  # the n-th injection of this run
 ```
 
-The model gives each row under Injected by hooks the `index` of its most recent injection, which is
-the number `--injection` takes.
+The model gives each hook that injected the `index` of its most recent injection, which is the
+number `--injection` takes.
 Text Kanon did not write, such as a file name or a line from a rule, has its control characters
 stripped before it is drawn.
 
@@ -253,15 +257,23 @@ MEMORY
   ~/.claude/projects/-home-you-project/memory/config.md
   ~/.claude/projects/-home-you-project/memory/old-ci.md
   ~/.claude/projects/-home-you-project/memory/release-flow.md
+  .claude/agent-memory/reviewer/MEMORY.md  agent reviewer, project
 
-INJECTED
-  example-plugin  SessionStart          ×1   8.6k chars
-  unattributed    UserPromptSubmit      ×6   0.3k chars
-  kanon           SessionStart          ×1   0.3k chars
-  kanon           PreToolUse:Read       ×1   0.2k chars
+HOOKS
+  user            Stop                  ~/.claude/hooks/notify.sh
+  example-plugin  SessionStart          hooks/session-start                  ×1   8.6k chars
+  kanon           SessionStart          sh "hooks/scripts/session-start.sh"  ×1   0.3k chars
+  kanon           PreToolUse:Read       sh "hooks/scripts/read.sh"           ×1   0.2k chars
+  kanon           InstructionsLoaded    sh "hooks/scripts/record.sh"
+  kanon           ConfigChange          sh "hooks/scripts/record.sh"
+  kanon           SessionStart          sh "hooks/scripts/record.sh"
+  kanon           SessionEnd            sh "hooks/scripts/session-end.sh"
+  kanon           UserPromptSubmit      sh "hooks/scripts/turn.sh"
+  unattributed    UserPromptSubmit                                           ×6   0.3k chars
 
 SKILLS
-  example-plugin:brainstorming
+  user            house-style
+  example-plugin  example-plugin:brainstorming  invoked
 
 COMPACTION
   11:40  auto  968k -> 25k tokens
@@ -278,7 +290,7 @@ NOT LOADED
   quiet      docs/CLAUDE.md                       on-demand, not triggered
 
 CONFIG CHANGED
-  09:58  skills  ~/.claude/skills/nl-taal/SKILL.md
+  09:58  skills  ~/.claude/skills/house-style/SKILL.md
 ```
 
 That is a real run, not a mock-up: `bash tools/screenshots/make.sh sample` plants the repository,
@@ -291,12 +303,15 @@ it is empty. `STALE` lists every rule or memory with a verdict: `gone` when a pa
 longer exists, `may-be-stale` (printed as `may-stale` to fit the column) when a function, flag or
 script it names occurs nowhere any more or a file it names has commits since it was written (names
 come from inline code spans, `@imports` and bare path-shaped words, never from fenced code blocks),
-and `ok` once you have acknowledged it with `kanon ack`. `MEMORY` lists the project's memories.
-`INJECTED` collapses the text hooks added to the context into one row per plugin and hook event,
-with how many times it happened and the characters in total, the largest first, attributed
-through the installed plugins' `hooks.json`;
-Kanon's own injections are listed like any other. `SKILLS` and `COMPACTION` name the skills invoked
-and each compaction, with its token counts before and after.
+and `ok` once you have acknowledged it with `kanon ack`. `MEMORY` lists the project's memories, then the memory each subagent keeps
+(`.claude/agent-memory/` and its user and local siblings), named by agent and scope. `HOOKS`
+lists every hook configured for the session, from managed, user, project and local settings and
+from every enabled plugin, each with its event and command. A hook that added text to the context
+carries how many times it did and the characters in total. Text that no configured hook explains
+closes the list, attributed through the installed plugins' `hooks.json`; Kanon's own hooks are
+listed like any other. `SKILLS` lists every skill you can invoke, personal, project and from
+plugins, and marks the ones this run used as `invoked`. `COMPACTION` names each compaction, with
+its token counts before and after.
 
 The last column is Claude Code's own word for why a file loaded, printed verbatim. `session_start`
 and `nested_traversal` are not the whole vocabulary: `compact` has been observed too, which is how

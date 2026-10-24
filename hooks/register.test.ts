@@ -28,7 +28,7 @@ const memoryItem = (real: string, path: string, gone: boolean) => ({
 const TEXT = JSON.stringify({ v: 1, title: 'notes.md', lines: Array.from({ length: 100 }, (_, i) => `line ${i + 1}`), truncated: false })
 
 const modelJson = (memory: object[] = [memoryItem(NOTES, '~/.claude/projects/-home-user-project/memory/notes.md', true)]) =>
-  JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory, injected: [], skills: [], compactions: [] })
+  JSON.stringify({ v: 2, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory, hooks: [], skills: [], agentMemory: [], compactions: [] })
 
 const PANE_PROPS = {
   title: 'Kanon',
@@ -480,19 +480,35 @@ test('opening a file runs kanon show with the realpath as one argument and draws
   await ui.unmount()
 })
 
-test('an injected row opens its details and the text of its most recent injection, by the index the model gave it', async ($, on) => {
-  const injected = [{ plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 3, chars: 120, index: 7 }]
-  const model = JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], injected, skills: [], compactions: [] })
+test('a hook row opens its details and the text of its most recent injection, by the index the model gave it', async ($, on) => {
+  const hooks = [{ scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', matcher: null, command: '', source: '', injected: { count: 3, chars: 120, index: 7 } }]
+  const model = JSON.stringify({ v: 2, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], hooks, skills: [], agentMemory: [], compactions: [] })
   const w = world(on, { model: () => ran(model), show: () => ran(JSON.stringify({ v: 1, title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false })) })
   await $.session.start(START)
   await slash($)
   await w.clock.settle()
   const ui = await mountPane($)
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'unattributed' }))!.key! })
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'UserPromptSubmit' }))!.key! })
   await w.clock.settle()
   expect(await ui.find({ type: 'Text', text: /most recent of 3/ })).toBeDefined()
   expect(w.showRuns().map(r => r.slice(2))).toEqual([['show', '--cwd', ROOT, '--session', SESSION, '--injection', '7']])
   expect(await ui.find({ type: 'Text', text: /Remember the house style\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a skill opens its details and the text of its SKILL.md, read by its realpath', async ($, on) => {
+  const real = '/home/user/.claude/skills/house-style/SKILL.md'
+  const skills = [{ scope: 'user', plugin: null, name: 'house-style', path: '~/.claude/skills/house-style/SKILL.md', real, invoked: false }]
+  const model = JSON.stringify({ v: 2, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], hooks: [], skills, agentMemory: [], compactions: [] })
+  const w = world(on, { model: () => ran(model), show: () => ran(JSON.stringify({ v: 1, title: 'SKILL.md', lines: ['Write in the first person.'], truncated: false })) })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'house-style' }))!.key! })
+  await w.clock.settle()
+  expect(w.showRuns().map(r => r.slice(2))).toEqual([['show', '--cwd', ROOT, '--path', real]])
+  expect(await ui.find({ type: 'Text', text: /Write in the first person\./ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -583,8 +599,8 @@ test('the wide preview reads the previewed item’s text and draws its first lin
 })
 
 test('a preview read for an item no longer previewed is dropped, and what is shown now is read', async ($, on) => {
-  const injected = [{ plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 1, chars: 30, index: 2 }]
-  const model = JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [memoryItem(NOTES, '~/notes.md', true)], injected, skills: [], compactions: [] })
+  const hooks = [{ scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', matcher: null, command: '', source: '', injected: { count: 1, chars: 30, index: 2 } }]
+  const model = JSON.stringify({ v: 2, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [memoryItem(NOTES, '~/notes.md', true)], hooks, skills: [], agentMemory: [], compactions: [] })
   let reads = 0
   const w = world(on, {
     model: () => ran(model),
@@ -595,8 +611,8 @@ test('a preview read for an item no longer previewed is dropped, and what is sho
   await w.clock.settle()
   const ui = await mountPane($, 140)
   await w.clock.settle()
-  // The preview's read is in flight; the person opens the injection instead.
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'unattributed' }))!.key! })
+  // The preview's read is in flight; the person opens the hook instead.
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'UserPromptSubmit' }))!.key! })
   await w.clock.advance(3_000)
   expect(w.showRuns().map(r => r.slice(2))).toEqual([
     ['show', '--cwd', ROOT, '--path', NOTES],

@@ -1492,6 +1492,11 @@ function withTranscript(prefix: string) {
   const hooksDir = join(claude, 'plugins', 'cache', 'example-market', 'example-plugin', '1.0.0', 'hooks')
   mkdirSync(hooksDir, { recursive: true })
   writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command }] }] } }))
+  const pluginRoot = join(hooksDir, '..')
+  mkdirSync(join(pluginRoot, 'skills', 'plan'), { recursive: true })
+  writeFileSync(join(pluginRoot, 'skills', 'plan', 'SKILL.md'), '---\nname: plan\n---\n')
+  writeFileSync(join(claude, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'example-plugin@example-market': [{ scope: 'user', installPath: pluginRoot }] } }))
+  writeFileSync(join(claude, 'settings.json'), JSON.stringify({ enabledPlugins: { 'example-plugin@example-market': true } }))
 
   const text = 'You have example-plugin. '.repeat(40)
   const att = (timestamp: string, attachment: object) => JSON.stringify({ type: 'attachment', timestamp, attachment })
@@ -1520,10 +1525,11 @@ function withTranscript(prefix: string) {
 test('report names the plugin behind each hook injection, from the installed plugin cache', async () => {
   const { repo, env, chars } = withTranscript('kanon-cli-injected-')
   const out = (await run(['report', '--session', 's', '--cwd', repo], env)).split('\n')
-  const at = out.indexOf('INJECTED')
+  const at = out.indexOf('HOOKS')
   expect(at).toBeGreaterThan(-1)
-  expect(out[at + 1]).toBe(`  example-plugin  SessionStart          ×1   ${(chars / 1000).toFixed(1)}k chars`)
-  expect(out[at + 2]).toBe('  unattributed    UserPromptSubmit      ×1   0.4k chars')
+  expect(out[at + 1]).toStartWith('  example-plugin  SessionStart          "hooks/start.sh"')
+  expect(out[at + 1]).toEndWith(` ×1   ${(chars / 1000).toFixed(1)}k chars`)
+  expect(out[at + 2]).toBe(`  unattributed    UserPromptSubmit      ${' '.repeat(37)}×1   0.4k chars`)
 })
 
 test('a skill invoked early in a long run is still listed, however far back the transcript has to be read', async () => {
@@ -1533,7 +1539,7 @@ test('a skill invoked early in a long run is still listed, however far back the 
   appendFileSync(join(home, 'transcript.jsonl'), `${filler}\n`.repeat(24 * 1024))
   const out = await run(['report', '--session', 's', '--cwd', repo], env)
   const lines = out.split('\n')
-  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 2)).toEqual(['SKILLS', '  example-plugin:plan'])
+  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 2)).toEqual(['SKILLS', '  example-plugin  example-plugin:plan  invoked'])
   expect(out).not.toContain('earlier:run-skill')
 })
 
@@ -1541,7 +1547,7 @@ test('report lists this run\'s skills once each, and its compactions', async () 
   const { repo, env } = withTranscript('kanon-cli-skills-')
   const out = await run(['report', '--session', 's', '--cwd', repo], env)
   const lines = out.split('\n')
-  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 3)).toEqual(['SKILLS', '  example-plugin:plan', ''])
+  expect(lines.slice(lines.indexOf('SKILLS'), lines.indexOf('SKILLS') + 3)).toEqual(['SKILLS', '  example-plugin  example-plugin:plan  invoked', ''])
   expect(out).not.toContain('earlier:run-skill')
   expect(out).toContain('COMPACTION\n  21:40  auto  968k -> 25k tokens')
 })
@@ -1676,7 +1682,7 @@ test('model --json prints the pane contract for an unrecorded session as a predi
   writeFileSync(join(repo, 'CLAUDE.md'), 'Use `bun test`.\n')
   const out = await run(['model', '--json', '--session', 'never-recorded', '--cwd', repo], env)
   const m = JSON.parse(out)
-  expect(m.v).toBe(1)
+  expect(m.v).toBe(2)
   expect(m.basis).toBe('predicted')
   expect(m.root).toBe(sessionRoot(repo))
   expect(m.instructions.map((i: { path: string }) => i.path)).toContain('CLAUDE.md')
@@ -1699,6 +1705,20 @@ test('model --json on the predicted basis still lists the launch files, unjudged
   expect(file).toBeDefined()
   expect(file.verdict).toBeNull()
   expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
+})
+
+test('model --json lists every hook, skill and agent memory, on either basis', async () => {
+  const { repo, env } = isolated('kanon-cli-model-inv-')
+  const claude = env.CLAUDE_CONFIG_DIR
+  mkdirSync(join(claude, 'skills', 'deploy'), { recursive: true })
+  writeFileSync(join(claude, 'skills', 'deploy', 'SKILL.md'), 'x\n')
+  writeFileSync(join(claude, 'settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo done' }] }] } }))
+  mkdirSync(join(repo, '.claude', 'agent-memory', 'rev'), { recursive: true })
+  writeFileSync(join(repo, '.claude', 'agent-memory', 'rev', 'MEMORY.md'), 'x\n')
+  const m = JSON.parse(await run(['model', '--json', '--session', 'never-recorded', '--cwd', repo], env))
+  expect(m.hooks).toEqual([{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', source: join(claude, 'settings.json'), injected: null, shared: false }])
+  expect(m.skills.map((s: { name: string; invoked: boolean }) => [s.name, s.invoked])).toEqual([['deploy', false]])
+  expect(m.agentMemory.map((a: { agent: string; path: string }) => [a.agent, a.path])).toEqual([['rev', '.claude/agent-memory/rev/MEMORY.md']])
 })
 
 test('model --json uses the observed report when the session was recorded', async () => {
@@ -1725,7 +1745,7 @@ test('model --json prints the error shape and exits 0 when it fails', async () =
   const out = await new Response(proc.stdout).text()
   expect(await proc.exited).toBe(0)
   const e = JSON.parse(out)
-  expect(e.v).toBe(1)
+  expect(e.v).toBe(2)
   expect(typeof e.error).toBe('string')
   expect(e.error.length).toBeGreaterThan(0)
 })
@@ -1751,7 +1771,8 @@ test('model --json on the predicted basis still carries the transcript\'s skills
   )
   const model = JSON.parse(await run(['model', '--json', '--session', 's', '--cwd', repo], env))
   expect(model.basis).toBe('predicted')
-  expect(model.skills).toEqual(['example-plugin:brainstorming'])
+  // The transcript's path here is no file, so the row has nothing to open.
+  expect(model.skills.map((s: { scope: string; name: string; invoked: boolean; real: string }) => [s.scope, s.name, s.invoked, s.real])).toEqual([['other', 'example-plugin:brainstorming', true, '']])
 })
 
 /**
@@ -1805,9 +1826,9 @@ test('show answers a file it cannot read with an error object and exit 0', async
 test('show prints the n-th injection of this run, the index the model gives its row', async () => {
   const { repo, env } = withTranscript('kanon-cli-show-inj-')
   const model = JSON.parse(await run(['model', '--json', '--session', 's', '--cwd', repo], env))
-  const prompt = model.injected.find((i: { hookName: string }) => i.hookName === 'UserPromptSubmit')
-  expect(prompt.index).toBe(1)
-  const shown = JSON.parse(await run(['show', '--cwd', repo, '--session', 's', '--injection', String(prompt.index)], env))
+  const prompt = model.hooks.find((h: { event: string }) => h.event === 'UserPromptSubmit')
+  expect(prompt.injected.index).toBe(1)
+  const shown = JSON.parse(await run(['show', '--cwd', repo, '--session', 's', '--injection', String(prompt.injected.index)], env))
   expect(shown).toEqual({ v: 1, title: 'unattributed UserPromptSubmit', lines: ['x'.repeat(400)], truncated: false })
   const first = JSON.parse(await run(['show', '--cwd', repo, '--session', 's', '--injection', '0'], env))
   expect(first.title).toBe('example-plugin SessionStart')

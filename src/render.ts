@@ -1,7 +1,6 @@
 import { PLAIN, stripControl, type Paint } from './colour'
 import { driftIsEmpty, type FileDigest } from './drift'
-import { groupInjections } from './model'
-import { short } from './paths'
+import { short, shortCommand } from './paths'
 import type { Steered } from './steering'
 import type { Classified, Report, Skipped } from './types'
 
@@ -11,7 +10,7 @@ import type { Classified, Report, Skipped } from './types'
 // at a fixed offset regardless of tag or path length.
 const TAG_WIDTH = 11
 const PATH_WIDTH = 37
-// The INJECTED columns: a plugin name and a hook name, which are both wider
+// The HOOKS and SKILLS columns: a plugin name and a hook name, which are both wider
 // than a tag and far narrower than a path.
 const PLUGIN_WIDTH = 16
 const HOOK_WIDTH = 22
@@ -87,17 +86,36 @@ function staleLine(s: Steered, root: string, paint: Paint): string {
 }
 
 /**
- * INJECTED rows: one per plugin and hook, with how many injections it made
- * and their characters together, the most characters first (groupInjections,
- * shared with the pane). Kanon's own injection is listed like anyone else's.
- * A plugin name is a directory name in the plugin cache and a hook name is
- * the transcript's word, neither written by Kanon, so both are stripped too.
+ * A hook command as a row shows it (shortCommand), cut to the path column.
+ * The command is a settings file's or a plugin's text, so it is stripped too.
  */
-function injectedLines(report: Report, paint: Paint): string[] {
-  return groupInjections(report.injections).map(
-    (r) =>
-      `  ${pad(stripControl(r.plugin), PLUGIN_WIDTH)}${pad(stripControl(r.hookName), HOOK_WIDTH)}${pad(`×${r.count}`, COUNT_WIDTH)}${paint.note(`${(r.chars / 1000).toFixed(1)}k chars`)}`,
-  )
+function hookCommand(command: string, root: string): string {
+  const text = shortCommand(stripControl(command), root)
+  return text.length > PATH_WIDTH - 1 ? `${text.slice(0, PATH_WIDTH - 2)}…` : text
+}
+
+/** The first column of a HOOKS or SKILLS row: the plugin's name, else the scope. */
+const scopeLabel = (x: { scope: string; plugin: string | null }): string => stripControl(x.plugin ?? x.scope)
+
+/**
+ * HOOKS rows: every configured hook in scope order, the event with its
+ * matcher as the transcript writes it (`PreToolUse:Read`), the command, and
+ * how many injections it made with their characters together. Injections no
+ * configured hook explains close the list under the plugin attribution named.
+ */
+function hookLines(report: Report, paint: Paint): string[] {
+  return report.inventory.hooks.map((h) => {
+    const event = stripControl(h.matcher === null ? h.event : `${h.event}:${h.matcher}`)
+    // `shared`: an injection under `other` may be this hook's, and the transcript cannot say whose.
+    const mark = h.injected !== null ? `${pad(`×${h.injected.count}`, COUNT_WIDTH)}${paint.note(`${(h.injected.chars / 1000).toFixed(1)}k chars`)}` : h.shared ? paint.note('shared') : ''
+    const line = `  ${pad(scopeLabel(h), PLUGIN_WIDTH)}${pad(event, HOOK_WIDTH)}${mark === '' ? hookCommand(h.command, report.root) : pad(hookCommand(h.command, report.root), PATH_WIDTH) + mark}`
+    return line.trimEnd()
+  })
+}
+
+/** SKILLS rows: every skill available, in scope order, `invoked` on the ones this run used. */
+function skillLines(report: Report, paint: Paint): string[] {
+  return report.inventory.skills.map((s) => `  ${pad(scopeLabel(s), PLUGIN_WIDTH)}${stripControl(s.name)}${s.invoked ? `  ${paint.note('invoked')}` : ''}`)
 }
 
 const kTokens = (n: number): string => `${Math.round(n / 1000)}k`
@@ -114,9 +132,12 @@ function steeringSections(report: Report, paint: Paint): string[] {
     out.push('', paint.heading(heading), ...lines)
   }
   section('STALE', report.steered.filter((s) => s.verdict !== null).map((s) => staleLine(s, root, paint)))
-  section('MEMORY', report.steered.filter((s) => s.kind === 'memory').map((s) => `  ${paint.path(short(s.path, root))}`))
-  section('INJECTED', injectedLines(report, paint))
-  section('SKILLS', report.skills.map((s) => `  ${stripControl(s.name)}`))
+  section('MEMORY', [
+    ...report.steered.filter((s) => s.kind === 'memory').map((s) => `  ${paint.path(short(s.path, root))}`),
+    ...report.inventory.agentMemory.map((m) => `  ${paint.path(stripControl(short(m.path, root)))}  ${paint.note(stripControl(`agent ${m.agent}, ${m.scope}`))}`),
+  ])
+  section('HOOKS', hookLines(report, paint))
+  section('SKILLS', skillLines(report, paint))
   section(
     'COMPACTION',
     report.compactions.map((c) => `  ${c.t.slice(11, 16)}  ${stripControl(c.trigger) || 'unknown'}  ${paint.note(`${kTokens(c.preTokens)} -> ${kTokens(c.postTokens)} tokens`)}`),

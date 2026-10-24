@@ -67,7 +67,7 @@ done
 # --- the sample report is real ------------------------------------------------
 # Every non-blank line of the fenced sample must be something render() could
 # produce. Section headers are the cheap, high-value half of that.
-for header in 'SESSION' 'LOADED' 'STALE' 'MEMORY' 'INJECTED' 'SKILLS' 'COMPACTION' 'DRIFT' 'NOT LOADED' 'CONFIG CHANGED'; do
+for header in 'SESSION' 'LOADED' 'STALE' 'MEMORY' 'HOOKS' 'SKILLS' 'COMPACTION' 'DRIFT' 'NOT LOADED' 'CONFIG CHANGED'; do
   if grep -q "^${header}" README.md && grep -qF "${header}" src/render.ts; then
     ok "sample section ${header} exists in render.ts"
   elif grep -q "^${header}" README.md; then

@@ -47,3 +47,16 @@ export function short(path: string, root: string): string {
   }
   return path
 }
+
+/**
+ * A hook command as the report and the pane write it: the plugin root left
+ * out, since both name the plugin beside it (eight Kanon hooks all read
+ * `sh "$CLAUDE_PLUGIN_ROOT/hooks/scrip…` once cut), and paths under the
+ * root and the home directory written as short() writes them. Shared so the
+ * two views can never call the same hook by two names.
+ */
+export function shortCommand(command: string, root: string): string {
+  const home = homedir()
+  const text = command.replace(/\$\{?CLAUDE_PLUGIN_ROOT\}?\//g, '').split(`${root}/`).join('')
+  return home ? text.split(`${home}/`).join('~/') : text
+}

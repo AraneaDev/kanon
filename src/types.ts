@@ -1,3 +1,4 @@
+import type { Inventoried } from './inventory'
 import type { Drift } from './drift'
 import type { Steered } from './steering'
 import type { Injection, TranscriptFacts } from './transcript'
@@ -106,6 +107,8 @@ export interface Report {
   /** Skills invoked in this run, first sighting of each name. */
   skills: TranscriptFacts['skills']
   compactions: TranscriptFacts['compactions']
+  /** Every configured hook, available skill and agent memory, marked against this run. */
+  inventory: Inventoried
 }
 
 /**

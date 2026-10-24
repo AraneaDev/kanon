@@ -119,7 +119,7 @@ export async function endTurn(io: Port, agentId: string | undefined, isAborted: 
 
 /** What pressing a Button (or its hotkey) does. */
 export async function act(io: Port, action: Action): Promise<void> {
-  if (action.kind === 'open') return open(io, 'real' in action ? { real: action.real } : { injection: action.injection })
+  if (action.kind === 'open') return open(io, 'real' in action ? { real: action.real } : { hook: action.hook })
   if (action.kind === 'back') return back(io)
   if (action.kind === 'ack') return acknowledge(io, action.real)
   if (action.kind === 'next' || action.kind === 'previous') return page(io, action.kind === 'next' ? 1 : -1)
@@ -128,7 +128,7 @@ export async function act(io: Port, action: Action): Promise<void> {
 }
 
 /**
- * Opening an item or an injection: its details at once, from the top of its
+ * Opening a file or a hook: its details at once, from the top of its
  * text, and the text read now, afresh even when a preview already holds it,
  * so what the person opens is what the file says now.
  */
