@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { writeAtomic } from './atomic'
 import { ownerOf, pluginIndex } from './attribution'
+import { EMPTY_INVENTORIED, inventoried, inventory, type Inventoried } from './inventory'
+import { MANAGED_POLICY_DIRS } from './stale'
 import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
@@ -206,7 +208,7 @@ function collect(session: string, cwd: string, withSteering = false, mayJudge = 
  * the hook killed before either was written. With no cache there, STALE is
  * left out rather than computed.
  */
-function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home: string, mayJudge: boolean): Pick<Report, 'steered' | 'injections' | 'skills' | 'compactions'> {
+function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home: string, mayJudge: boolean): Pick<Report, 'steered' | 'injections' | 'skills' | 'compactions' | 'inventory'> {
   let steered: Steered[] = []
   try {
     steered = readSteering(kanonHome(), report.root) ?? (mayJudge ? judgeSteering(report.root, report.loaded, events, facts) : null) ?? []
@@ -224,7 +226,16 @@ function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home
   // invoked, so a name is shown once, where it was first seen.
   const names = new Set<string>()
   const skills = facts.skills.filter((s) => !names.has(s.name) && names.add(s.name))
-  return { steered, injections, skills, compactions: facts.compactions }
+  return { steered, injections, skills, compactions: facts.compactions, inventory: inventoryOf(report.root, home, injections, skills) }
+}
+
+/** The inventory for a root, marked against a run; a failure lists nothing, since the list is a courtesy. */
+function inventoryOf(root: string, home: string, injections: Report['injections'], skills: Report['skills']): Inventoried {
+  try {
+    return inventoried(inventory({ root, claudeHome: home, managedDirs: MANAGED_POLICY_DIRS }), injections, skills)
+  } catch {
+    return EMPTY_INVENTORIED
+  }
 }
 
 /**
@@ -639,7 +650,7 @@ function buildModel(cwd: string): PaneModel {
   let recorded: Report | null = null
   if (session !== undefined && existsSync(sessionFile(session))) {
     recorded = collect(session, cwd, true)
-    if (recorded.loaded.length > 0) return paneModel(recorded, 'observed', recorded.root, recorded.steered)
+    if (recorded.loaded.length > 0) return paneModel(recorded, 'observed', recorded.root, recorded.steered, recorded.inventory)
   }
   // Unobserved: predict, exactly as `brief` does, with every loadable file judged.
   const home = claudeHome()
@@ -652,7 +663,8 @@ function buildModel(cwd: string): PaneModel {
   // A failed judging lists the files unjudged, exactly as steering() does: an
   // empty list would tell the person the session has no instruction files.
   const steered = readSteering(kanonHome(), root) ?? judgeSteering(root, files, events, transcriptFacts(events), extra) ?? unjudged(files)
-  return paneModel(recorded, 'predicted', root, steered)
+  // The inventory is read from disk, not observed, so it is listed on this basis too.
+  return paneModel(recorded, 'predicted', root, steered, recorded?.inventory ?? inventoryOf(root, home, [], []))
 }
 
 /** The `kanon show` contract version, which the pane checks like the model's. */

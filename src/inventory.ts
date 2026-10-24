@@ -283,3 +283,69 @@ export function inventory(p: Places): Inventory {
   return { plugins, hooks: byScope(hooks), skills: byScope(skills), agentMemory: agentMemory(p) }
 }
 
+
+export interface MarkedHook extends Hook {
+  /** Its injections this run: how many, their characters together, the index of the most recent. */
+  injected: { count: number; chars: number; index: number } | null
+}
+
+export interface MarkedSkill extends Skill {
+  invoked: boolean
+}
+
+/** The inventory as the report and the pane list it, marked against the run. */
+export interface Inventoried {
+  hooks: MarkedHook[]
+  skills: MarkedSkill[]
+  agentMemory: AgentMemory[]
+}
+
+export const EMPTY_INVENTORIED: Inventoried = { hooks: [], skills: [], agentMemory: [] }
+
+/** `SessionStart:compact` is the SessionStart event; the part after the colon is its source or matcher. */
+const eventOf = (hookName: string): string => hookName.split(':')[0]!
+
+interface Ran { hookName: string; command: string | null; plugin: string; chars: number }
+
+/**
+ * Each injection marks the configured hook that printed it: same command,
+ * same event, and when several plugins ship that command, the one
+ * attribution named. One that no hook explains (a mod, a skill's own hook,
+ * a plugin since removed) is listed as `other`, so nothing the pane showed
+ * before this inventory existed goes missing. Within a scope the most
+ * characters come first, since that is the hook costing the most context.
+ */
+export function markHooks(hooks: Hook[], injections: ReadonlyArray<Ran>): MarkedHook[] {
+  const marked: MarkedHook[] = hooks.map((h) => ({ ...h, injected: null }))
+  const others = new Map<string, MarkedHook>()
+  const add = (h: MarkedHook, chars: number, index: number) => {
+    h.injected = h.injected === null ? { count: 1, chars, index } : { count: h.injected.count + 1, chars: h.injected.chars + chars, index }
+  }
+  injections.forEach((inj, index) => {
+    const event = eventOf(inj.hookName)
+    const same = inj.command === null ? [] : marked.filter((h) => h.command === inj.command && h.event === event)
+    const owned = same.length > 1 ? same.filter((h) => h.plugin === inj.plugin) : same
+    if (owned.length === 1) return add(owned[0]!, inj.chars, index)
+    const key = JSON.stringify([inj.plugin, event, inj.command ?? ''])
+    let other = others.get(key)
+    if (other === undefined) {
+      other = { scope: 'other', plugin: inj.plugin, event, matcher: null, command: inj.command ?? '', source: '', injected: null }
+      others.set(key, other)
+    }
+    add(other, inj.chars, index)
+  })
+  const chars = (h: MarkedHook) => h.injected?.chars ?? 0
+  // byScope is stable, so sorting by characters first leaves them ordered inside each scope.
+  return byScope([...marked, ...others.values()].sort((a, b) => chars(b) - chars(a)))
+}
+
+/** Invoked when the transcript names it, by name or by the file it ran from. */
+export function markSkills(skills: Skill[], invoked: ReadonlyArray<{ name: string; path: string }>): MarkedSkill[] {
+  const names = new Set(invoked.map((s) => s.name))
+  const paths = new Set(invoked.filter((s) => s.path !== '').map((s) => realPath(s.path)))
+  return skills.map((s) => ({ ...s, invoked: names.has(s.name) || paths.has(realPath(s.path)) }))
+}
+
+export function inventoried(inv: Inventory, injections: ReadonlyArray<Ran>, invoked: ReadonlyArray<{ name: string; path: string }>): Inventoried {
+  return { hooks: markHooks(inv.hooks, injections), skills: markSkills(inv.skills, invoked), agentMemory: inv.agentMemory }
+}

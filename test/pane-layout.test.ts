@@ -37,6 +37,9 @@ const small: PaneModel = {
   injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars: 9100, index: 0 }],
   skills: [],
   compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 160000, postTokens: 40000 }],
+  hooks: [],
+  allSkills: [],
+  agentMemory: [],
 }
 
 const ready = (model: PaneModel): Status => ({ kind: 'ready', model })

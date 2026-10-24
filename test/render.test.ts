@@ -23,6 +23,7 @@ function base(): Report {
     injections: [],
     skills: [],
     compactions: [],
+    inventory: { hooks: [], skills: [], agentMemory: [] },
   }
 }
 
@@ -144,6 +145,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
     injections: [],
     skills: [],
     compactions: [],
+    inventory: { hooks: [], skills: [], agentMemory: [] },
   }
   const out = render(r)
   expect(out).toContain('  user       ~/.claude/rules/context7.md          session_start')

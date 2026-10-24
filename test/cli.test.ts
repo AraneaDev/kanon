@@ -1701,6 +1701,20 @@ test('model --json on the predicted basis still lists the launch files, unjudged
   expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
 })
 
+test('model --json lists every hook, skill and agent memory, on either basis', async () => {
+  const { repo, env } = isolated('kanon-cli-model-inv-')
+  const claude = env.CLAUDE_CONFIG_DIR
+  mkdirSync(join(claude, 'skills', 'deploy'), { recursive: true })
+  writeFileSync(join(claude, 'skills', 'deploy', 'SKILL.md'), 'x\n')
+  writeFileSync(join(claude, 'settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo done' }] }] } }))
+  mkdirSync(join(repo, '.claude', 'agent-memory', 'rev'), { recursive: true })
+  writeFileSync(join(repo, '.claude', 'agent-memory', 'rev', 'MEMORY.md'), 'x\n')
+  const m = JSON.parse(await run(['model', '--json', '--session', 'never-recorded', '--cwd', repo], env))
+  expect(m.hooks).toEqual([{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', injected: null }])
+  expect(m.allSkills.map((s: { name: string; invoked: boolean }) => [s.name, s.invoked])).toEqual([['deploy', false]])
+  expect(m.agentMemory.map((a: { agent: string; path: string }) => [a.agent, a.path])).toEqual([['rev', '.claude/agent-memory/rev/MEMORY.md']])
+})
+
 test('model --json uses the observed report when the session was recorded', async () => {
   const { home, repo } = seeded()
   const out = await run(['model', '--json', '--session', 's', '--cwd', repo], { KANON_HOME: home, CLAUDE_CONFIG_DIR: join(home, 'no-claude-dir') })

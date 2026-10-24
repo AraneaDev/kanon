@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { byScope, inventory, type Places } from '../src/inventory'
+import { byScope, inventory, markHooks, markSkills, type Hook, type Places } from '../src/inventory'
 import { tmp } from './tmp'
 
 function put(path: string, text: string): void {
@@ -186,4 +186,63 @@ test('byScope orders managed, user, project, local, plugins by name, other', () 
     { scope: 'managed' as const, plugin: null, id: 1 },
   ]
   expect(byScope(xs).map((x) => x.id)).toEqual([1, 2, 3, 4, 5, 6, 7])
+})
+
+describe('marks', () => {
+  const hook = (over: Partial<Hook>): Hook => ({ scope: 'user', plugin: null, event: 'SessionStart', matcher: null, command: 'c', source: '/s', ...over })
+  const inj = (hookName: string, command: string | null, plugin: string, chars = 10) => ({ hookName, command, plugin, chars })
+
+  test('an injection marks the hook with its command and event, summed, index the most recent', () => {
+    const hooks = [hook({ command: 'a' }), hook({ command: 'b' })]
+    const marked = markHooks(hooks, [inj('SessionStart:compact', 'a', 'unattributed', 5), inj('Stop', 'a', 'x'), inj('SessionStart:startup', 'a', 'unattributed', 7)])
+    expect(marked.map((h) => [h.command, h.injected])).toEqual([
+      ['a', { count: 2, chars: 12, index: 2 }],
+      ['b', null],
+      ['a', { count: 1, chars: 10, index: 1 }],
+    ])
+    expect(marked[2]).toMatchObject({ scope: 'other', plugin: 'x', event: 'Stop' })
+  })
+
+  test('a command two plugins share marks only the plugin attribution names', () => {
+    const shared = 'sh "$CLAUDE_PLUGIN_ROOT/s.sh"'
+    const hooks = [hook({ scope: 'plugin', plugin: 'one', command: shared }), hook({ scope: 'plugin', plugin: 'two', command: shared })]
+    expect(markHooks(hooks, [inj('SessionStart', shared, 'two')]).map((h) => [h.plugin, h.injected?.count ?? 0])).toEqual([
+      ['one', 0],
+      ['two', 1],
+    ])
+  })
+
+  test('an unattributed shared command marks nothing and lists as other', () => {
+    const shared = 'sh "$CLAUDE_PLUGIN_ROOT/s.sh"'
+    const hooks = [hook({ scope: 'plugin', plugin: 'one', command: shared }), hook({ scope: 'plugin', plugin: 'two', command: shared })]
+    const marked = markHooks(hooks, [inj('SessionStart', shared, 'unattributed')])
+    expect(marked.map((h) => [h.scope, h.injected?.count ?? 0])).toEqual([
+      ['plugin', 0],
+      ['plugin', 0],
+      ['other', 1],
+    ])
+  })
+
+  test('within a scope the most injected characters come first', () => {
+    const hooks = [hook({ command: 'small' }), hook({ command: 'none' }), hook({ command: 'big' })]
+    const marked = markHooks(hooks, [inj('SessionStart', 'small', 'u', 3), inj('SessionStart', 'big', 'u', 30)])
+    expect(marked.map((h) => h.command)).toEqual(['big', 'small', 'none'])
+  })
+
+  test('a null command injection is other with an empty command', () => {
+    expect(markHooks([], [inj('UserPromptSubmit', null, 'unattributed')])).toEqual([
+      { scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', matcher: null, command: '', source: '', injected: { count: 1, chars: 10, index: 0 } },
+    ])
+  })
+
+  test('a skill is invoked by its name or by its path', () => {
+    const base = tmp('kanon-mark-')
+    put(join(base, 'b', 'SKILL.md'), 'x')
+    const skills = [
+      { scope: 'user' as const, plugin: null, name: 'a', path: join(base, 'a', 'SKILL.md') },
+      { scope: 'user' as const, plugin: null, name: 'b', path: join(base, 'b', 'SKILL.md') },
+      { scope: 'user' as const, plugin: null, name: 'c', path: join(base, 'c', 'SKILL.md') },
+    ]
+    expect(markSkills(skills, [{ name: 'a', path: '' }, { name: 'renamed', path: join(base, 'b', 'SKILL.md') }]).map((s) => s.invoked)).toEqual([true, true, false])
+  })
 })

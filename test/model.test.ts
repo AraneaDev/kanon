@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { MODEL_VERSION, paneModel } from '../src/model'
 import { short } from '../src/paths'
 import type { Steered } from '../src/steering'
+import type { Inventoried } from '../src/inventory'
 import type { Report } from '../src/types'
 import { tmp } from './tmp'
 
@@ -56,6 +57,9 @@ test('paneModel maps a report into the pane contract', () => {
     ],
     skills: ['example:skill'],
     compactions: [{ t: '2026-10-24T10:00:00Z', trigger: 'auto', preTokens: 900, postTokens: 100 }],
+    hooks: [],
+    allSkills: [],
+    agentMemory: [],
   })
   expect(m.instructions[0]!.path).toBe(short(foreign, root))
 })
@@ -96,4 +100,25 @@ test('without a report the model is predicted, from steering alone', () => {
   expect(m.injected).toEqual([])
   expect(m.skills).toEqual([])
   expect(m.compactions).toEqual([])
+})
+
+test('the inventory arrives as given, paths shortened and realpathed', () => {
+  const { root, rule } = fixture()
+  const skill = join(root, '.claude', 'skills', 'deploy', 'SKILL.md')
+  mkdirSync(join(root, '.claude', 'skills', 'deploy'), { recursive: true })
+  writeFileSync(skill, 'x\n')
+  const inv: Inventoried = {
+    hooks: [{ scope: 'user', plugin: null, event: 'Stop', matcher: 'Bash', command: 'c', source: '/s', injected: { count: 2, chars: 40, index: 1 } }],
+    skills: [{ scope: 'project', plugin: null, name: 'deploy', path: skill, invoked: true }],
+    agentMemory: [{ scope: 'project', agent: 'rev', path: rule }],
+  }
+  const m = paneModel(null, 'predicted', root, [], inv)
+  expect(m.hooks).toEqual([{ scope: 'user', plugin: null, event: 'Stop', matcher: 'Bash', command: 'c', injected: { count: 2, chars: 40, index: 1 } }])
+  expect(m.allSkills).toEqual([{ scope: 'project', plugin: null, name: 'deploy', path: '.claude/skills/deploy/SKILL.md', real: skill, invoked: true }])
+  expect(m.agentMemory).toEqual([{ scope: 'project', agent: 'rev', path: '.claude/rules/style.md', real: rule }])
+})
+
+test('no inventory given lists none', () => {
+  const { root } = fixture()
+  expect(paneModel(null, 'predicted', root, [])).toMatchObject({ hooks: [], allSkills: [], agentMemory: [] })
 })

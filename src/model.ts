@@ -1,3 +1,4 @@
+import { EMPTY_INVENTORIED, type AgentMemory, type Inventoried, type MarkedHook, type Scope } from './inventory'
 import { realPath, short } from './paths'
 import type { Steered } from './steering'
 import { RULESET, type Origin, type Report } from './types'
@@ -51,6 +52,33 @@ export function groupInjections(injections: ReadonlyArray<{ plugin: string; hook
   return [...groups.values()].sort((a, b) => b.chars - a.chars)
 }
 
+/** A configured hook, or an injection no hook explains (`scope: 'other'`). */
+export interface PaneHook {
+  scope: Scope
+  plugin: string | null
+  event: string
+  matcher: string | null
+  command: string
+  injected: MarkedHook['injected']
+}
+
+export interface PaneSkill {
+  scope: Scope
+  plugin: string | null
+  name: string
+  /** As short() spells it. */
+  path: string
+  real: string
+  invoked: boolean
+}
+
+export interface PaneAgentMemory {
+  scope: AgentMemory['scope']
+  agent: string
+  path: string
+  real: string
+}
+
 export interface PaneModel {
   v: typeof MODEL_VERSION
   root: string
@@ -62,6 +90,11 @@ export interface PaneModel {
   injected: InjectedGroup[]
   skills: string[]
   compactions: Array<{ t: string; trigger: string; preTokens: number; postTokens: number }>
+  /** Every configured hook and every unexplained injection, in scope order. */
+  hooks: PaneHook[]
+  /** Every skill available, in scope order, invoked ones marked. */
+  allSkills: PaneSkill[]
+  agentMemory: PaneAgentMemory[]
 }
 
 /**
@@ -78,7 +111,7 @@ export interface PaneModel {
  * listed, with no verdict, because a pane that dropped it would hide a file
  * that steers the session.
  */
-export function paneModel(report: Report | null, basis: PaneModel['basis'], root: string, steered: Steered[]): PaneModel {
+export function paneModel(report: Report | null, basis: PaneModel['basis'], root: string, steered: Steered[], inv: Inventoried = EMPTY_INVENTORIED): PaneModel {
   const judged = new Map(steered.map((s) => [realPath(s.path), s]))
   const seen = new Set<string>()
   const instructions: PaneItem[] = []
@@ -115,5 +148,8 @@ export function paneModel(report: Report | null, basis: PaneModel['basis'], root
     injected: groupInjections(report?.injections ?? []),
     skills: (report?.skills ?? []).map((s) => s.name),
     compactions: (report?.compactions ?? []).map((c) => ({ t: c.t, trigger: c.trigger, preTokens: c.preTokens, postTokens: c.postTokens })),
+    hooks: inv.hooks.map((h) => ({ scope: h.scope, plugin: h.plugin, event: h.event, matcher: h.matcher, command: h.command, injected: h.injected })),
+    allSkills: inv.skills.map((s) => ({ scope: s.scope, plugin: s.plugin, name: s.name, path: short(s.path, root), real: realPath(s.path), invoked: s.invoked })),
+    agentMemory: inv.agentMemory.map((m) => ({ scope: m.scope, agent: m.agent, path: short(m.path, root), real: realPath(m.path) })),
   }
 }

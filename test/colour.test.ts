@@ -20,6 +20,7 @@ function base(): Report {
     injections: [],
     skills: [],
     compactions: [],
+    inventory: { hooks: [], skills: [], agentMemory: [] },
   }
 }
 
