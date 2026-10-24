@@ -170,7 +170,7 @@ line:
 KANON  5 instruction files and 2 memories steer this session (predicted) · nothing gone, nothing foreign
 ```
 
-Your own files are counted, not listed; `/kanon` has the full list. A session with something worth
+Your own files are counted, not listed; `/kanon` opens the full list. A session with something worth
 knowing about names it:
 
 ```text
@@ -266,6 +266,32 @@ claude plugin install kanon@aranea
 Hooks bind when a session starts, so start a new session before Kanon sees anything. It only sees
 sessions that began after it was installed, and there is no way to reconstruct what happened
 before that.
+
+## The Kanon pane
+
+`/kanon` opens the Kanon pane beside the chat, and `/kanon` again closes it. The pane never opens by
+itself: it opens when you run the command, and it does not remember having been open. Where nothing
+can draw, as in `claude -p` or the SDK, `/kanon` prints the report instead. Desktop sessions that run
+in WSL load no plugins, so the pane is not there either.
+
+The pane groups what steers the session: Instructions, Memory, Injected by hooks, Skills and
+Compaction. Four glyphs carry the findings:
+
+| Glyph | Meaning |
+| --- | --- |
+| `▲` | gone |
+| `≈` | may be stale |
+| `!` | foreign |
+| `✓` | acknowledged |
+
+Each file name is a button that opens its detail in place. The keys are `o` (on a wide terminal, open
+the previewed item), `a` (acknowledge a flagged item, the same record `kanon ack` writes), `b` (back)
+and `r` (retry). On a terminal wider than 130 columns the detail of the previewed item sits beside the
+list. The pane refreshes when a turn ends.
+
+The pane runs `kanon model --json` and lays out what comes back, so it never re-implements Kanon.
+Text Kanon did not write, such as a file name or a line from a rule, has its control characters
+stripped before it is drawn.
 
 ## The `/kanon:report` command
 
@@ -435,7 +461,13 @@ git clone https://github.com/AraneaDev/kanon.git
 cd kanon
 bun install
 bun run check      # typecheck, then the full suite
+sh tools/mod-test.sh   # the pane's own tests, under `claude plugin test`
 ```
+
+`bun test` is rooted at `test/` through `bunfig.toml`. The pane's tests need the plugin kit, which
+only `claude plugin test` provides, so `tools/mod-test.sh` stages the plugin without `test/` and runs
+the kit on that. It needs the `claude` binary, so CI does not run it. The pane's layout is pure and
+covered by `bun test`, which CI does run.
 
 The screenshots above are generated, not taken by hand:
 
