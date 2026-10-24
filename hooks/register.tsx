@@ -92,6 +92,8 @@ export const register: Register = on => {
       feedback: mod.feedback,
       frame: mod.frame,
       content: mod.content,
+      // A hotkey works only while the pane holds the keyboard; the footer says when it does not.
+      focused: e.props.isFocused,
     }
     // What `n`, `p` and the wheel page by: the size this render lays out for.
     mod.drawn = { columns: frame.columns, rows: frame.rows }

@@ -57,7 +57,17 @@ export interface LayoutInput {
   frame: number
   /** The content view's text; null (or absent) outside it. */
   content?: Content | null
+  /**
+   * Whether the pane holds the keyboard (the engine's `isFocused`). A hotkey
+   * works only then: live, after Escape or a click in the prompt, `b` went
+   * into the prompt. False puts the way back in the footer; absent is taken
+   * as focused.
+   */
+  focused?: boolean
 }
+
+/** What the footer says, in place of the basis, while the pane does not hold the keyboard. */
+export const FOCUS_HINT = 'click the pane for its keys'
 
 /** The engine refuses a tree over 100,000 characters; Knossos keeps this margin under it, and so does Kanon. */
 export const TEXT_BUDGET = 90_000
@@ -106,8 +116,10 @@ export function layout(input: LayoutInput): Row[] {
   if (status.kind === 'loading') return loadingRows(width, height, input.frame)
   if (status.kind === 'error') return errorRows(stripControl(status.reason), width, height)
   const model = shown(status.model)
-  if (input.view.kind === 'content') return contentRows(model, input.view, input.content ?? { loading: true }, width, height, input.feedback)
-  return readyRows(model, input.view, width, height, input.feedback)
+  // The footer's right edge: the basis, or how to give the pane the keyboard.
+  const note = input.focused === false ? FOCUS_HINT : model.basis
+  if (input.view.kind === 'content') return contentRows(model, input.view, input.content ?? { loading: true }, width, height, input.feedback, note)
+  return readyRows(model, input.view, width, height, input.feedback, note)
 }
 
 /**
@@ -159,7 +171,7 @@ function errorRows(reason: string, width: number, height: number): Row[] {
   return rows
 }
 
-function readyRows(model: ShownModel, view: Exclude<View, { kind: 'content' }>, width: number, height: number, feedback: string | null): Row[] {
+function readyRows(model: ShownModel, view: Exclude<View, { kind: 'content' }>, width: number, height: number, feedback: string | null, note: string): Row[] {
   const items = [...model.instructions, ...model.memory]
   const opened = view.kind === 'detail' && 'real' in view ? (items.find(i => i.real === view.real) ?? null) : null
   const openedInjection = view.kind === 'detail' && 'injection' in view ? (model.injected.find(g => g.key === view.injection) ?? null) : null
@@ -177,7 +189,7 @@ function readyRows(model: ShownModel, view: Exclude<View, { kind: 'content' }>, 
             ...(items.length + model.injected.length > 0 ? LIST_KEYS : []),
             ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
           ]
-  const footer = footerRow(keys, model.basis, feedback, width)
+  const footer = footerRow(keys, note, feedback, width)
   if (height === 1) return [footer]
 
   const budget = height - 1
@@ -216,7 +228,7 @@ function pinned(body: Row[], budget: number, footer: Row): Row[] {
  * every key gives up the first ones: the last is `b`, wherever there is one,
  * and a view nobody can leave is worse than one with fewer shortcuts.
  */
-function footerRow(keys: Segment[][], basis: string, feedback: string | null, width: number): Row {
+function footerRow(keys: Segment[][], note: string, feedback: string | null, width: number): Row {
   let kept = keys
   while (kept.length > 1 && 1 + keysWidth(kept) > width) kept = kept.slice(1)
   const left: Segment[] = [{ text: ' ' }, ...kept.flatMap((k, i) => (i === 0 ? k : [{ text: '  ' }, ...k]))]
@@ -225,7 +237,7 @@ function footerRow(keys: Segment[][], basis: string, feedback: string | null, wi
     if (width - segmentsWidth(left) - segmentsWidth(right) >= 1) return spread('footer', left, right, width)
     return { key: 'footer', segments: [{ text: fit(` ${feedback}`, width), color: HEADING }] }
   }
-  return spread('footer', left, [{ text: `${basis} `, dim: true }], width)
+  return spread('footer', left, [{ text: `${note} `, dim: true }], width)
 }
 
 const keysWidth = (keys: Segment[][]): number => keys.reduce((n, k, i) => n + segmentsWidth(k) + (i === 0 ? 0 : 2), 0)
@@ -581,7 +593,7 @@ function position(first: number, last: number, of: number): string {
  * of the keys that apply. Full width at every tier: reading wants the room
  * more than it wants the list beside it.
  */
-function contentRows(model: ShownModel, view: Extract<View, { kind: 'content' }>, content: Content, columns: number, rows: number, feedback: string | null): Row[] {
+function contentRows(model: ShownModel, view: Extract<View, { kind: 'content' }>, content: Content, columns: number, rows: number, feedback: string | null, note: string): Row[] {
   const g = contentGeometry(columns, rows)
   const height = heightOf(g.width, rows)
   const keys: Segment[][] = []
@@ -602,7 +614,7 @@ function contentRows(model: ShownModel, view: Extract<View, { kind: 'content' }>
     body = [dimRow('content-loading', ' Reading…', g.inner)]
   }
   keys.push([backKey()])
-  const footer = footerRow(keys, model.basis, feedback, g.width)
+  const footer = footerRow(keys, note, feedback, g.width)
   if (height === 1) return [footer]
   const section: Section = { key: 'content', ...contentTitle(model, view, content), body }
   return pinned(cardLines(section, g.width, g.tier, g.density), height - 1, footer)
