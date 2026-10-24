@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.24](https://github.com/AraneaDev/kanon/compare/v0.0.23...v0.0.24) (2026-10-24)
+
+
+### Fixes
+
+* show an item's text in its detail, not behind v ([#59](https://github.com/AraneaDev/kanon/issues/59)) ([87a64df](https://github.com/AraneaDev/kanon/commit/87a64dfc0d80b3349107a9eea4d9afeb9172249c))
+
 ## [0.0.23](https://github.com/AraneaDev/kanon/compare/v0.0.22...v0.0.23) (2026-10-24)
 
 
