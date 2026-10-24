@@ -3,6 +3,7 @@
 #
 #   bash tools/screenshots/make.sh            every shot
 #   bash tools/screenshots/make.sh report     just the report shot
+#   bash tools/screenshots/make.sh pane       the two pane images (SVG)
 #
 # Every shot runs the real CLI against a planted repository. Nothing here
 # starts a Claude Code session or spends a token, so this is free to run as

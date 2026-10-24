@@ -32,11 +32,11 @@ test('an interactive terminal gets colour', () => {
 })
 
 /**
- * The case that matters most. `/kanon` runs the CLI through Claude Code's
+ * The case that matters most. `/kanon:report` runs the CLI through Claude Code's
  * Bash tool, so stdout is a pipe and the report is on its way into a model's
  * context. Escape codes there cost tokens and come back out as literal text.
  */
-test('a pipe gets no colour, which is the /kanon path', () => {
+test('a pipe gets no colour, which is the /kanon:report path', () => {
   expect(colourEnabled({}, false)).toBe(false)
 })
 

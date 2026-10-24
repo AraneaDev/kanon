@@ -8,6 +8,7 @@ import { brief, type BriefInput } from './brief'
 import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { digest, merge, SNAPSHOT_VERSION } from './drift'
+import { paneModel, MODEL_VERSION, type PaneModel } from './model'
 import { prune, readStart, readTail } from './limits'
 import { cleanLine, compactions, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
@@ -144,13 +145,13 @@ function recordedRoot(path: string): string | undefined {
  * command or the Bash tool (as of this ruleset there is no
  * `CLAUDE_SESSION_ID` in that environment; hooks get it separately, on
  * their stdin JSON, which is how the Recorder and the two session hooks
- * get theirs). `/kanon` therefore has no id to pass, so an omitted or
+ * get theirs). `/kanon:report` therefore has no id to pass, so an omitted or
  * empty `--session` falls back to a recorded session file instead.
  *
  * Picking merely the most recently written file is not safe: with two
  * Claude Code sessions open in two different repositories, the newer file
  * belongs to whichever session last recorded an event, which has nothing
- * to do with which repository `/kanon` is being run from. Handing repo A's
+ * to do with which repository `/kanon:report` is being run from. Handing repo A's
  * report repo B's events doesn't just name the wrong session, it fabricates
  * a FOREIGN alarm on repo B's own legitimate file and reports repo A's real
  * CLAUDE.md as missing -- a false alarm is worse than none, so the fallback
@@ -404,15 +405,18 @@ function writtenAt(root: string, path: string, kind: Steered['kind'], deadline?:
  */
 function steering(root: string, files: Classified[], events: Event[], extra: Classified[] = []): Steered[] {
   const steered = judgeSteering(root, files, events, transcriptFacts(events), extra)
-  if (steered === null) {
-    return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
-  }
+  if (steered === null) return unjudged(files)
   try {
     writeSteering(kanonHome(), root, steered)
   } catch {
     // Housekeeping for the hot path; see above.
   }
   return steered
+}
+
+/** The instruction files with no verdicts: what is shown when judging failed, rather than nothing. */
+function unjudged(files: Classified[]): Steered[] {
+  return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
 }
 
 /**
@@ -445,6 +449,10 @@ function judgeSteering(
   // discovery, judging and the cache write stay inside SessionStart's 5 s.
   const deadline = Date.now() + judgeBudget()
   try {
+    // Every path inside steer() is guarded, so no fixture can make it throw;
+    // this lets a test reach the fallback the guard below exists for. It is
+    // not a user setting.
+    if (process.env.KANON_JUDGE_FAIL === '1') throw new Error('judging forced to fail')
     return steer({
       root,
       // The user's home, not the Claude config dir: a note's `~/` means the
@@ -531,7 +539,7 @@ function alarmLines(report: Report): string[] {
 }
 
 /**
- * Only SessionEnd commits. /kanon runs this same command mid-session,
+ * Only SessionEnd commits. /kanon:report runs this same command mid-session,
  * and a commit there would erase the baseline this very report is
  * describing, making every subsequent run say "nothing changed".
  * An unobserved session (nothing recorded, or a log that recorded
@@ -596,6 +604,47 @@ function runReport(session: string | undefined, cwd: string): void {
     // survive without corrupting the file that's already there.
   }
   if (flag('commit-state') && report.loaded.length > 0) commitSnapshot(report, session)
+}
+
+/**
+ * The pane's data as one JSON line. Built from the report's own functions,
+ * so the pane and `report` cannot judge differently, and it reads steering
+ * the way the interactive report does: the cache when there is one, else
+ * judged now. It never writes the cache. Any failure is one error object on
+ * stdout and exit 0: the pane parses stdout and shows the reason, and a
+ * nonzero exit would show it nothing.
+ */
+function runModel(cwd: string): void {
+  try {
+    console.log(JSON.stringify(buildModel(cwd)))
+  } catch (err) {
+    console.log(JSON.stringify({ v: MODEL_VERSION, error: err instanceof Error ? err.message : String(err) }))
+  }
+}
+
+function buildModel(cwd: string): PaneModel {
+  const sessionArg = arg('session')
+  const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
+  // Kept even when it recorded no instruction load: the session's transcript
+  // still says which hooks injected text, which skills ran and when it
+  // compacted, and those are observations whatever the basis.
+  let recorded: Report | null = null
+  if (session !== undefined && existsSync(sessionFile(session))) {
+    recorded = collect(session, cwd, true)
+    if (recorded.loaded.length > 0) return paneModel(recorded, 'observed', recorded.root, recorded.steered)
+  }
+  // Unobserved: predict, exactly as `brief` does, with every loadable file judged.
+  const home = claudeHome()
+  const root = sessionRoot(cwd)
+  const { candidates } = discover(cwd, home)
+  const files = launchFiles(candidates, root, home)
+  const launch = new Set(files.map((f) => f.path))
+  const extra = loadableFiles(candidates, root, home).filter((f) => !launch.has(f.path))
+  const events = runEvents(session)
+  // A failed judging lists the files unjudged, exactly as steering() does: an
+  // empty list would tell the person the session has no instruction files.
+  const steered = readSteering(kanonHome(), root) ?? judgeSteering(root, files, events, transcriptFacts(events), extra) ?? unjudged(files)
+  return paneModel(recorded, 'predicted', root, steered)
 }
 
 function runBrief(session: string | undefined, cwd: string): void {
@@ -784,6 +833,24 @@ function itemPath(spelled: string, root: string): string {
  * An item that is not flagged is said plainly, with exit 0: a stale command
  * pasted from an old brief is not an error worth a stack trace.
  */
+/**
+ * The steering model for this root, judged now: the recorded session's loads
+ * when there are any, else the predicted launch files, with every other
+ * loadable file judged after them, exactly as the brief and the pane judge.
+ * Null when judging fails. Never writes the cache; the caller decides.
+ */
+function freshSteering(cwd: string, root: string): Steered[] | null {
+  const session = latestSessionFor(cwd)
+  const home = claudeHome()
+  const { candidates } = discover(cwd, home)
+  const report = session !== undefined && existsSync(sessionFile(session)) ? collect(session, cwd, false) : null
+  const files = report && report.loaded.length > 0 ? report.loaded : launchFiles(candidates, root, home)
+  const listed = new Set(files.map((f) => realPath(f.path)))
+  const extra = loadableFiles(candidates, root, home).filter((f) => !listed.has(realPath(f.path)))
+  const events = runEvents(session)
+  return judgeSteering(root, files, events, transcriptFacts(events), extra)
+}
+
 function runAck(spelled: string | undefined, cwd: string): void {
   if (spelled === undefined) {
     console.log('usage: kanon ack --cwd <path> <item-path>')
@@ -791,8 +858,21 @@ function runAck(spelled: string | undefined, cwd: string): void {
   }
   const root = sessionRoot(cwd)
   const path = itemPath(spelled, root)
-  const items = readSteering(kanonHome(), root) ?? []
-  const item = items.find((s) => s.path === path && s.verdict !== null)
+  const flagged = (list: Steered[]) => list.find((s) => s.path === path && s.verdict !== null)
+  let items = readSteering(kanonHome(), root) ?? []
+  let item = flagged(items)
+  if (!item) {
+    // With no cache, or one from before this item was flagged, the pane judges
+    // on the fly and offers `a` on what it found. Judge the same way here, so
+    // the acknowledgement records the verdict and digest the person saw; the
+    // writes below then cache it.
+    const fresh = freshSteering(cwd, root)
+    const found = fresh ? flagged(fresh) : undefined
+    if (fresh && found) {
+      items = fresh
+      item = found
+    }
+  }
   if (!item) {
     console.log(`kanon: ${spelled} is not flagged`)
     return
@@ -873,6 +953,9 @@ function main(): void {
     // See above.
   }
 
+  // Before the session lookup, which can throw: `model` owns its failures.
+  if (command === 'model' && flag('json')) return runModel(cwd)
+
   const sessionArg = arg('session')
   const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
 
@@ -890,7 +973,7 @@ function main(): void {
     if (phrase !== undefined) return runWhose(phrase, session, cwd)
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn] [--session <id>] [--cwd <path>] [--path <file>] [--transcript <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn|model --json] [--session <id>] [--cwd <path>] [--path <file>] [--transcript <path>] [--hook] [--commit-state]')
 }
 
 try {

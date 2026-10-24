@@ -21,7 +21,7 @@ nothing here fakes a TTY. The brief is captured without it, because the brief
 is never coloured: it is written for a model, and this shot should show
 exactly what the model receives.
 
-Usage:  python screenshots.py [report|brief|admits|all]
+Usage:  python screenshots.py [report|brief|admits|audit|pane|all]
 
 Free: no Claude Code session is started and no token is spent. Generating the
 shots makes no network request either, though make.sh's first run installs
@@ -474,7 +474,83 @@ def sample():
     sys.stdout.write(f"SESSION  {shown}{' ' * max(1, 27 - len(shown))}{ruleset}\n{rest}")
 
 
-SHOTS = {"report": shot_report, "brief": shot_brief, "admits": shot_admits, "audit": shot_audit}
+def pane_session(home, repo, claude):
+    """What the pane shot needs beyond the instruction files: memory and a transcript.
+
+    Smaller than steering() on purpose. The pane shot is about one finding,
+    a memory that names a script which no longer exists, so the transcript
+    holds one hook injection and one skill and nothing else, and the memory
+    directory holds the gone memory, one that may be stale, and the index.
+    Every value is invented; the record shapes follow test/fixtures/transcript/.
+    """
+    import json
+    project = claude / "projects" / "-home-you-project"
+    transcript = project / "demo.jsonl"
+    memory = project / "memory"
+    write(memory / "MEMORY.md", "- [Release flow](release-flow.md)\n- [Config](config.md)\n")
+    write(memory / "release-flow.md", "Cut a release with `scripts/release.sh`.\n")
+    write(memory / "config.md", "Settings are read by `loadLegacyConfig()`.\n")
+
+    command = "${CLAUDE_PLUGIN_ROOT}/hooks/session-start"
+    write(claude / "plugins" / "cache" / "example-market" / "example-plugin" / "1.0.0" / "hooks" / "hooks.json",
+          json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}))
+    text = "You have example-plugin. " * 120
+    stdout = json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}})
+    t = "2026-08-27T09:14:03.000Z"
+    records = [
+        {"type": "attachment", "timestamp": t,
+         "attachment": {"type": "hook_success", "hookName": "SessionStart", "command": command, "stdout": stdout}},
+        {"type": "attachment", "timestamp": t,
+         "attachment": {"type": "hook_additional_context", "hookName": "SessionStart", "content": [text]}},
+        {"type": "attachment", "timestamp": "2026-08-27T09:40:00.000Z",
+         "attachment": {"type": "invoked_skills", "skills": [
+             {"name": "example-plugin:brainstorming", "path": "/home/you/.claude/skills/brainstorming/SKILL.md"}]}},
+    ]
+    write(transcript, "".join(json.dumps(r) + "\n" for r in records))
+
+    log = home / "sessions" / "demo.jsonl"
+    start = json.dumps({"t": "2026-08-27T09:14:02Z", "hook": "SessionStart", "raw": {
+        "session_id": "demo", "hook_event_name": "SessionStart", "cwd": str(repo),
+        "source": "startup", "transcript_path": str(transcript)}})
+    log.write_text(start + "\n" + log.read_text())
+
+
+def pane_svg(model, out, *args):
+    """Draw the pane from a saved `kanon model --json` with tools/screenshots/pane-svg.ts."""
+    proc = subprocess.run(["bun", str(Path(__file__).with_name("pane-svg.ts")), str(model), str(out), *args],
+                          capture_output=True)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr.decode("utf8", "replace"))
+        raise SystemExit(f"pane-svg.ts exited {proc.returncode}")
+    sys.stdout.write(proc.stdout.decode("utf8").replace(str(ROOT) + "/", ""))
+
+
+def shot_pane():
+    """The Kanon pane, as SVG: the hero beside a chat, and one gone memory opened.
+
+    The pane is a terminal UI and pyte cannot run it, so these two are drawn
+    by pane-svg.ts instead, from the pane's own layout() over the JSON the
+    real CLI printed. The brief runs first, as the SessionStart hook would,
+    so the steering cache the model reads is the one a session would have;
+    its first line heads the chat column. The model's paths are already
+    short (root-relative or `~/`), and its realpaths are never drawn.
+    """
+    import json
+    home, repo, claude = plant("pane")
+    record(home, loaded_session(repo))
+    pane_session(home, repo, claude)
+    hook = json.loads(run_cli(["brief", "--hook", "--session", "demo", "--cwd", str(repo)], home, claude, False))
+    brief = home / "brief.txt"
+    brief.write_text(hook["hookSpecificOutput"]["additionalContext"])
+    model = home / "model.json"
+    model.write_bytes(run_cli(["model", "--json", "--session", "demo", "--cwd", str(repo)], home, claude, False))
+    gone = next(i["real"] for i in json.loads(model.read_text())["memory"]
+                if (i["verdict"] or {}).get("level") == "gone")
+    pane_svg(model, ASSETS / "pane.svg", "--columns", "96", "--rows", "29", "--chat", str(brief))
+    pane_svg(model, ASSETS / "pane-detail.svg", "--columns", "96", "--rows", "12", "--detail", gone)
+
+
+SHOTS = {"report": shot_report, "brief": shot_brief, "admits": shot_admits, "audit": shot_audit, "pane": shot_pane}
 
 
 def main():

@@ -8,7 +8,7 @@ import type { Origin } from './types'
  * terminal a person is looking at. Every other thing Kanon writes stays
  * byte-for-byte plain, and each for its own reason:
  *
- *  - `/kanon` runs the CLI through Claude Code's Bash tool. The report is
+ *  - `/kanon:report` runs the CLI through Claude Code's Bash tool. The report is
  *    piped into a model's context and echoed back out as markdown, so escape
  *    codes there would cost tokens on the way in and render as literal
  *    garbage on the way out. Colour cannot reach a model; it can only

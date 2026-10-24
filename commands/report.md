@@ -14,7 +14,7 @@ Claude Code does not hand a running session its own session id, so the
 recently recorded session that was itself recorded from this repository (or
 this directory, outside a repository). It will not fall back to a session
 from a different repository, even a more recently active one, so running
-`/kanon` from two repositories at once never mixes their reports up.
+`/kanon:report` from two repositories at once never mixes their reports up.
 
 If the output is `kanon: no recorded session found for <path>`, say that
 plainly: no instruction loads have been recorded for this directory, and Kanon
