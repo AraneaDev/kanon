@@ -4,9 +4,10 @@
  * segments one Text, and each pressable segment a Button. Drawing acts on
  * nothing: what a press does is handed in.
  *
- * A Button's label is the segment's own text, `a: acknowledge` when it has a
- * hotkey, since a terminal Button does not show its hotkey itself; so it
- * takes exactly the cells the layout gave it. A Button cannot take a
+ * A Button with a hotkey draws `x: label` itself, so its label is the
+ * segment's text with that `x: ` taken off: the layout lays out `b: back`
+ * and the engine draws exactly that. Passing the whole text drew `b: b:`
+ * once the box cut it (seen live in 0.0.22). A Button cannot take a
  * background, so it stands in a Box of the segment's width that carries it.
  *
  * JSX compiles to the engine's `h` and `Fragment` globals; neither is
@@ -31,6 +32,13 @@ const sameStyle = (a: Segment, b: Segment): boolean => JSON.stringify(textStyle(
 /** A Button's key: by its hotkey where it has one (one per view), else by its place in the row. */
 const buttonKey = (row: Row, s: Segment, i: number): string => (s.hotkey === undefined ? `${row.key}#${i}` : `key-${s.hotkey}`)
 
+/** The label a Button is given: its text without the `x: ` the engine draws for its hotkey. */
+export function buttonLabel(s: Segment): string {
+  if (s.hotkey === undefined) return s.text
+  const prefix = `${s.hotkey}: `
+  return s.text.startsWith(prefix) ? s.text.slice(prefix.length) : s.text
+}
+
 /** The pane's rows as one column, `columns` wide. */
 export function drawRows(ui: Ui, rows: Row[], columns: number, press: (action: Action) => void): RenderElement {
   const { Box } = ui
@@ -54,7 +62,7 @@ function drawRow(ui: Ui, row: Row, columns: number, press: (action: Action) => v
           <Button
             key={key}
             plain
-            label={s.text}
+            label={buttonLabel(s)}
             {...(s.hotkey === undefined ? {} : { hotkey: s.hotkey })}
             {...(s.dim ? { dimColor: true } : {})}
             onPress={() => press(action)}

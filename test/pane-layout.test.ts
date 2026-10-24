@@ -520,3 +520,20 @@ describe('v in the detail view', () => {
     expect(text(file)).toStartWith(' v: view  b: back ')
   })
 })
+
+/**
+ * A hotkey works only while the pane holds the keyboard. Live, after Escape
+ * or a click in the prompt, `b` went into the prompt and the pane seemed not
+ * to go back at all. The footer says so instead of the basis.
+ */
+describe('focus', () => {
+  it('a pane without the keyboard says how to give it, in place of the basis', () => {
+    const footer = text(run({ focused: false }).at(-1)!)
+    expect(footer).toContain('click the pane for its keys')
+    expect(footer).not.toContain(small.basis)
+  })
+  it('a focused pane, or one that does not say, shows the basis', () => {
+    expect(text(run({ focused: true }).at(-1)!)).toContain(small.basis)
+    expect(text(run({}).at(-1)!)).toContain(small.basis)
+  })
+})

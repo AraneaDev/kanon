@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-857%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-859%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -90,6 +90,11 @@ wheel scrolls it. `b` steps back one level, from the text to the detail and from
 list. The other keys are `o` (on a wide terminal, open the previewed item), `a` (acknowledge a
 flagged item, the same record `kanon ack` writes) and `r` (retry). On a terminal wider than 130
 columns the detail of the previewed item sits beside the list. The pane refreshes when a turn ends.
+
+The keys work only while the pane has the keyboard. Escape, or a click in the prompt, gives the
+keyboard back to the prompt, and a `b` typed then goes into your message instead. The footer says
+`click the pane for its keys` whenever that is the case; a click on the pane, or its tab, hands the
+keyboard back.
 
 <p align="center">
   <img src="assets/pane-detail.svg" alt="The Kanon pane with one memory opened in place: release-flow.md, marked gone. It shows the path, the origin user, the reason not observed, the evidence that it names scripts/release.sh which no longer exists, and the state not acknowledged. The footer offers a: acknowledge, v: view and b: back" width="640">
