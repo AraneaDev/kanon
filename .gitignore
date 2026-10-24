@@ -5,7 +5,6 @@ dist/
 *.bak
 .claude/
 .momus/
-CLAUDE.md
 tools/screenshots/.venv/
 /.superpowers/
 tools/screenshots/__pycache__/
