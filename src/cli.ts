@@ -625,9 +625,13 @@ function runModel(cwd: string): void {
 function buildModel(cwd: string): PaneModel {
   const sessionArg = arg('session')
   const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
+  // Kept even when it recorded no instruction load: the session's transcript
+  // still says which hooks injected text, which skills ran and when it
+  // compacted, and those are observations whatever the basis.
+  let recorded: Report | null = null
   if (session !== undefined && existsSync(sessionFile(session))) {
-    const report = collect(session, cwd, true)
-    if (report.loaded.length > 0) return paneModel(report, 'observed', report.root, report.steered)
+    recorded = collect(session, cwd, true)
+    if (recorded.loaded.length > 0) return paneModel(recorded, 'observed', recorded.root, recorded.steered)
   }
   // Unobserved: predict, exactly as `brief` does, with every loadable file judged.
   const home = claudeHome()
@@ -640,7 +644,7 @@ function buildModel(cwd: string): PaneModel {
   // A failed judging lists the files unjudged, exactly as steering() does: an
   // empty list would tell the person the session has no instruction files.
   const steered = readSteering(kanonHome(), root) ?? judgeSteering(root, files, events, transcriptFacts(events), extra) ?? unjudged(files)
-  return paneModel(null, 'predicted', root, steered)
+  return paneModel(recorded, 'predicted', root, steered)
 }
 
 function runBrief(session: string | undefined, cwd: string): void {
@@ -829,6 +833,24 @@ function itemPath(spelled: string, root: string): string {
  * An item that is not flagged is said plainly, with exit 0: a stale command
  * pasted from an old brief is not an error worth a stack trace.
  */
+/**
+ * The steering model for this root, judged now: the recorded session's loads
+ * when there are any, else the predicted launch files, with every other
+ * loadable file judged after them, exactly as the brief and the pane judge.
+ * Null when judging fails. Never writes the cache; the caller decides.
+ */
+function freshSteering(cwd: string, root: string): Steered[] | null {
+  const session = latestSessionFor(cwd)
+  const home = claudeHome()
+  const { candidates } = discover(cwd, home)
+  const report = session !== undefined && existsSync(sessionFile(session)) ? collect(session, cwd, false) : null
+  const files = report && report.loaded.length > 0 ? report.loaded : launchFiles(candidates, root, home)
+  const listed = new Set(files.map((f) => realPath(f.path)))
+  const extra = loadableFiles(candidates, root, home).filter((f) => !listed.has(realPath(f.path)))
+  const events = runEvents(session)
+  return judgeSteering(root, files, events, transcriptFacts(events), extra)
+}
+
 function runAck(spelled: string | undefined, cwd: string): void {
   if (spelled === undefined) {
     console.log('usage: kanon ack --cwd <path> <item-path>')
@@ -836,8 +858,21 @@ function runAck(spelled: string | undefined, cwd: string): void {
   }
   const root = sessionRoot(cwd)
   const path = itemPath(spelled, root)
-  const items = readSteering(kanonHome(), root) ?? []
-  const item = items.find((s) => s.path === path && s.verdict !== null)
+  const flagged = (list: Steered[]) => list.find((s) => s.path === path && s.verdict !== null)
+  let items = readSteering(kanonHome(), root) ?? []
+  let item = flagged(items)
+  if (!item) {
+    // With no cache, or one from before this item was flagged, the pane judges
+    // on the fly and offers `a` on what it found. Judge the same way here, so
+    // the acknowledgement records the verdict and digest the person saw; the
+    // writes below then cache it.
+    const fresh = freshSteering(cwd, root)
+    const found = fresh ? flagged(fresh) : undefined
+    if (fresh && found) {
+      items = fresh
+      item = found
+    }
+  }
   if (!item) {
     console.log(`kanon: ${spelled} is not flagged`)
     return

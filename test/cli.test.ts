@@ -1718,3 +1718,42 @@ test('model --json prints the error shape and exits 0 when it fails', async () =
   expect(typeof e.error).toBe('string')
   expect(e.error.length).toBeGreaterThan(0)
 })
+
+/**
+ * A session that recorded no instruction load is a prediction, but its
+ * transcript still says which skills ran and what hooks injected. Those are
+ * observations whatever the basis, so the pane shows them on a predicted
+ * model too rather than an empty Skills card.
+ */
+test('model --json on the predicted basis still carries the transcript\'s skills', async () => {
+  const { home, repo, env } = isolated('kanon-cli-model-facts-')
+  writeFileSync(join(repo, 'CLAUDE.md'), 'Keep it short.\n')
+  const transcript = join(home, 'transcript.jsonl')
+  writeFileSync(
+    transcript,
+    JSON.stringify({ type: 'attachment', timestamp: '2026-10-24T00:00:01.000Z', attachment: { type: 'invoked_skills', skills: [{ name: 'example-plugin:brainstorming', path: 'plugin:example-plugin:brainstorming', content: 'x' }] } }) + '\n',
+  )
+  mkdirSync(join(home, 'sessions'), { recursive: true })
+  writeFileSync(
+    join(home, 'sessions', 's.jsonl'),
+    JSON.stringify({ t: '2026-10-24T00:00:00Z', hook: 'SessionStart', raw: { session_id: 's', hook_event_name: 'SessionStart', cwd: repo, source: 'startup', transcript_path: transcript } }) + '\n',
+  )
+  const model = JSON.parse(await run(['model', '--json', '--session', 's', '--cwd', repo], env))
+  expect(model.basis).toBe('predicted')
+  expect(model.skills).toEqual(['example-plugin:brainstorming'])
+})
+
+/**
+ * With no steering cache the pane judges on the fly and offers `a` on what it
+ * found. Acknowledging that item must work, not answer "is not flagged":
+ * `ack` judges the same way, caches it, and records the acknowledgement.
+ */
+test('ack works on a flagged item when no steering cache exists yet', async () => {
+  const { home, repo, env } = isolated('kanon-cli-ack-nocache-')
+  writeFileSync(join(repo, 'CLAUDE.md'), 'The parser lives in `/home/user-kanon-test/gone/parser.ts`.\n')
+  const out = await run(['ack', '--cwd', repo, 'CLAUDE.md'], env)
+  expect(out).toContain('kanon: acknowledged CLAUDE.md')
+  expect(existsSync(join(home, 'state'))).toBe(true)
+  const brief = await run(['brief', '--cwd', repo], env)
+  expect(brief).not.toContain('gone     CLAUDE.md')
+})
