@@ -1768,3 +1768,58 @@ test('ack works on a flagged item when no steering cache exists yet', async () =
   const brief = await run(['brief', '--cwd', repo], env)
   expect(brief).not.toContain('gone     CLAUDE.md')
 })
+
+// ------------------------------------------------------------ kanon show
+
+test('show prints a file as JSON lines: tabs expanded, control characters stripped, the title as the pane names it', async () => {
+  const { home, repo, env } = isolated('kanon-cli-show-')
+  const file = join(repo, 'CLAUDE.md')
+  writeFileSync(file, '# Project\n\tindented\x1b[31m red\r\nlast\n')
+  const r = await runFull(['show', '--cwd', repo, '--path', file], env)
+  expect(r.code).toBe(0)
+  expect(JSON.parse(r.out)).toEqual({ v: 1, title: 'CLAUDE.md', lines: ['# Project', '  indented[31m red', 'last'], truncated: false })
+  // It writes nothing: not even the housekeeping every other command does.
+  expect(readdirSync(home).sort()).toEqual(['repo'])
+})
+
+test('show reads an oversized file by its start and says it was cut', async () => {
+  const { repo, env } = isolated('kanon-cli-show-big-')
+  const file = join(repo, 'big.md')
+  writeFileSync(file, 'line\n'.repeat(1024 * 1024))
+  const shown = JSON.parse(await run(['show', '--cwd', repo, '--path', file], env))
+  expect(shown.truncated).toBe(true)
+  expect(shown.lines.length).toBeLessThan(1024 * 1024)
+  expect(shown.lines.every((l: string) => l === 'line' || 'line'.startsWith(l))).toBe(true)
+})
+
+test('show answers a file it cannot read with an error object and exit 0', async () => {
+  const { repo, env } = isolated('kanon-cli-show-absent-')
+  const r = await runFull(['show', '--cwd', repo, '--path', join(repo, 'absent.md')], env)
+  expect(r.code).toBe(0)
+  const o = JSON.parse(r.out)
+  expect(o.v).toBe(1)
+  expect(typeof o.error).toBe('string')
+  expect(o.lines).toBeUndefined()
+})
+
+test('show prints the n-th injection of this run, the index the model gives its row', async () => {
+  const { repo, env } = withTranscript('kanon-cli-show-inj-')
+  const model = JSON.parse(await run(['model', '--json', '--session', 's', '--cwd', repo], env))
+  const prompt = model.injected.find((i: { hookName: string }) => i.hookName === 'UserPromptSubmit')
+  expect(prompt.index).toBe(1)
+  const shown = JSON.parse(await run(['show', '--cwd', repo, '--session', 's', '--injection', String(prompt.index)], env))
+  expect(shown).toEqual({ v: 1, title: 'unattributed UserPromptSubmit', lines: ['x'.repeat(400)], truncated: false })
+  const first = JSON.parse(await run(['show', '--cwd', repo, '--session', 's', '--injection', '0'], env))
+  expect(first.title).toBe('example-plugin SessionStart')
+})
+
+test('show answers an injection this run does not have, or a bad index, with an error object', async () => {
+  const { repo, env } = withTranscript('kanon-cli-show-inj-bad-')
+  for (const n of ['2', '-1', 'x', '1.5']) {
+    const r = await runFull(['show', '--cwd', repo, '--session', 's', '--injection', n], env)
+    expect(r.code).toBe(0)
+    expect(typeof JSON.parse(r.out).error).toBe('string')
+  }
+  const none = await runFull(['show', '--cwd', repo], env)
+  expect(typeof JSON.parse(none.out).error).toBe('string')
+})

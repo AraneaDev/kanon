@@ -3,8 +3,9 @@
  * command toggling the pane, what a press does, and the end of a turn.
  * register.tsx wires each event to one of these and does nothing else.
  */
+import { contentPage, contentScroll, type Target } from '../lib/layout'
 import type { Action } from '../lib/types'
-import { acknowledge, refresh } from './cli'
+import { acknowledge, readContent, refresh } from './cli'
 import type { Port } from './port'
 import { mod, PANE, paneClosed, paneOpened, setStatus, setView } from './state'
 
@@ -118,9 +119,60 @@ export async function endTurn(io: Port, agentId: string | undefined, isAborted: 
 
 /** What pressing a Button (or its hotkey) does. */
 export async function act(io: Port, action: Action): Promise<void> {
-  if (action.kind === 'open') return setView(io, { kind: 'detail', real: action.real })
-  if (action.kind === 'back') return setView(io, { kind: 'list' })
+  if (action.kind === 'open') return setView(io, 'real' in action ? { kind: 'detail', real: action.real } : { kind: 'detail', injection: action.injection })
+  if (action.kind === 'back') return back(io)
   if (action.kind === 'ack') return acknowledge(io, action.real)
+  if (action.kind === 'view') return view(io)
+  if (action.kind === 'next' || action.kind === 'previous') return page(io, action.kind === 'next' ? 1 : -1)
   setStatus(io, { kind: 'loading' })
   await refresh(io)
+}
+
+const targetOf = (v: Target): Target => ('real' in v ? { real: v.real } : { injection: v.injection })
+
+/** `b`: one level back. The text goes back to the detail it was opened from, the detail to the list. */
+function back(io: Port): void {
+  const v = mod.view
+  if (v.kind === 'content') {
+    mod.content = null
+    mod.reading += 1
+    return setView(io, { kind: 'detail', ...targetOf(v) })
+  }
+  setView(io, { kind: 'list' })
+}
+
+/**
+ * `v`: the text of what the detail shows. The content view opens at once,
+ * reading, and the text replaces that when `kanon show` answers, unless the
+ * person has gone back or closed the pane meanwhile.
+ */
+async function view(io: Port): Promise<void> {
+  const v = mod.view
+  if (v.kind !== 'detail') return
+  const target = targetOf(v)
+  const reading = ++mod.reading
+  mod.content = { loading: true }
+  setView(io, { kind: 'content', ...target, scroll: 0 })
+  const content = await readContent(io, target)
+  if (reading !== mod.reading || !mod.open) return
+  mod.content = content
+  io.ui.invalidate('ui.render')
+}
+
+/** `n` and `p`: a page of the text forward or back, a page being the rows the pane showed at its last render. */
+function page(io: Port, dir: 1 | -1): void {
+  if (mod.view.kind !== 'content') return
+  scrollContent(io, mod.view.scroll + dir * contentPage(mod.drawn.columns, mod.drawn.rows))
+}
+
+/**
+ * Moves the text to `to`, held inside it; false outside the content view.
+ * The wheel and the page keys both land here, so they clamp alike.
+ */
+export function scrollContent(io: Port, to: number): boolean {
+  const v = mod.view
+  if (v.kind !== 'content') return false
+  const scroll = contentScroll({ content: mod.content, ...mod.drawn }, to)
+  if (scroll !== v.scroll) setView(io, { ...v, scroll })
+  return true
 }

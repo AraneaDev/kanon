@@ -18,21 +18,32 @@
  * ends `n more ↓`. Only the wide tier has a marker: it marks the item the
  * right half previews. Narrower, each file name is its own open button.
  */
-import type { PaneItem, PaneModel } from '../../src/model'
+import type { InjectedGroup, PaneItem, PaneModel } from '../../src/model'
 import { stripControl } from './control'
 import { besideRows, cardInner, cardRows, gridColumns, moreRows, type Section } from './cards'
 import { MARK, mark, type Mark } from './marks'
 import { ACCENT, HEADING } from './palette'
 import { button, clip, dimRow, segmentsWidth, spread, walkedRow } from './rows'
-import { cells, fit, fitStart, grouped, padEnd, pathParts } from './text'
+import { cells, fit, fitStart, grouped, padEnd, pathParts, spaces, wrapCells } from './text'
 import { tierOf, type Tier } from './tiers'
 import type { Action, Row, Segment } from './types'
 
 export type { Action, Row, Segment } from './types'
 export { rowWidth } from './rows'
 
-/** The list, or one item opened in place, by its realpath. */
-export type View = { kind: 'list' } | { kind: 'detail'; real: string }
+/** What a detail or the content view is about: an item by its realpath, or a collapsed injection by its key ({@link injectionKey}). */
+export type Target = { real: string } | { injection: string }
+/**
+ * The list; one item or injection opened in place; or the text of one, read
+ * from `scroll`, the first row shown. `b` steps back one level: content to
+ * detail to list.
+ */
+export type View = { kind: 'list' } | ({ kind: 'detail' } & Target) | ({ kind: 'content'; scroll: number } & Target)
+/**
+ * The text the content view shows, as `kanon show` printed it, independent of
+ * the model's status: the lines, still reading, or why it could not be read.
+ */
+export type Content = { title: string; lines: string[]; truncated: boolean } | { loading: true } | { error: string }
 /** What the mod knows about the session: still reading it, the model, or why it could not read it. */
 export type Status = { kind: 'loading' } | { kind: 'ready'; model: PaneModel } | { kind: 'error'; reason: string }
 export interface LayoutInput {
@@ -44,6 +55,8 @@ export interface LayoutInput {
   feedback: string | null
   /** The loading spinner's frame; the mod advances it on a clock while loading, so the layout needs none. */
   frame: number
+  /** The content view's text; null (or absent) outside it. */
+  content?: Content | null
 }
 
 /** The engine refuses a tree over 100,000 characters; Knossos keeps this margin under it, and so does Kanon. */
@@ -64,18 +77,37 @@ export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 const blankRow = (key: string): Row => ({ key, segments: [{ text: ' ' }] })
 
 /**
+ * The key a collapsed injection is opened by: its plugin and hook, the pair
+ * it is grouped by. Not its index, which moves to the newest injection every
+ * time the hook fires again, so an injection opened across a turn's end
+ * would close under the person.
+ */
+export const injectionKey = (g: Pick<InjectedGroup, 'plugin' | 'hookName'>): string => JSON.stringify([g.plugin, g.hookName])
+
+/** An injection as the layout draws it: names stripped, and the key it is opened by, taken from the names as the model gave them. */
+type ShownInjection = InjectedGroup & { key: string }
+type ShownModel = Omit<PaneModel, 'injected'> & { injected: ShownInjection[] }
+
+/** The rows of the pane's height a layout `columns` wide can use: `rows`, or fewer when the text budget caps it. */
+function heightOf(columns: number, rows: number): number {
+  return Math.max(0, Math.min(Math.floor(rows), Math.floor(TEXT_BUDGET / Math.max(1, columns))))
+}
+
+/**
  * The pane's rows. Never more than `rows` (fewer when the text budget caps
  * the height), never one wider than `columns`.
  */
 export function layout(input: LayoutInput): Row[] {
   const width = Math.max(0, Math.floor(input.columns))
   // Every row is at most `width` cells, so this many rows can never exceed the budget.
-  const height = Math.max(0, Math.min(Math.floor(input.rows), Math.floor(TEXT_BUDGET / Math.max(1, width))))
+  const height = heightOf(width, input.rows)
   if (width === 0 || height === 0) return []
   const { status } = input
   if (status.kind === 'loading') return loadingRows(width, height, input.frame)
   if (status.kind === 'error') return errorRows(stripControl(status.reason), width, height)
-  return readyRows(shown(status.model), input.view, width, height, input.feedback)
+  const model = shown(status.model)
+  if (input.view.kind === 'content') return contentRows(model, input.view, input.content ?? { loading: true }, width, height, input.feedback)
+  return readyRows(model, input.view, width, height, input.feedback)
 }
 
 /**
@@ -85,7 +117,7 @@ export function layout(input: LayoutInput): Row[] {
  * display point can miss it. `real` is left exactly as given: it is the
  * action's key, never drawn, and `kanon ack` must receive it unchanged.
  */
-function shown(model: PaneModel): PaneModel {
+function shown(model: PaneModel): ShownModel {
   const item = (i: PaneItem): PaneItem => ({
     ...i,
     path: stripControl(i.path),
@@ -99,7 +131,7 @@ function shown(model: PaneModel): PaneModel {
     basis: stripControl(model.basis) as PaneModel['basis'],
     instructions: model.instructions.map(item),
     memory: model.memory.map(item),
-    injected: model.injected.map(i => ({ ...i, plugin: stripControl(i.plugin), hookName: stripControl(i.hookName) })),
+    injected: model.injected.map(i => ({ ...i, key: injectionKey(i), plugin: stripControl(i.plugin), hookName: stripControl(i.hookName) })),
     skills: model.skills.map(stripControl),
     compactions: model.compactions.map(c => ({ ...c, t: stripControl(c.t), trigger: stripControl(c.trigger) })),
   }
@@ -127,21 +159,24 @@ function errorRows(reason: string, width: number, height: number): Row[] {
   return rows
 }
 
-function readyRows(model: PaneModel, view: View, width: number, height: number, feedback: string | null): Row[] {
+function readyRows(model: ShownModel, view: Exclude<View, { kind: 'content' }>, width: number, height: number, feedback: string | null): Row[] {
   const items = [...model.instructions, ...model.memory]
-  const opened = view.kind === 'detail' ? (items.find(i => i.real === view.real) ?? null) : null
+  const opened = view.kind === 'detail' && 'real' in view ? (items.find(i => i.real === view.real) ?? null) : null
+  const openedInjection = view.kind === 'detail' && 'injection' in view ? (model.injected.find(g => g.key === view.injection) ?? null) : null
   const tier = tierOf(width)
   // The wide tier previews an item beside the list: the opened one, else the first flagged one.
   // Only there is there a marker, an `o` that opens the previewed item, and an `a` for it;
   // narrower, each file name is its own open button.
-  const previewed = tier === 'wide' ? (opened ?? items.find(flagged) ?? null) : null
+  const previewed = tier === 'wide' && openedInjection === null ? (opened ?? items.find(flagged) ?? null) : null
   const keys: Segment[][] =
     opened !== null
       ? detailKeys(opened).map(k => [k])
-      : [
-          ...(items.length > 0 ? LIST_KEYS : []),
-          ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
-        ]
+      : openedInjection !== null
+        ? INJECTION_KEYS
+        : [
+            ...(items.length + model.injected.length > 0 ? LIST_KEYS : []),
+            ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
+          ]
   const footer = footerRow(keys, model.basis, feedback, width)
   if (height === 1) return [footer]
 
@@ -149,27 +184,42 @@ function readyRows(model: PaneModel, view: View, width: number, height: number, 
   let body: Row[]
   if (tier === 'wide') {
     const [left, right] = gridColumns(width, LIST_SHARE)
-    const detail = previewed !== null ? detailRows(previewed, right, tier, budget) : hintRows(right, items.length === 0)
-    body = besideRows(listRows(model, left, tier, budget, previewed?.real ?? null), detail, left)
+    const detail =
+      openedInjection !== null
+        ? injectionDetailRows(openedInjection, right, tier, budget)
+        : previewed !== null
+          ? detailRows(previewed, right, tier, budget)
+          : hintRows(right, items.length === 0)
+    body = besideRows(listRows(model, left, tier, budget, previewed?.real ?? openedInjection?.key ?? null), detail, left)
   } else if (opened !== null) {
     body = detailRows(opened, width, tier, budget)
+  } else if (openedInjection !== null) {
+    body = injectionDetailRows(openedInjection, width, tier, budget)
   } else {
     body = listRows(model, width, tier, budget, null)
   }
-  body = body.slice(0, budget)
-  // The footer is pinned to the bottom: blank rows fill what the body leaves.
-  const fill = Array.from({ length: budget - body.length }, (_, i) => blankRow(`fill-${i}`))
-  return [...body, ...fill, footer]
+  return pinned(body, budget, footer)
+}
+
+/** `body` cut to `budget` rows, blank rows filling what it leaves, and the footer pinned under them. */
+function pinned(body: Row[], budget: number, footer: Row): Row[] {
+  const cut = body.slice(0, budget)
+  const fill = Array.from({ length: budget - cut.length }, (_, i) => blankRow(`fill-${i}`))
+  return [...cut, ...fill, footer]
 }
 
 /**
- * The footer: the keys that work in this view, as buttons, and against the
- * right edge the basis, or the feedback while there is one. The feedback
- * replaces the basis rather than the keys, so a key stays pressable through
- * its two seconds; when both do not fit, the feedback wins.
+ * The footer: the keys that work in this view, and against the right edge
+ * the basis, or the feedback while there is one. The feedback replaces the
+ * basis rather than the keys, so a key stays pressable through its two
+ * seconds; when both do not fit, the feedback wins. A footer too narrow for
+ * every key gives up the first ones: the last is `b`, wherever there is one,
+ * and a view nobody can leave is worse than one with fewer shortcuts.
  */
 function footerRow(keys: Segment[][], basis: string, feedback: string | null, width: number): Row {
-  const left: Segment[] = [{ text: ' ' }, ...keys.flatMap((k, i) => (i === 0 ? k : [{ text: '  ' }, ...k]))]
+  let kept = keys
+  while (kept.length > 1 && 1 + keysWidth(kept) > width) kept = kept.slice(1)
+  const left: Segment[] = [{ text: ' ' }, ...kept.flatMap((k, i) => (i === 0 ? k : [{ text: '  ' }, ...k]))]
   if (feedback !== null) {
     const right: Segment[] = [{ text: `${feedback} `, color: HEADING }]
     if (width - segmentsWidth(left) - segmentsWidth(right) >= 1) return spread('footer', left, right, width)
@@ -177,6 +227,8 @@ function footerRow(keys: Segment[][], basis: string, feedback: string | null, wi
   }
   return spread('footer', left, [{ text: `${basis} `, dim: true }], width)
 }
+
+const keysWidth = (keys: Segment[][]): number => keys.reduce((n, k, i) => n + segmentsWidth(k) + (i === 0 ? 0 : 2), 0)
 
 /**
  * A key the engine handles rather than a Button of the pane's, drawn the way
@@ -193,10 +245,14 @@ const engineKey = (key: string, label: string): Segment[] => [{ text: key, color
  */
 const LIST_KEYS: Segment[][] = [engineKey('tab', 'move'), engineKey('enter', 'open')]
 
+const viewKey = (): Segment => button({ kind: 'view' }, 'view', 'v')
+const backKey = (): Segment => button({ kind: 'back' }, 'back', 'b')
+const INJECTION_KEYS: Segment[][] = [[viewKey()], [backKey()]]
+
 /** `a: acknowledge`, for an item with a verdict not yet acknowledged; else nothing. */
 const ackKey = (item: PaneItem): Segment[] => (item.verdict !== null && !item.acknowledged ? [button({ kind: 'ack', real: item.real }, 'acknowledge', 'a')] : [])
 
-const detailKeys = (item: PaneItem): Segment[] => [...ackKey(item), button({ kind: 'back' }, 'back', 'b')]
+const detailKeys = (item: PaneItem): Segment[] => [...ackKey(item), viewKey(), backKey()]
 
 /** Needs the person's eye: a verdict not yet acknowledged, or a file from a dependency. */
 const flagged = (item: PaneItem): boolean => (item.verdict !== null && !item.acknowledged) || item.origin === 'foreign'
@@ -230,14 +286,14 @@ const DENSITIES: Density[] = [
   { gap: false, under: false },
 ]
 
-function listRows(model: PaneModel, width: number, tier: Tier, budget: number, marked: string | null): Row[] {
+function listRows(model: ShownModel, width: number, tier: Tier, budget: number, marked: string | null): Row[] {
   const inner = cardInner(width, tier)
   const groups = groupsOf(model, tier, inner)
   const { shown, limits, density } = allocate(groups, budget)
   return groups.flatMap((g, i) => (shown[i] ? cardLines(sectionOf(g, inner, limits[i]!, marked), width, tier, density) : []))
 }
 
-function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
+function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
   const showOrigin = tier !== 'narrow' && inner >= ORIGIN_MIN
   const itemGroup = (key: string, title: string, items: PaneItem[], origin: boolean): Group => {
     const sorted = sortFlagged(items)
@@ -250,13 +306,14 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
       rows: (width, limit, marked) => sorted.slice(0, limit).map(it => itemRow(key, it, width, it.real === marked, origin)),
     }
   }
-  const plainGroup = <T>(key: string, title: string, list: T[], row: (x: T, width: number) => Segment[]): Group => ({
+  const plainGroup = <T>(key: string, title: string, list: T[], row: (x: T, width: number) => Segment[], id?: (x: T) => string): Group => ({
     key,
     title,
     length: list.length,
     flagged: 0,
     note: [],
-    rows: (width, limit) => list.slice(0, limit).map((x, i) => plainRow(`${key}:${i}`, row(x, width), width)),
+    rows: (width, limit, marked) =>
+      list.slice(0, limit).map((x, i) => (id === undefined ? plainRow(`${key}:${i}`, row(x, width), width) : walkedRow(`${key}:${id(x)}`, id(x) === marked, [{ text: ' ' }, ...row(x, width)], width))),
   })
 
   const pw = Math.min(NAME_MAX, Math.max(0, ...model.injected.map(i => cells(i.plugin))))
@@ -267,11 +324,14 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
     itemGroup('instructions', 'Instructions', model.instructions, showOrigin),
     itemGroup('memory', 'Memory', model.memory, false),
     plainGroup('injected', 'Injected by hooks', model.injected, (inj, width) => {
-      const names: Segment[] = [{ text: padEnd(fit(inj.plugin, pw), pw + 2) }, { text: padEnd(fit(inj.hookName, hw), hw + 2), dim: true }]
+      // The plugin name is the button that opens the injection, as a file name opens a file.
+      const plugin = fit(inj.plugin, pw)
+      const open: Segment[] = plugin === '' ? [] : [button({ kind: 'open', injection: inj.key }, plugin)]
+      const names: Segment[] = [...open, { text: spaces(pw + 2 - cells(plugin)) }, { text: padEnd(fit(inj.hookName, hw), hw + 2), dim: true }]
       const detail: Segment[] = [{ text: padEnd(times(inj.count), cw + 2), dim: true }, { text: kilo(inj.chars), color: HEADING }, { text: ' chars', dim: true }]
       // Narrow gives up the kind detail before the names: they are the row.
       return tier === 'narrow' && segmentsWidth(names) + segmentsWidth(detail) + 2 > width ? names : [...names, ...detail]
-    }),
+    }, inj => inj.key),
     plainGroup('skills', 'Skills', model.skills, name => [{ text: name }]),
     plainGroup('compaction', 'Compaction', model.compactions, c => {
       const time = /T(\d\d:\d\d)/.exec(c.t)?.[1]
@@ -409,14 +469,28 @@ function allocate(groups: Group[], budget: number): { shown: boolean[]; limits: 
 
 // -------------------------------------------------------------- the detail
 
+/** A detail's labelled row: the label in its column, dim, then the value, cut to the card's inner width. */
+function fieldOf(inner: number): (key: string, label: string, segments: Segment[]) => Row {
+  return (key, label, segments) => ({
+    key: `detail-${key}`,
+    segments: clip([{ text: '  ' }, { text: padEnd(label, LABEL_COLUMN), dim: true }, ...segments], inner),
+  })
+}
+
+/** A detail card in `budget` rows: the spacing goes before any of the content does. */
+function detailCard(section: Section, width: number, tier: Tier, budget: number): Row[] {
+  const lines = DENSITIES.map(d => cardLines(section, width, tier, d))
+  return (lines.find(l => l.length <= budget) ?? lines[lines.length - 1]!).slice(0, budget)
+}
+
+/** The name a card shows for an item: its file name. */
+const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
+
 /** An item opened in place: what it is, where it came from, and for a flag its evidence and whether it was acknowledged. */
 function detailRows(item: PaneItem, width: number, tier: Tier, budget: number): Row[] {
   const inner = cardInner(width, tier)
   const value = inner - 2 - LABEL_COLUMN
-  const field = (key: string, label: string, segments: Segment[]): Row => ({
-    key: `detail-${key}`,
-    segments: clip([{ text: '  ' }, { text: padEnd(label, LABEL_COLUMN), dim: true }, ...segments], inner),
-  })
+  const field = fieldOf(inner)
   const rows: Row[] = [
     field('path', 'path', pathSegments(item, value)),
     field('origin', 'origin', [{ text: item.origin }]),
@@ -432,11 +506,118 @@ function detailRows(item: PaneItem, width: number, tier: Tier, budget: number): 
   }
   const state = markOf(item)
   const note = state === MARK.none ? [] : [mark(state, ' '), { text: state.legend, dim: true }]
-  const title = item.path.slice(item.path.lastIndexOf('/') + 1)
-  const section: Section = { key: 'detail', title, subtitle: item.kind, note, body: rows }
-  // The spacing goes before any of the content does.
-  const lines = DENSITIES.map(d => cardLines(section, width, tier, d))
-  return (lines.find(l => l.length <= budget) ?? lines[lines.length - 1]!).slice(0, budget)
+  return detailCard({ key: 'detail', title: baseName(item.path), subtitle: item.kind, note, body: rows }, width, tier, budget)
+}
+
+/**
+ * A collapsed injection opened in place: whose it is, which hook, how often
+ * it fired and how much it added. `v` shows the most recent one's text, so
+ * the count says which one that will be.
+ */
+function injectionDetailRows(g: ShownInjection, width: number, tier: Tier, budget: number): Row[] {
+  const field = fieldOf(cardInner(width, tier))
+  const many = g.count > 1
+  const rows: Row[] = [
+    field('plugin', 'plugin', [{ text: g.plugin }]),
+    field('hook', 'hook', [{ text: g.hookName }]),
+    field('count', 'injected', many ? [{ text: `${grouped(g.count)} times` }, { text: ', v shows the most recent', dim: true }] : [{ text: 'once' }]),
+    field('size', 'size', [{ text: grouped(g.chars), color: HEADING }, { text: many ? ' chars in total' : ' chars', dim: true }]),
+  ]
+  return detailCard({ key: 'detail', title: g.hookName, subtitle: 'injection', body: rows }, width, tier, budget)
+}
+
+// ------------------------------------------------------------- the content
+
+/** The fewest rows of text the content view keeps before it gives up the spacing around its title. */
+const CONTENT_MIN = 3
+
+/** How the content view uses a pane `columns` by `rows`: its tier, the cells a line of text gets, the card's spacing, and how many rows of text show. */
+function contentGeometry(columns: number, rows: number): { width: number; tier: Tier; inner: number; text: number; density: Density; page: number } {
+  const width = Math.max(0, Math.floor(columns))
+  const budget = Math.max(0, heightOf(width, rows) - 1)
+  const tier = tierOf(width)
+  const inner = cardInner(width, tier)
+  const head = (d: Density) => (d.gap ? 1 : 0) + 1 + (d.under ? 1 : 0)
+  // The position line under the text takes one row.
+  const density = DENSITIES.find(d => head(d) + 1 + CONTENT_MIN <= budget) ?? DENSITIES[DENSITIES.length - 1]!
+  return { width, tier, inner, text: Math.max(1, inner - 1), density, page: Math.max(1, budget - head(density) - 1) }
+}
+
+/** The rows of text the content view shows at once in a pane `columns` by `rows`: what `n` and `p` page by. */
+export function contentPage(columns: number, rows: number): number {
+  return contentGeometry(columns, rows).page
+}
+
+/** Each line of the text cut into rows of `width` cells, each row remembering the line it came from. */
+function contentLines(lines: string[], width: number): Array<{ text: string; line: number }> {
+  return lines.flatMap((l, line) => {
+    const parts = wrapCells(stripControl(l), width)
+    return (parts.length === 0 ? [''] : parts).map(text => ({ text, line }))
+  })
+}
+
+/**
+ * `scroll` held inside the text: never before its first row, never so far
+ * that the last page is not full. The mod stores only what this returns, so
+ * `p` after scrolling past the end moves at once.
+ */
+export function contentScroll(input: { content: Content | null; columns: number; rows: number }, scroll: number): number {
+  const { content } = input
+  if (content === null || !('lines' in content)) return 0
+  const g = contentGeometry(input.columns, input.rows)
+  const total = contentLines(content.lines, g.text).length
+  return Math.min(Math.max(0, Math.floor(scroll) || 0), Math.max(0, total - g.page))
+}
+
+/** `lines 41–80 of 212`, by the lines of the text the rows came from, not by the rows. */
+function position(first: number, last: number, of: number): string {
+  if (first === last) return `line ${first} of ${of}`
+  return `lines ${first}–${last} of ${of}`
+}
+
+/**
+ * The content view: the text of an item or an injection as a card titled
+ * with it, the rows from `scroll`, where in the text they are, and a footer
+ * of the keys that apply. Full width at every tier: reading wants the room
+ * more than it wants the list beside it.
+ */
+function contentRows(model: ShownModel, view: Extract<View, { kind: 'content' }>, content: Content, columns: number, rows: number, feedback: string | null): Row[] {
+  const g = contentGeometry(columns, rows)
+  const height = heightOf(g.width, rows)
+  const keys: Segment[][] = []
+  let body: Row[]
+  if ('lines' in content) {
+    const all = contentLines(content.lines, g.text)
+    const start = contentScroll({ content, columns, rows }, view.scroll)
+    const shown = all.slice(start, start + g.page)
+    if (start + g.page < all.length) keys.push([button({ kind: 'next' }, 'next', 'n')])
+    if (start > 0) keys.push([button({ kind: 'previous' }, 'previous', 'p')])
+    const first = shown[0]
+    const last = shown[shown.length - 1]
+    const at = first === undefined || last === undefined ? 'nothing to show' : `${position(first.line + 1, last.line + 1, content.lines.length)}${content.truncated ? ' · truncated' : ''}`
+    body = [...shown.map((r, i): Row => ({ key: `content-${start + i}`, segments: [{ text: ' ' }, { text: r.text }] })), dimRow('content-at', ` ${at}`, g.inner)]
+  } else if ('error' in content) {
+    body = wrap(stripControl(content.error), g.text).map((line, i): Row => ({ key: `content-error-${i}`, segments: [{ text: ` ${line}`, dim: true }] }))
+  } else {
+    body = [dimRow('content-loading', ' Reading…', g.inner)]
+  }
+  keys.push([backKey()])
+  const footer = footerRow(keys, model.basis, feedback, g.width)
+  if (height === 1) return [footer]
+  const section: Section = { key: 'content', ...contentTitle(model, view, content), body }
+  return pinned(cardLines(section, g.width, g.tier, g.density), height - 1, footer)
+}
+
+/** The content card's title: the item's file name or the injection's hook, as its detail names it; the text's own title when the model no longer has it. */
+function contentTitle(model: ShownModel, target: Target, content: Content): { title: string; subtitle?: string } {
+  if ('real' in target) {
+    const item = [...model.instructions, ...model.memory].find(i => i.real === target.real)
+    if (item !== undefined) return { title: baseName(item.path), subtitle: item.kind }
+  } else {
+    const g = model.injected.find(i => i.key === target.injection)
+    if (g !== undefined) return { title: g.hookName, subtitle: 'injection' }
+  }
+  return { title: 'title' in content ? stripControl(content.title) : '…' }
 }
 
 /** The wide tier's right half with nothing to preview. */

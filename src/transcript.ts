@@ -100,6 +100,21 @@ export function reachesBefore(text: string, since: Date): boolean {
  * cannot be placed on either side of the boundary and is dropped.
  */
 export function readTranscript(text: string, since: Date | null = null): TranscriptFacts {
+  return scan(text, since).facts
+}
+
+/**
+ * The text of each injection of the run, in the order and at the positions
+ * `readTranscript().injections` lists them, so the index the pane shows for
+ * an injection is the index `kanon show --injection` reads back. Kept out of
+ * the facts: every report would otherwise carry every injection's text, and
+ * only `show` ever needs one.
+ */
+export function injectionTexts(text: string, since: Date | null = null): string[] {
+  return scan(text, since).pending.map((p) => p.text)
+}
+
+function scan(text: string, since: Date | null): { facts: TranscriptFacts; pending: Pending[] } {
   const floor = since === null ? null : since.getTime()
   const seen = new Set<string>()
   const pending: Pending[] = []
@@ -184,5 +199,5 @@ export function readTranscript(text: string, since: Date | null = null): Transcr
     chars: p.text.length,
     command: commandFor(p, runs),
   }))
-  return facts
+  return { facts, pending }
 }

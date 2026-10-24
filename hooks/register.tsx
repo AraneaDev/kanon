@@ -11,7 +11,7 @@ import type { Action } from './lib/types'
 import { reportText } from './mod/cli'
 import { drawRows } from './mod/draw'
 import type { Port } from './mod/port'
-import { act, adoptOpenPane, endTurn, startRegistration, toggle } from './mod/session'
+import { act, adoptOpenPane, endTurn, scrollContent, startRegistration, toggle } from './mod/session'
 import { mod, PANE, paneClosed } from './mod/state'
 
 /** The pane's height when the surface names none. */
@@ -72,6 +72,15 @@ export const register: Register = on => {
     return closed
   })
 
+  // The person's wheel over the text scrolls the text; anywhere else the pane scrolls as it would.
+  // The literal is PANE, as below.
+  on('ui.scroll', { component: 'Pane', requestId: 'kanon' }, async ($, e, next) => {
+    if (e.origin.kind !== 'person' || mod.view.kind !== 'content') return next(e)
+    // The layout never draws more rows than the pane has, so there is no page behind the text to hand the wheel to.
+    scrollContent(portOf($), mod.view.scroll + e.by)
+    return {}
+  }).catch(($, e, next) => (next.called ? {} : next(e)))
+
   // The literal is PANE: the validator reads a matcher only when it is spelled out.
   on('ui.render', { component: 'Pane', requestId: 'kanon' }, async ($, e) => {
     const io = portOf($)
@@ -82,7 +91,10 @@ export const register: Register = on => {
       rows: e.props.scroll.bodyRows ?? DEFAULT_ROWS,
       feedback: mod.feedback,
       frame: mod.frame,
+      content: mod.content,
     }
+    // What `n`, `p` and the wheel page by: the size this render lays out for.
+    mod.drawn = { columns: frame.columns, rows: frame.rows }
     // A model with a field missing can make the layout throw, and a skipped
     // render draws nothing at all. The error view says so instead, and its
     // retry reads the model again.

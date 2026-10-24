@@ -108,6 +108,46 @@ function middleCut(dir: string, room: number): string {
   return `${head(chars, left)}…${right > 0 ? tail(chars, right) : ''}`
 }
 
+/**
+ * One line of text in rows of at most `width` cells, for reading rather than
+ * scanning: broken at the last space that fits, the space itself dropped, and
+ * a run with no space in it cut between graphemes. Leading indentation is
+ * kept, because in a rule or a code sample it carries meaning. An empty line
+ * is one empty row. A grapheme wider than `width` alone takes a row of its
+ * own; only a width under two can see that.
+ */
+export function wrapCells(text: string, width: number): string[] {
+  if (width <= 0) return []
+  if (cells(text) <= width) return [text]
+  const out: string[] = []
+  let line: string[] = []
+  let used = 0
+  for (const g of split(text)) {
+    const w = graphemeCells(g)
+    if (used + w > width && line.length > 0) {
+      if (g === ' ') {
+        out.push(line.join(''))
+        line = []
+        used = 0
+        continue
+      }
+      const space = line.lastIndexOf(' ')
+      if (space > 0) {
+        out.push(line.slice(0, space).join(''))
+        line = line.slice(space + 1)
+      } else {
+        out.push(line.join(''))
+        line = []
+      }
+      used = line.reduce((n, c) => n + graphemeCells(c), 0)
+    }
+    line.push(g)
+    used += w
+  }
+  if (line.length > 0) out.push(line.join(''))
+  return out
+}
+
 export const spaces = (n: number): string => ' '.repeat(Math.max(0, n))
 export const padEnd = (text: string, width: number): string => text + spaces(width - cells(text))
 export const padStart = (text: string, width: number): string => spaces(width - cells(text)) + text

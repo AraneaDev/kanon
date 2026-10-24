@@ -8,11 +8,21 @@ import type { Tone } from './palette'
  * draws text rows only.
  */
 /**
- * What pressing a segment does: open an item in place (by its realpath), go
- * back to the list, acknowledge an item (the record `kanon ack` writes), or
- * retry a failed read. The mod turns a segment carrying one into a Button.
+ * What pressing a segment does: open an item in place (by its realpath) or a
+ * collapsed injection (by its key), go back one level, acknowledge an item
+ * (the record `kanon ack` writes), retry a failed read, view the text of what
+ * is open, or page that text. The mod turns a segment carrying one into a
+ * Button.
  */
-export type Action = { kind: 'open'; real: string } | { kind: 'back' } | { kind: 'ack'; real: string } | { kind: 'retry' }
+export type Action =
+  | { kind: 'open'; real: string }
+  | { kind: 'open'; injection: string }
+  | { kind: 'back' }
+  | { kind: 'ack'; real: string }
+  | { kind: 'retry' }
+  | { kind: 'view' }
+  | { kind: 'next' }
+  | { kind: 'previous' }
 
 /**
  * A run of text in one style. `color` is a Claude Code theme key (see
