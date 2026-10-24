@@ -9,7 +9,7 @@ import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { digest, merge, SNAPSHOT_VERSION } from './drift'
 import { paneModel, MODEL_VERSION, type PaneModel } from './model'
-import { prune, readBack, readStart, tooLarge } from './limits'
+import { prune, readBack, readStart } from './limits'
 import { cleanLine, compactions, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
@@ -704,12 +704,20 @@ function shownLines(text: string): string[] {
   return lines.map((l) => stripControl(l.replace(/\t/g, '  ')))
 }
 
+/**
+ * The most `show` hands the pane. The pane wraps the whole text on every
+ * scroll, and at 4 MiB that froze it for over a second per wheel tick; an
+ * instruction file or memory worth reading in a pane is far smaller.
+ */
+const SHOW_MAX = 256 * 1024
+
 function showFile(cwd: string, file: string): Shown {
   const root = sessionRoot(cwd)
   const path = realPath(resolve(cwd, file))
-  const buf = readStart(path)
+  const buf = readStart(path, SHOW_MAX + 1)
   if (buf === null) throw new Error(`kanon could not read ${short(path, root)}`)
-  return { title: short(path, root), lines: shownLines(buf.toString('utf8')), truncated: tooLarge(path) }
+  const truncated = buf.length > SHOW_MAX
+  return { title: short(path, root), lines: shownLines(buf.subarray(0, SHOW_MAX).toString('utf8')), truncated }
 }
 
 function showInjection(cwd: string, n: string): Shown {

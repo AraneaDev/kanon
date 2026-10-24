@@ -1823,3 +1823,17 @@ test('show answers an injection this run does not have, or a bad index, with an 
   const none = await runFull(['show', '--cwd', repo], env)
   expect(typeof JSON.parse(none.out).error).toBe('string')
 })
+
+/**
+ * The pane wraps the whole text on every scroll, so a 4 MiB file froze it for
+ * over a second per wheel tick. `show` hands it at most 256 KiB and says the
+ * rest was cut; the file itself is never the pane's to page through in full.
+ */
+test('show cuts a file at 256 KiB and says so', async () => {
+  const { repo, env } = isolated('kanon-cli-show-cap-')
+  const file = join(repo, 'notes.md')
+  writeFileSync(file, ('y'.repeat(99) + '\n').repeat(3000))
+  const shown = JSON.parse(await run(['show', '--cwd', repo, '--path', file], env))
+  expect(shown.truncated).toBe(true)
+  expect(shown.lines.join('\n').length).toBeLessThanOrEqual(256 * 1024)
+})
