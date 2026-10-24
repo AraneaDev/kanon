@@ -517,8 +517,13 @@ def pane_session(home, repo, claude):
     write(memory / "config.md", "Settings are read by `loadLegacyConfig()`.\n")
 
     command = "${CLAUDE_PLUGIN_ROOT}/hooks/session-start"
-    write(claude / "plugins" / "cache" / "example-market" / "example-plugin" / "1.0.0" / "hooks" / "hooks.json",
-          json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}))
+    plugin = claude / "plugins" / "cache" / "example-market" / "example-plugin" / "1.0.0"
+    write(plugin / "hooks" / "hooks.json", json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}}))
+    write(plugin / "skills" / "brainstorming" / "SKILL.md", "---\nname: brainstorming\n---\nAsk before building.\n")
+    write(claude / "skills" / "house-style" / "SKILL.md", "---\nname: house-style\n---\nWrite in the first person.\n")
+    write(repo / ".claude" / "agent-memory" / "reviewer" / "MEMORY.md", "- Check the changelog on every release.\n")
+    installed(claude, {"example-plugin@example-market": plugin},
+              hooks={"Stop": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/notify.sh"}]}]})
     text = "You have example-plugin. " * 120
     stdout = json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}})
     t = "2026-08-27T09:14:03.000Z"

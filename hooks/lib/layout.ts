@@ -5,8 +5,11 @@
  * it. The mod (hooks/mod) turns the rows into elements and every pressable
  * segment into a Button.
  *
- * The list is layout A: five ruled cards, Instructions, Memory, Injected by
- * hooks, Skills, Compaction, flagged items first within their card. Two
+ * The list is layout A: five ruled cards, Instructions, Memory, Hooks,
+ * Skills, Compaction, flagged items first within their card. Memory ends
+ * with the memory subagents keep; Hooks and Skills list everything
+ * configured or available, in scope order, each row naming where it comes
+ * from in its first column as Instructions names an origin. Two
  * promises hold at every size, and the width sweep in
  * test/pane-layout.test.ts checks both: no row is wider than `columns` and
  * there are never more rows than `rows`, the footer last.
@@ -22,7 +25,7 @@
  * then its text, windowed when it is longer than the room left. There the
  * text gives way before the card does (see `detailGeometry`).
  */
-import type { InjectedGroup, PaneItem, PaneModel } from '../../src/model'
+import type { PaneAgentMemory, PaneHook, PaneItem, PaneModel, PaneSkill } from '../../src/model'
 import { stripControl } from './control'
 import { besideRows, cardInner, cardRows, FRAME, gridColumns, moreRows, type Section } from './cards'
 import { MARK, mark, type Mark } from './marks'
@@ -35,10 +38,10 @@ import type { Action, Row, Segment } from './types'
 export type { Action, Row, Segment } from './types'
 export { rowWidth } from './rows'
 
-/** What a detail is about: an item by its realpath, or a collapsed injection by its key ({@link injectionKey}). */
-export type Target = { real: string } | { injection: string }
+/** What a detail is about: a file (an item, a skill, an agent memory) by its realpath, or a hook by its key ({@link hookKey}). */
+export type Target = { real: string } | { hook: string }
 /**
- * The list, or one item or injection opened in place: its details and, under
+ * The list, or one file or hook opened in place: its details and, under
  * them, its text read from `scroll`, the first row of the text shown (0 when
  * absent). `b` goes back to the list in one step.
  *
@@ -54,7 +57,7 @@ export type View = { kind: 'list' } | ({ kind: 'detail'; scroll?: number } & Tar
 export type Content = { title: string; lines: string[]; truncated: boolean } | { loading: true } | { error: string }
 
 /** The one string a target is known by, so the mod can tell whether the text it holds is the text of what is shown. */
-export const targetKey = (t: Target): string => ('real' in t ? `real:${t.real}` : `injection:${t.injection}`)
+export const targetKey = (t: Target): string => ('real' in t ? `real:${t.real}` : `hook:${t.hook}`)
 /** What the mod knows about the session: still reading it, the model, or why it could not read it. */
 export type Status = { kind: 'loading' } | { kind: 'ready'; model: PaneModel } | { kind: 'error'; reason: string }
 export interface LayoutInput {
@@ -102,16 +105,19 @@ export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 const blankRow = (key: string): Row => ({ key, segments: [{ text: ' ' }] })
 
 /**
- * The key a collapsed injection is opened by: its plugin and hook, the pair
- * it is grouped by. Not its index, which moves to the newest injection every
- * time the hook fires again, so an injection opened across a turn's end
- * would close under the person.
+ * The key a hook is opened by: everything that tells two hooks apart. Not
+ * its injection index, which moves to the newest injection every time the
+ * hook fires again, so a hook opened across a turn's end would close under
+ * the person.
  */
-export const injectionKey = (g: Pick<InjectedGroup, 'plugin' | 'hookName'>): string => JSON.stringify([g.plugin, g.hookName])
+export const hookKey = (h: Pick<PaneHook, 'scope' | 'plugin' | 'event' | 'matcher' | 'command'>): string => JSON.stringify([h.scope, h.plugin, h.event, h.matcher, h.command])
 
-/** An injection as the layout draws it: names stripped, and the key it is opened by, taken from the names as the model gave them. */
-type ShownInjection = InjectedGroup & { key: string }
-type ShownModel = Omit<PaneModel, 'injected'> & { injected: ShownInjection[] }
+/** A hook as the layout draws it: text stripped, and the key it is opened by, taken from the text as the model gave it. */
+type ShownHook = PaneHook & { key: string }
+type ShownModel = Omit<PaneModel, 'hooks'> & { hooks: ShownHook[] }
+
+/** What a hook's detail shows under its card when it added nothing: there is no text to read. */
+const NOTHING_ADDED: Content = { error: 'It added nothing to the context this run.' }
 
 /** The rows of the pane's height a layout `columns` wide can use: `rows`, or fewer when the text budget caps it. */
 function heightOf(columns: number, rows: number): number {
@@ -135,22 +141,41 @@ export function layout(input: LayoutInput): Row[] {
   const note = input.focused === false ? FOCUS_HINT : model.basis
   const content = input.content ?? { loading: true }
   const opened = openedOf(model, input.view)
-  if (opened !== null) return detailView(opened, input.view.kind === 'detail' ? (input.view.scroll ?? 0) : 0, content, width, height, input.feedback, note)
+  if (opened !== null) {
+    const shownContent = opened.kind === 'hook' && opened.hook.injected === null ? NOTHING_ADDED : content
+    return detailView(opened, input.view.kind === 'detail' ? (input.view.scroll ?? 0) : 0, shownContent, width, height, input.feedback, note)
+  }
   return listView(model, content, width, height, input.feedback, note)
 }
 
-/** An item or a collapsed injection, as a detail shows it. */
-type Opened = { kind: 'item'; item: PaneItem } | { kind: 'injection'; group: ShownInjection }
+/** What a detail can show: an item, a hook, a skill or an agent memory. */
+type Opened =
+  | { kind: 'item'; item: PaneItem }
+  | { kind: 'hook'; hook: ShownHook }
+  | { kind: 'skill'; skill: PaneSkill }
+  | { kind: 'agent'; memory: PaneAgentMemory }
 
-/** What the view has open, as the model has it now; null for the list, or for an item the model no longer has (the list shows instead). */
+/** What the view has open, as the model has it now; null for the list, or for one the model no longer has (the list shows instead). */
 function openedOf(model: ShownModel, view: View): Opened | null {
   if (view.kind !== 'detail') return null
   if ('real' in view) {
     const item = [...model.instructions, ...model.memory].find(i => i.real === view.real)
-    return item === undefined ? null : { kind: 'item', item }
+    if (item !== undefined) return { kind: 'item', item }
+    const memory = model.agentMemory.find(m => m.real === view.real)
+    if (memory !== undefined) return { kind: 'agent', memory }
+    const skill = model.skills.find(s => s.real !== '' && s.real === view.real)
+    return skill === undefined ? null : { kind: 'skill', skill }
   }
-  const group = model.injected.find(g => g.key === view.injection)
-  return group === undefined ? null : { kind: 'injection', group }
+  const hook = model.hooks.find(h => h.key === view.hook)
+  return hook === undefined ? null : { kind: 'hook', hook }
+}
+
+/** Whose text an opened detail shows: a file by its realpath, a hook by its most recent injection, or none. */
+function textOf(opened: Opened): Target | null {
+  if (opened.kind === 'item') return { real: opened.item.real }
+  if (opened.kind === 'agent') return { real: opened.memory.real }
+  if (opened.kind === 'skill') return opened.skill.real === '' ? null : { real: opened.skill.real }
+  return opened.hook.injected === null ? null : { hook: opened.hook.key }
 }
 
 /** The item the wide tier previews beside the list: the first flagged one. */
@@ -158,7 +183,7 @@ const previewOf = (model: ShownModel): PaneItem | null => [...model.instructions
 
 /**
  * Whose text the pane shows at `columns`, so the mod knows what to read: the
- * opened item or injection at any tier, else in the wide tier the previewed
+ * opened file or hook at any tier, else in the wide tier the previewed
  * item, else none. The same decisions {@link layout} makes, from the same
  * input, so the two can never disagree about which text belongs where.
  */
@@ -166,7 +191,7 @@ export function textTarget(input: Pick<LayoutInput, 'status' | 'view' | 'columns
   if (input.status.kind !== 'ready') return null
   const model = shown(input.status.model)
   const opened = openedOf(model, input.view)
-  if (opened !== null) return opened.kind === 'item' ? { real: opened.item.real } : { injection: opened.group.key }
+  if (opened !== null) return textOf(opened)
   if (tierOf(Math.max(0, Math.floor(input.columns))) !== 'wide') return null
   const previewed = previewOf(model)
   return previewed === null ? null : { real: previewed.real }
@@ -174,10 +199,12 @@ export function textTarget(input: Pick<LayoutInput, 'status' | 'view' | 'columns
 
 /**
  * The model with every string the pane draws stripped of control characters
- * (see `control.ts`): paths, origins, kinds, reasons, evidence, plugin, hook and skill names,
+ * (see `control.ts`): paths, origins, kinds, reasons, evidence, plugin names,
+ * hook events, matchers, commands and sources, skill and agent names,
  * compaction triggers and times, the basis. Stripped here, once, so no
  * display point can miss it. `real` is left exactly as given: it is the
- * action's key, never drawn, and `kanon ack` must receive it unchanged.
+ * action's key, never drawn, and `kanon ack` must receive it unchanged. So
+ * is a hook's key, taken from the text as the model gave it.
  */
 function shown(model: PaneModel): ShownModel {
   const item = (i: PaneItem): PaneItem => ({
@@ -193,8 +220,18 @@ function shown(model: PaneModel): ShownModel {
     basis: stripControl(model.basis) as PaneModel['basis'],
     instructions: model.instructions.map(item),
     memory: model.memory.map(item),
-    injected: model.injected.map(i => ({ ...i, key: injectionKey(i), plugin: stripControl(i.plugin), hookName: stripControl(i.hookName) })),
-    skills: model.skills.map(stripControl),
+    hooks: model.hooks.map(h => ({
+      ...h,
+      key: hookKey(h),
+      plugin: h.plugin === null ? null : stripControl(h.plugin),
+      scope: stripControl(h.scope) as PaneHook['scope'],
+      event: stripControl(h.event),
+      matcher: h.matcher === null ? null : stripControl(h.matcher),
+      command: stripControl(h.command),
+      source: stripControl(h.source),
+    })),
+    skills: model.skills.map(s => ({ ...s, scope: stripControl(s.scope) as PaneSkill['scope'], plugin: s.plugin === null ? null : stripControl(s.plugin), name: stripControl(s.name), path: stripControl(s.path) })),
+    agentMemory: model.agentMemory.map(m => ({ ...m, scope: stripControl(m.scope) as PaneAgentMemory['scope'], agent: stripControl(m.agent), path: stripControl(m.path) })),
     compactions: model.compactions.map(c => ({ ...c, t: stripControl(c.t), trigger: stripControl(c.trigger) })),
   }
 }
@@ -232,7 +269,7 @@ function listView(model: ShownModel, content: Content, width: number, height: nu
   const tier = tierOf(width)
   const previewed = tier === 'wide' ? previewOf(model) : null
   const keys: Segment[][] = [
-    ...(items.length + model.injected.length > 0 ? LIST_KEYS : []),
+    ...(items.length + model.hooks.length + model.skills.length + model.agentMemory.length > 0 ? LIST_KEYS : []),
     ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
   ]
   const footer = footerRow(keys, note, feedback, width)
@@ -362,23 +399,54 @@ function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
       list.slice(0, limit).map((x, i) => (id === undefined ? plainRow(`${key}:${i}`, row(x, width), width) : walkedRow(`${key}:${id(x)}`, id(x) === marked, [{ text: ' ' }, ...row(x, width)], width))),
   })
 
-  const pw = Math.min(NAME_MAX, Math.max(0, ...model.injected.map(i => cells(i.plugin))))
-  const cw = Math.max(0, ...model.injected.map(i => cells(times(i.count))))
-  const hw = Math.min(NAME_MAX, Math.max(0, ...model.injected.map(i => cells(i.hookName))))
+  // Where a hook or skill comes from, in its first column as an origin is in
+  // Instructions, and given up in the narrow tier as an origin is.
+  const showWho = tier !== 'narrow'
+  const hw = Math.min(NAME_MAX, Math.max(0, ...model.hooks.map(h => cells(whoOf(h)))))
+  const ew = Math.min(NAME_MAX, Math.max(0, ...model.hooks.map(h => cells(eventOf(h)))))
+  const injected = model.hooks.flatMap(h => (h.injected === null ? [] : [h.injected]))
+  const cw = Math.max(0, ...injected.map(i => cells(times(i.count))))
+  const kw = Math.max(0, ...injected.map(i => cells(`${kilo(i.chars)} chars`)))
+  const markWidth = injected.length === 0 ? 0 : cw + 2 + kw
+  const sw = Math.min(NAME_MAX, Math.max(0, ...model.skills.map(s => cells(whoOf(s)))))
   const tw = Math.min(NAME_MAX, Math.max(0, ...model.compactions.map(c => cells(c.trigger))))
+  const memory = sortFlagged(model.memory)
   return [
     itemGroup('instructions', 'Instructions', model.instructions, showOrigin),
-    itemGroup('memory', 'Memory', model.memory, false),
-    plainGroup('injected', 'Injected by hooks', model.injected, (inj, width) => {
-      // The plugin name is the button that opens the injection, as a file name opens a file.
-      const plugin = fit(inj.plugin, pw)
-      const open: Segment[] = plugin === '' ? [] : [button({ kind: 'open', injection: inj.key }, plugin)]
-      const names: Segment[] = [...open, { text: spaces(pw + 2 - cells(plugin)) }, { text: padEnd(fit(inj.hookName, hw), hw + 2), dim: true }]
-      const detail: Segment[] = [{ text: padEnd(times(inj.count), cw + 2), dim: true }, { text: kilo(inj.chars), color: HEADING }, { text: ' chars', dim: true }]
-      // Narrow gives up the kind detail before the names: they are the row.
-      return tier === 'narrow' && segmentsWidth(names) + segmentsWidth(detail) + 2 > width ? names : [...names, ...detail]
-    }, inj => inj.key),
-    plainGroup('skills', 'Skills', model.skills, name => [{ text: name }]),
+    {
+      // The project's memory, flagged first, then the memory each subagent keeps, which is never judged.
+      key: 'memory',
+      title: 'Memory',
+      length: memory.length + model.agentMemory.length,
+      flagged: memory.filter(flagged).length,
+      note: flagNote(model.memory, tier === 'narrow'),
+      rows: (width, limit, marked) => {
+        const items = memory.slice(0, limit).map(it => itemRow('memory', it, width, it.real === marked, false))
+        return [...items, ...model.agentMemory.slice(0, Math.max(0, limit - items.length)).map(m => agentRow(m, width, m.real === marked))]
+      },
+    },
+    plainGroup('hooks', 'Hooks', model.hooks, (h, width) => {
+      // The event is the button that opens the hook, as a file name opens a file.
+      const event = fit(eventOf(h), ew)
+      const who: Segment[] = showWho ? [{ text: padEnd(fit(whoOf(h), hw), hw + 2), dim: true }] : []
+      const names: Segment[] = [...who, button({ kind: 'open', hook: h.key }, event), { text: spaces(ew + 2 - cells(event)) }]
+      const i = h.injected
+      const said: Segment[] =
+        i === null
+          ? markWidth === 0 ? [] : [{ text: spaces(markWidth) }]
+          : [{ text: padEnd(times(i.count), cw + 2), dim: true }, { text: kilo(i.chars), color: HEADING }, { text: padEnd(' chars', kw - cells(kilo(i.chars))), dim: true }]
+      // Narrow gives up the command before what the hook added: the names and the count are the row.
+      const room = width - 1 - segmentsWidth(names) - segmentsWidth(said) - (markWidth === 0 ? 0 : 2)
+      if (tier === 'narrow' || h.command === '' || room < 4) return i === null ? names : [...names, ...said]
+      return [...names, ...said, ...(markWidth === 0 ? [] : [{ text: '  ' }]), { text: fit(h.command, room), dim: true }]
+    }, h => h.key),
+    plainGroup('skills', 'Skills', model.skills, (s, width) => {
+      const who: Segment[] = showWho ? [{ text: padEnd(fit(whoOf(s), sw), sw + 2), dim: true }] : []
+      const ran: Segment[] = s.invoked ? [{ text: '  ' }, { text: 'invoked', color: ACCENT }] : []
+      const name = fit(s.name, Math.max(1, width - 1 - segmentsWidth(who) - segmentsWidth(ran)))
+      // A skill Claude Code ran that no directory explains has no file to open.
+      return [...who, s.real === '' ? { text: name } : button({ kind: 'open', real: s.real }, name), ...ran]
+    }, s => (s.real === '' ? `name:${s.name}` : s.real)),
     plainGroup('compaction', 'Compaction', model.compactions, c => {
       const time = /T(\d\d:\d\d)/.exec(c.t)?.[1]
       return [
@@ -393,8 +461,24 @@ function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
   ]
 }
 
-/** How many injections a collapsed row stands for: `×88`. */
+/** How many injections a hook's row stands for: `×88`. */
 const times = (n: number): string => `×${grouped(n)}`
+
+/** Where a hook or skill comes from: its plugin's name, else its scope. */
+const whoOf = (x: { scope: string; plugin: string | null }): string => x.plugin ?? x.scope
+
+/** A hook's event with its matcher, as the transcript writes it: `PreToolUse:Bash`. */
+const eventOf = (h: Pick<PaneHook, 'event' | 'matcher'>): string => (h.matcher === null ? h.event : `${h.event}:${h.matcher}`)
+
+/**
+ * A subagent's memory file as a Memory row: the quiet glyph, since it is never
+ * judged, the agent and its scope, then its path, the file name a button.
+ */
+function agentRow(m: PaneAgentMemory, inner: number, marked: boolean): Row {
+  const lead: Segment[] = [{ text: ' ' }, mark(MARK.none, ' '), { text: `${fit(m.agent, NAME_MAX)} · ${m.scope}  `, dim: true }]
+  const room = inner - 1 - segmentsWidth(lead)
+  return walkedRow(`memory:${m.real}`, marked, [...lead, ...pathSegments(m.path, m.real, room)], inner)
+}
 
 /** `42` below a thousand, `9.1k` from there: in thousands, under 50 would read `0.0k`. */
 const kilo = (n: number): string => (n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`)
@@ -408,12 +492,13 @@ function itemRow(group: string, item: PaneItem, inner: number, marked: boolean, 
   const origin: Segment[] = showOrigin ? [{ text: padEnd(item.origin, ORIGIN_COLUMN), dim: true }] : []
   // The marker's column comes first, so the path has what is left after it.
   const room = inner - 1 - segmentsWidth(lead) - segmentsWidth(origin)
-  return walkedRow(`${group}:${item.real}`, marked, [...lead, ...origin, ...pathSegments(item, room)], inner)
+  return walkedRow(`${group}:${item.real}`, marked, [...lead, ...origin, ...pathSegments(item.path, item.real, room)], inner)
 }
 
-function pathSegments(item: PaneItem, room: number): Segment[] {
-  const { dir, base } = pathParts(item.path, room)
-  const action: Action = { kind: 'open', real: item.real }
+/** A path cut in its folders to `room`, the file name a button that opens the file at `real`. */
+function pathSegments(path: string, real: string, room: number): Segment[] {
+  const { dir, base } = pathParts(path, room)
+  const action: Action = { kind: 'open', real }
   return [...(dir === '' ? [] : [{ text: dir, dim: true }]), ...(base === '' ? [] : [{ text: base, press: action }])]
 }
 
@@ -529,25 +614,46 @@ const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
 /** A detail's card with its fields and nothing under them yet: the title, the note, the labelled rows. */
 function cardOf(opened: Opened, inner: number): Section {
   const field = fieldOf(inner)
-  if (opened.kind === 'injection') {
-    // Whose it is, which hook, how often it fired and how much it added; when
-    // it fired more than once, the text under the card is its most recent.
-    const g = opened.group
-    const many = g.count > 1
+  const value = inner - 2 - LABEL_COLUMN
+  if (opened.kind === 'hook') {
+    // Whose it is, what it runs and where that is set, then how often it
+    // injected and how much; when more than once, the text under the card is
+    // its most recent.
+    const h = opened.hook
+    const i = h.injected
+    const many = i !== null && i.count > 1
     const rows: Row[] = [
-      field('plugin', 'plugin', [{ text: g.plugin }]),
-      field('hook', 'hook', [{ text: g.hookName }]),
-      field('count', 'injected', many ? [{ text: `${grouped(g.count)} times` }] : [{ text: 'once' }]),
-      field('size', 'size', [{ text: grouped(g.chars), color: HEADING }, { text: many ? ' chars in total' : ' chars', dim: true }]),
-      ...(many ? [field('shown', 'shown', [{ text: `most recent of ${grouped(g.count)}` }])] : []),
+      field('from', 'from', [{ text: whoOf(h) }]),
+      ...wrap(h.command, value).map((line, n) => field(`command-${n}`, n === 0 ? 'command' : '', [{ text: line }])),
+      ...(h.source === '' ? [] : [field('source', 'source', [{ text: fitStart(h.source, value) }])]),
+      field('count', 'injected', i === null ? [{ text: 'nothing this run', dim: true }] : many ? [{ text: `${grouped(i.count)} times` }] : [{ text: 'once' }]),
+      ...(i === null ? [] : [field('size', 'size', [{ text: grouped(i.chars), color: HEADING }, { text: many ? ' chars in total' : ' chars', dim: true }])]),
+      ...(many ? [field('shown', 'shown', [{ text: `most recent of ${grouped(i.count)}` }])] : []),
     ]
-    return { key: 'detail', title: g.hookName, subtitle: 'injection', body: rows }
+    return { key: 'detail', title: eventOf(h), subtitle: 'hook', body: rows }
+  }
+  if (opened.kind === 'skill') {
+    const s = opened.skill
+    const rows: Row[] = [
+      field('from', 'from', [{ text: whoOf(s) }]),
+      ...(s.real === '' ? [] : [field('path', 'path', pathSegments(s.path, s.real, value))]),
+      field('invoked', 'invoked', s.invoked ? [{ text: 'this run' }] : [{ text: 'not this run', dim: true }]),
+    ]
+    return { key: 'detail', title: s.name, subtitle: 'skill', body: rows }
+  }
+  if (opened.kind === 'agent') {
+    const m = opened.memory
+    const rows: Row[] = [
+      field('agent', 'agent', [{ text: m.agent }]),
+      field('scope', 'scope', [{ text: m.scope }]),
+      field('path', 'path', pathSegments(m.path, m.real, value)),
+    ]
+    return { key: 'detail', title: baseName(m.path), subtitle: 'agent memory', body: rows }
   }
   // What the item is, where it came from, and for a flag its evidence and whether it was acknowledged.
   const item = opened.item
-  const value = inner - 2 - LABEL_COLUMN
   const rows: Row[] = [
-    field('path', 'path', pathSegments(item, value)),
+    field('path', 'path', pathSegments(item.path, item.real, value)),
     field('origin', 'origin', [{ text: item.origin }]),
     field('reason', 'reason', item.reason === null ? [{ text: 'not observed', dim: true }] : [{ text: item.reason }]),
   ]

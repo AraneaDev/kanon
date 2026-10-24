@@ -1,7 +1,6 @@
-import { homedir } from 'node:os'
 import { PLAIN, stripControl, type Paint } from './colour'
 import { driftIsEmpty, type FileDigest } from './drift'
-import { short } from './paths'
+import { short, shortCommand } from './paths'
 import type { Steered } from './steering'
 import type { Classified, Report, Skipped } from './types'
 
@@ -87,20 +86,11 @@ function staleLine(s: Steered, root: string, paint: Paint): string {
 }
 
 /**
- * A hook command as a row shows it: the plugin root left out, the root and
- * the home directory written as they are everywhere else in the report, then
- * cut to the path column.
+ * A hook command as a row shows it (shortCommand), cut to the path column.
  * The command is a settings file's or a plugin's text, so it is stripped too.
  */
 function hookCommand(command: string, root: string): string {
-  // The plugin column names the plugin, so its root is written as nothing:
-  // eight Kanon hooks all read `sh "$CLAUDE_PLUGIN_ROOT/hooks/scrip…` otherwise.
-  const text = stripControl(command)
-    .replace(/\$\{?CLAUDE_PLUGIN_ROOT\}?\//g, '')
-    .split(`${root}/`)
-    .join('')
-    .split(`${homedir()}/`)
-    .join('~/')
+  const text = shortCommand(stripControl(command), root)
   return text.length > PATH_WIDTH - 1 ? `${text.slice(0, PATH_WIDTH - 2)}…` : text
 }
 

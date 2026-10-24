@@ -10,12 +10,12 @@
  */
 import type { PaneModel } from '../../src/model'
 import { stripControl } from '../lib/control'
-import { injectionKey, type Content, type Status, type Target } from '../lib/layout'
+import { hookKey, type Content, type Status, type Target } from '../lib/layout'
 import type { Port, RunResult } from './port'
 import { mod, say, setStatus } from './state'
 
 /** The model version the pane draws (src/model.ts MODEL_VERSION; not imported, the mod loads no file outside hooks/). */
-const MODEL_VERSION = 1
+const MODEL_VERSION = 2
 /** A read of the model. Run off the hook (on the clock), so it does not count against a hook's 10 s. */
 const MODEL_TIMEOUT_MS = 10_000
 /** The report and an acknowledge. The report runs inside the command hook, so it stays under the hook's 10 s. */
@@ -56,7 +56,7 @@ export function parseModel(stdout: string): Status {
   const o = parsed as Record<string, unknown>
   if (typeof o.error === 'string') return { kind: 'error', reason: stripControl(o.error) }
   if (o.v !== MODEL_VERSION) return { kind: 'error', reason: `kanon printed model version ${String(o.v)}; this pane reads version ${MODEL_VERSION}.` }
-  const lists = ['instructions', 'memory', 'injected', 'skills', 'compactions'] as const
+  const lists = ['instructions', 'memory', 'hooks', 'skills', 'agentMemory', 'compactions'] as const
   if (typeof o.root !== 'string' || typeof o.basis !== 'string' || !lists.every(k => Array.isArray(o[k]))) {
     return { kind: 'error', reason: 'kanon printed JSON that is not a pane model.' }
   }
@@ -200,9 +200,9 @@ export async function acknowledge(io: Port, real: string): Promise<void> {
 
 /**
  * The text of what the person asked to read: `kanon show --path <real>` for
- * a file, or `--injection <index>` for the most recent injection of a
- * collapsed row, its index looked up in the model as it stands now. Every
- * argument its own element, as everywhere else.
+ * a file, or `--injection <index>` for a hook's most recent injection, its
+ * index looked up in the model as it stands now. Every argument its own
+ * element, as everywhere else.
  */
 export async function readContent(io: Port, target: Target): Promise<Content> {
   try {
@@ -212,9 +212,10 @@ export async function readContent(io: Port, target: Target): Promise<Content> {
       args = ['show', '--cwd', cwd, '--path', target.real]
     } else {
       const model = mod.status.kind === 'ready' ? mod.status.model : null
-      const group = model?.injected.find(g => injectionKey(g) === target.injection)
-      if (group === undefined) return { error: 'That injection is no longer in this session.' }
-      args = ['show', '--cwd', cwd, '--session', await io.session.id(), '--injection', String(group.index)]
+      const hook = model?.hooks.find(h => hookKey(h) === target.hook)
+      if (hook === undefined) return { error: 'That hook is no longer in this session.' }
+      if (hook.injected === null) return { error: 'It added nothing to the context this run.' }
+      args = ['show', '--cwd', cwd, '--session', await io.session.id(), '--injection', String(hook.injected.index)]
     }
     const result = await runCli(io, args, SHOW_TIMEOUT_MS)
     const content = parseContent(result.stdout)

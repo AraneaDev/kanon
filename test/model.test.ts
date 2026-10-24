@@ -51,36 +51,13 @@ test('paneModel maps a report into the pane contract', () => {
     memory: [
       { path: 'release-flow.md', real: memory, kind: 'memory', origin: 'user', reason: null, verdict: { level: 'gone', evidence: 'names `scripts/release.sh`, which no longer exists' }, acknowledged: false },
     ],
-    injected: [
-      { plugin: 'example', hookName: 'SessionStart:startup', count: 1, chars: 120, index: 0 },
-      { plugin: '?', hookName: 'UserPromptSubmit', count: 1, chars: 30, index: 1 },
-    ],
-    skills: ['example:skill'],
-    compactions: [{ t: '2026-10-24T10:00:00Z', trigger: 'auto', preTokens: 900, postTokens: 100 }],
     hooks: [],
-    allSkills: [],
+    skills: [],
     agentMemory: [],
+    compactions: [{ t: '2026-10-24T10:00:00Z', trigger: 'auto', preTokens: 900, postTokens: 100 }],
   })
+  expect(m.v).toBe(2)
   expect(m.instructions[0]!.path).toBe(short(foreign, root))
-})
-
-test('injections collapse to one row per plugin and hook, the most characters first, each naming its most recent', () => {
-  const { root, report } = fixture()
-  report.injections = [
-    { hookName: 'SessionStart', chars: 120, command: 'x', plugin: 'a' },
-    { hookName: 'UserPromptSubmit', chars: 30, command: null, plugin: 'unattributed' },
-    { hookName: 'UserPromptSubmit', chars: 40, command: null, plugin: 'unattributed' },
-    { hookName: 'SessionStart', chars: 5, command: 'x', plugin: 'a' },
-    { hookName: 'UserPromptSubmit', chars: 500, command: 'y', plugin: 'b' },
-    // Same hook, another plugin: its own row.
-    { hookName: 'SessionStart', chars: 1, command: null, plugin: 'unattributed' },
-  ]
-  expect(paneModel(report, 'observed', root, report.steered).injected).toEqual([
-    { plugin: 'b', hookName: 'UserPromptSubmit', count: 1, chars: 500, index: 4 },
-    { plugin: 'a', hookName: 'SessionStart', count: 2, chars: 125, index: 3 },
-    { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 2, chars: 70, index: 2 },
-    { plugin: 'unattributed', hookName: 'SessionStart', count: 1, chars: 1, index: 5 },
-  ])
 })
 
 test('a loaded file the judge did not reach is still listed, unjudged', () => {
@@ -97,7 +74,7 @@ test('without a report the model is predicted, from steering alone', () => {
   const m = paneModel(null, 'predicted', root, steered)
   expect(m.basis).toBe('predicted')
   expect(m.instructions.map((i) => i.path)).toEqual(['.claude/rules/style.md'])
-  expect(m.injected).toEqual([])
+  expect(m.hooks).toEqual([])
   expect(m.skills).toEqual([])
   expect(m.compactions).toEqual([])
 })
@@ -108,17 +85,31 @@ test('the inventory arrives as given, paths shortened and realpathed', () => {
   mkdirSync(join(root, '.claude', 'skills', 'deploy'), { recursive: true })
   writeFileSync(skill, 'x\n')
   const inv: Inventoried = {
-    hooks: [{ scope: 'user', plugin: null, event: 'Stop', matcher: 'Bash', command: 'c', source: '/s', injected: { count: 2, chars: 40, index: 1 } }],
+    hooks: [
+      { scope: 'project', plugin: null, event: 'Stop', matcher: 'Bash', command: `${root}/tools/done.sh`, source: join(root, '.claude', 'settings.json'), injected: { count: 2, chars: 40, index: 1 } },
+      { scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "${CLAUDE_PLUGIN_ROOT}/a.sh"', source: '/p/hooks/hooks.json', injected: null },
+      { scope: 'other', plugin: 'unattributed', event: 'Stop', matcher: null, command: '', source: '', injected: { count: 1, chars: 3, index: 0 } },
+    ],
     skills: [{ scope: 'project', plugin: null, name: 'deploy', path: skill, invoked: true }],
     agentMemory: [{ scope: 'project', agent: 'rev', path: rule }],
   }
   const m = paneModel(null, 'predicted', root, [], inv)
-  expect(m.hooks).toEqual([{ scope: 'user', plugin: null, event: 'Stop', matcher: 'Bash', command: 'c', injected: { count: 2, chars: 40, index: 1 } }])
-  expect(m.allSkills).toEqual([{ scope: 'project', plugin: null, name: 'deploy', path: '.claude/skills/deploy/SKILL.md', real: skill, invoked: true }])
+  expect(m.hooks).toEqual([
+    { scope: 'project', plugin: null, event: 'Stop', matcher: 'Bash', command: 'tools/done.sh', source: '.claude/settings.json', injected: { count: 2, chars: 40, index: 1 } },
+    { scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "a.sh"', source: '/p/hooks/hooks.json', injected: null },
+    { scope: 'other', plugin: 'unattributed', event: 'Stop', matcher: null, command: '', source: '', injected: { count: 1, chars: 3, index: 0 } },
+  ])
+  expect(m.skills).toEqual([{ scope: 'project', plugin: null, name: 'deploy', path: '.claude/skills/deploy/SKILL.md', real: skill, invoked: true }])
   expect(m.agentMemory).toEqual([{ scope: 'project', agent: 'rev', path: '.claude/rules/style.md', real: rule }])
+})
+
+test('a skill whose transcript path is no file has nothing to open', () => {
+  const { root } = fixture()
+  const inv: Inventoried = { hooks: [], skills: [{ scope: 'other', plugin: null, name: 'p:s', path: 'plugin:p:s', invoked: true }], agentMemory: [] }
+  expect(paneModel(null, 'predicted', root, [], inv).skills).toEqual([{ scope: 'other', plugin: null, name: 'p:s', path: '', real: '', invoked: true }])
 })
 
 test('no inventory given lists none', () => {
   const { root } = fixture()
-  expect(paneModel(null, 'predicted', root, [])).toMatchObject({ hooks: [], allSkills: [], agentMemory: [] })
+  expect(paneModel(null, 'predicted', root, [])).toMatchObject({ hooks: [], skills: [], agentMemory: [] })
 })

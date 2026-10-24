@@ -8,14 +8,15 @@ import type { Tone } from './palette'
  * draws text rows only.
  */
 /**
- * What pressing a segment does: open an item in place (by its realpath) or a
- * collapsed injection (by its key), go back to the list, acknowledge an
- * item (the record `kanon ack` writes), retry a failed read, or page the
- * text of what is open. The mod turns a segment carrying one into a Button.
+ * What pressing a segment does: open a file in place (an item, a skill or an
+ * agent memory, by its realpath) or a hook (by its key), go back to the list,
+ * acknowledge an item (the record `kanon ack` writes), retry a failed read,
+ * or page the text of what is open. The mod turns a segment carrying one into
+ * a Button.
  */
 export type Action =
   | { kind: 'open'; real: string }
-  | { kind: 'open'; injection: string }
+  | { kind: 'open'; hook: string }
   | { kind: 'back' }
   | { kind: 'ack'; real: string }
   | { kind: 'retry' }
