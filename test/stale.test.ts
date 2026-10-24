@@ -315,6 +315,27 @@ describe('judge', () => {
     expect(calls.changed).toEqual([])
   })
 
+  test('an example home directory is a placeholder, never gone', () => {
+    const { probe, calls } = fake({})
+    const text = 'Values are synthetic (`/home/you`, `/home/example/x.md`, `/Users/you/repo`).'
+    expect(judge(item(text), ROOT, HOME, probe)).toBeNull()
+    expect(judge(item(text, { origin: 'user', path: `${HOME}/.claude/CLAUDE.md` }), ROOT, HOME, probe)).toBeNull()
+    expect(calls.exists).toEqual([])
+  })
+
+  test('the machine\'s own home is judged even when its name is an example one', () => {
+    const { probe } = fake({})
+    expect(judge(item('`/home/you/gone.md`'), '/home/you/proj', '/home/you', probe)).toEqual({
+      level: 'gone',
+      evidence: 'names `/home/you/gone.md`, which no longer exists',
+    })
+  })
+
+  test('a real user\'s home is still judged', () => {
+    const { probe } = fake({})
+    expect(judge(item('`/home/alice/gone.md`'), ROOT, HOME, probe)?.level).toBe('gone')
+  })
+
   test('no names, or prose only, gives no verdict', () => {
     const { probe } = fake({})
     expect(judge(item('Prefer small commits and/or short ones.'), ROOT, HOME, probe)).toBeNull()
