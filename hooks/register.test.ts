@@ -240,6 +240,18 @@ for (const [name, model] of [
   })
 }
 
+test('a model the layout cannot draw shows the error view, not an empty pane', async ($, on) => {
+  // Passes parseModel (the lists are arrays), but the item has no path to draw.
+  const w = world(on, { model: () => ran(modelJson([{ kind: 'memory', origin: 'user', verdict: null, acknowledged: false }])) })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  const shown = (await ui.findAll({ type: 'Text' })).map(t => t.text.trim()).join(' ')
+  expect(shown).toMatch(/kanon\s+could\s+not\s+draw\s+the\s+pane/)
+  await ui.unmount()
+})
+
 test('while the model is read, the pane turns a spinner', async ($, on) => {
   const w = world(on, { model: () => w.clock.sleep(5_000).then(() => ran(modelJson())) })
   await $.session.start(START)

@@ -7,6 +7,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { layout } from './lib/layout'
+import type { Action } from './lib/types'
 import { reportText } from './mod/cli'
 import { drawRows } from './mod/draw'
 import type { Port } from './mod/port'
@@ -74,14 +75,22 @@ export const register: Register = on => {
   // The literal is PANE: the validator reads a matcher only when it is spelled out.
   on('ui.render', { component: 'Pane', requestId: 'kanon' }, async ($, e) => {
     const io = portOf($)
-    const rows = layout({
-      status: mod.status,
+    const onAction = (action: Action) => void act(io, action).catch(() => undefined)
+    const frame = {
       view: mod.view,
       columns: e.props.bodyColumns,
       rows: e.props.scroll.bodyRows ?? DEFAULT_ROWS,
       feedback: mod.feedback,
       frame: mod.frame,
-    })
-    return drawRows($.ui.resolve(e), rows, e.props.bodyColumns, action => void act(io, action).catch(() => undefined))
+    }
+    // A model with a field missing can make the layout throw, and a skipped
+    // render draws nothing at all. The error view says so instead, and its
+    // retry reads the model again.
+    try {
+      return drawRows($.ui.resolve(e), layout({ ...frame, status: mod.status }), e.props.bodyColumns, onAction)
+    } catch {
+      const failed = layout({ ...frame, status: { kind: 'error', reason: 'kanon could not draw the pane' } })
+      return drawRows($.ui.resolve(e), failed, e.props.bodyColumns, onAction)
+    }
   })
 }
