@@ -69,24 +69,24 @@ export function fenced(text: string): string {
 const message = (err: unknown): string => stripControl(err instanceof Error ? err.message : String(err))
 
 /**
- * Whether a run failed because the runtime could not start at all (not on
- * PATH, not executable), the one failure the fallback runtime can mend. A
- * timeout never counts: the runtime started, and a second try would spend
- * another timeout, past the command hook's 10 s.
+ * Whether a run failed by running out of time. `$.process.run` rejects for
+ * two reasons only, the runtime could not start or it timed out, and the
+ * wording of the first is not a contract, so every rejection but a timeout
+ * is taken for a runtime that did not start, the one failure the fallback
+ * runtime can mend. A timeout never is: the runtime started, and a second
+ * try would spend another timeout, past the command hook's 10 s.
  */
-function couldNotStart(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code
-  if (code === 'ENOENT' || code === 'EACCES') return true
+function timedOut(err: unknown): boolean {
+  if ((err as { code?: unknown } | null)?.code === 'ETIMEDOUT') return true
   const text = err instanceof Error ? err.message : String(err)
-  if (/timed?\s*out|timeout/i.test(text)) return false
-  return /ENOENT|EACCES|not found|no such file/i.test(text)
+  return /timed?\s*out|timeout/i.test(text)
 }
 
 /**
  * Runs the CLI: under `bun` first, then `~/.bun/bin/bun` when a bare `bun`
- * cannot start (a PATH without it, as a GUI-launched Claude Code often has).
- * Any other failure, a timeout above all, is the answer: it is not tried
- * again. The runtime that started is kept, so later runs go straight to it.
+ * was rejected for anything but a timeout (a PATH without it, as a
+ * GUI-launched Claude Code often has). A timeout is the answer: it is not
+ * tried again. The runtime that started is kept, so later runs go straight to it.
  */
 export async function runCli(io: Port, args: readonly string[], timeoutMs: number): Promise<RunResult> {
   const candidates = mod.bun !== null ? [mod.bun] : await runtimes(io)
@@ -98,7 +98,7 @@ export async function runCli(io: Port, args: readonly string[], timeoutMs: numbe
       return result
     } catch (err) {
       errors.push(message(err))
-      if (!couldNotStart(err)) break
+      if (timedOut(err)) break
     }
   }
   throw new Error(errors.join('; '))

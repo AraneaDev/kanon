@@ -382,6 +382,18 @@ test('a pane the engine did not place is not taken for open', async ($, on) => {
   expect(w.opened).toEqual([PANE, PANE])
 })
 
+test('a bare bun rejected for a reason the mod does not recognise is retried from ~/.bun/bin', async ($, on) => {
+  // $.process.run rejects only when the runtime cannot start or times out, and its wording is not a contract.
+  const w = world(on, { bunError: new Error('the runtime could not be launched') })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  expect(w.modelRuns().map(r => r[0])).toEqual(['bun', `${HOME}/.bun/bin/bun`])
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a bare bun that timed out is not run again from ~/.bun/bin', async ($, on) => {
   const w = world(on, { bunError: new Error('process timed out after 10000 ms') })
   await $.session.start(START)
