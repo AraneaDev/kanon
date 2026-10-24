@@ -69,3 +69,15 @@ describe('fenced', () => {
     expect(fenced('a ``` b')).toBe('````\na ``` b\n````')
   })
 })
+
+describe('reasons from output Kanon did not shape', () => {
+  // eslint-disable-next-line no-control-regex
+  const CONTROL = /[\u0000-\u001F\u007F-\u009F]/
+  test('an error object and non-JSON output carry no control characters', () => {
+    for (const out of [JSON.stringify({ v: 1, error: 'bad\x1b[31m\rthing' }), 'Seg\x1b[2Kfault\r\n']) {
+      const status = parseModel(out)
+      expect(status.kind).toBe('error')
+      if (status.kind === 'error') expect(CONTROL.test(status.reason)).toBe(false)
+    }
+  })
+})

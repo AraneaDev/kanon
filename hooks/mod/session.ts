@@ -55,7 +55,8 @@ function retryRegister(io: Port, attempt: number, generation: number): void {
       mod.registration.timer = null
       if (generation !== mod.registration.generation) return
       void registerCommand(io)
-        .then(done => (done ? undefined : retryRegister(io, attempt + 1, generation)))
+        // Landed at last: the session is bound now, so a pane held across the reload can be listed and adopted.
+        .then(done => (done ? adoptOpenPane(io) : retryRegister(io, attempt + 1, generation)))
         .catch(() => undefined)
     })
   } catch {
@@ -70,15 +71,35 @@ function refreshSoon(io: Port): void {
   io.clock.after(0, () => void refresh(io).catch(() => undefined))
 }
 
-/** `/kanon` where a pane can draw: closes the pane when it is open, else opens it, focused, and reads the model. */
+/**
+ * `/kanon` where a pane can draw: closes the pane when it is open, else opens
+ * it, focused, and reads the model. The close is left to the `ui.close` hook
+ * (register.tsx), the one place every close lands, the person's included. An
+ * open the engine failed or did not place is no open pane.
+ */
 export async function toggle(io: Port): Promise<void> {
   if (await isOpen(io)) {
-    paneClosed()
     await io.ui.close({ id: PANE }).catch(() => undefined)
     return
   }
   paneOpened(io)
-  await io.ui.open({ id: PANE, title: 'Kanon', focus: true }).catch(() => undefined)
+  const placed = await io.ui.open({ id: PANE, title: 'Kanon', focus: true }).then(
+    r => (r as { isPlaced?: unknown } | undefined)?.isPlaced !== false,
+    () => false,
+  )
+  if (!placed) return paneClosed()
+  refreshSoon(io)
+}
+
+/**
+ * A pane the engine holds while this module thinks it closed: after a hot
+ * reload, which resets the module but may leave the pane on screen. Adopted,
+ * so it reads the model at once instead of turning a stalled spinner until
+ * the next turn ends. It never opens a pane: it only takes one that is there.
+ */
+export async function adoptOpenPane(io: Port): Promise<void> {
+  if (mod.open || !(await isOpen(io))) return
+  paneOpened(io)
   refreshSoon(io)
 }
 
@@ -91,8 +112,7 @@ export async function endTurn(io: Port, agentId: string | undefined, isAborted: 
   if (agentId !== undefined) return
   if (!mod.registration.registered && mod.registration.timer === null) await registerCommand(io)
   if (isAborted || !(await isOpen(io))) return
-  // A pane the engine still holds after a hot reload, which reset this module to "closed": adopted, so its read is shown.
-  if (!mod.open) paneOpened(io)
+  if (!mod.open) return adoptOpenPane(io)
   refreshSoon(io)
 }
 

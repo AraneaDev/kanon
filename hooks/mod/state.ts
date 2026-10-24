@@ -72,8 +72,10 @@ function stopSpinner(): void {
   mod.timers.spinner = null
 }
 
-/** The footer carries `text` for two seconds, then lets it go; a newer note replaces an older one and its timer. */
+/** The footer of an open pane carries `text` for two seconds, then lets it go; a newer note replaces an older one and its timer. */
 export function say(io: Port, text: string): void {
+  // Said to a closed pane, it would start a timer nobody sees and greet the next open with stale news.
+  if (!mod.open) return
   mod.timers.feedback?.cancel()
   mod.feedback = text
   io.ui.invalidate('ui.render')

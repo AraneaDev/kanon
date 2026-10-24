@@ -10,7 +10,7 @@ import { layout } from './lib/layout'
 import { reportText } from './mod/cli'
 import { drawRows } from './mod/draw'
 import type { Port } from './mod/port'
-import { act, endTurn, startRegistration, toggle } from './mod/session'
+import { act, adoptOpenPane, endTurn, startRegistration, toggle } from './mod/session'
 import { mod, PANE, paneClosed } from './mod/state'
 
 /** The pane's height when the surface names none. */
@@ -42,7 +42,10 @@ function portOf($: EngineInterface): Port {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // A refused registration (no session bound yet, after a hot reload) is retried on the clock; the hook goes on regardless.
-    await startRegistration(portOf($)).catch(() => undefined)
+    const io = portOf($)
+    await startRegistration(io).catch(() => undefined)
+    // A pane left on screen across a hot reload reads the model now, not at the next turn's end.
+    await adoptOpenPane(io).catch(() => undefined)
     return next(e)
   })
 

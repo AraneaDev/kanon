@@ -9,6 +9,7 @@
  * string, exactly as it is.
  */
 import type { PaneModel } from '../../src/model'
+import { stripControl } from '../lib/control'
 import type { Status } from '../lib/layout'
 import type { Port, RunResult } from './port'
 import { mod, say, setStatus } from './state'
@@ -28,7 +29,8 @@ export function cliArgv(bun: string, root: string, args: readonly string[]): str
   return [bun, `${root.replace(/\/+$/, '')}/src/cli.ts`, ...args]
 }
 
-const firstLine = (text: string): string => (text.trim().split('\n')[0] ?? '').slice(0, QUOTE_MAX)
+/** The first line of output Kanon did not shape, stripped of control characters (see `control.ts`) and cut. */
+const firstLine = (text: string): string => stripControl(text.trim().split('\n')[0] ?? '').slice(0, QUOTE_MAX)
 
 /**
  * What the pane makes of `kanon model --json`'s stdout: the model, or why
@@ -48,7 +50,7 @@ export function parseModel(stdout: string): Status {
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { kind: 'error', reason: 'kanon printed JSON that is not a pane model.' }
   const o = parsed as Record<string, unknown>
-  if (typeof o.error === 'string') return { kind: 'error', reason: o.error }
+  if (typeof o.error === 'string') return { kind: 'error', reason: stripControl(o.error) }
   if (o.v !== MODEL_VERSION) return { kind: 'error', reason: `kanon printed model version ${String(o.v)}; this pane reads version ${MODEL_VERSION}.` }
   const lists = ['instructions', 'memory', 'injected', 'skills', 'compactions'] as const
   if (typeof o.root !== 'string' || typeof o.basis !== 'string' || !lists.every(k => Array.isArray(o[k]))) {
@@ -64,12 +66,27 @@ export function fenced(text: string): string {
   return `${fence}\n${text.replace(/\n+$/, '')}\n${fence}`
 }
 
-const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+const message = (err: unknown): string => stripControl(err instanceof Error ? err.message : String(err))
+
+/**
+ * Whether a run failed because the runtime could not start at all (not on
+ * PATH, not executable), the one failure the fallback runtime can mend. A
+ * timeout never counts: the runtime started, and a second try would spend
+ * another timeout, past the command hook's 10 s.
+ */
+function couldNotStart(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === 'ENOENT' || code === 'EACCES') return true
+  const text = err instanceof Error ? err.message : String(err)
+  if (/timed?\s*out|timeout/i.test(text)) return false
+  return /ENOENT|EACCES|not found|no such file/i.test(text)
+}
 
 /**
  * Runs the CLI: under `bun` first, then `~/.bun/bin/bun` when a bare `bun`
  * cannot start (a PATH without it, as a GUI-launched Claude Code often has).
- * The runtime that started is kept, so later runs go straight to it.
+ * Any other failure, a timeout above all, is the answer: it is not tried
+ * again. The runtime that started is kept, so later runs go straight to it.
  */
 export async function runCli(io: Port, args: readonly string[], timeoutMs: number): Promise<RunResult> {
   const candidates = mod.bun !== null ? [mod.bun] : await runtimes(io)
@@ -81,6 +98,7 @@ export async function runCli(io: Port, args: readonly string[], timeoutMs: numbe
       return result
     } catch (err) {
       errors.push(message(err))
+      if (!couldNotStart(err)) break
     }
   }
   throw new Error(errors.join('; '))
@@ -113,6 +131,8 @@ async function readModel(io: Port): Promise<Status> {
  * opened again is followed by a read for the new pane.
  */
 export async function refresh(io: Port): Promise<void> {
+  // A closed pane reads nothing: what it would show is gone with it.
+  if (!mod.open) return
   if (mod.refresh.running) {
     mod.refresh.again = true
     return
@@ -154,7 +174,12 @@ export async function acknowledge(io: Port, real: string): Promise<void> {
 export async function reportText(io: Port): Promise<string> {
   try {
     const [id, cwd] = await Promise.all([io.session.id(), io.session.cwd()])
-    const { stdout } = await runCli(io, ['report', '--session', id, '--cwd', cwd], REPORT_TIMEOUT_MS)
+    const { exitCode, stdout, stderr } = await runCli(io, ['report', '--session', id, '--cwd', cwd], REPORT_TIMEOUT_MS)
+    // The CLI exits 0 with a report; anything else crashed it, and an empty fence would hide why.
+    if (exitCode !== 0 || stdout.trim() === '') {
+      const why = firstLine(stderr) || firstLine(stdout) || 'it printed nothing'
+      return `kanon: could not run the report (exit ${exitCode}: ${why})`
+    }
     return fenced(stdout)
   } catch (err) {
     return `kanon: could not run the report (${message(err)})`

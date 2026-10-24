@@ -52,6 +52,15 @@ function world(
     refuseRegister?: () => boolean
     model?: () => Run | Promise<Run>
     bareBun?: boolean
+    /** What a bare `bun` throws instead of running (a timeout, say); `bareBun: false` is ENOENT. */
+    bunError?: Error
+    /** Panes the engine already holds before anything runs (a pane left open across a hot reload). */
+    heldPanes?: string[]
+    /** Whether the engine places an opened pane. */
+    placed?: boolean
+    report?: Run
+    /** Whether `ui.panes` is refused right now (no session bound yet, as after a hot reload). */
+    panesRefused?: () => boolean
   } = {},
 ) {
   const clock = mock.clock(on)
@@ -59,7 +68,7 @@ function world(
   const runs: string[][] = []
   const opened: string[] = []
   const closed: string[] = []
-  const panes = new Set<string>()
+  const panes = new Set<string>(opts.heldPanes ?? [])
   let inFlight = 0
   let mostInFlight = 0
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
@@ -76,6 +85,7 @@ function world(
   })
   on('ui.open', (_$, e) => {
     opened.push(e.id)
+    if (opts.placed === false) return { value: { isPlaced: false, reason: 'no room' } as never }
     panes.add(e.id)
     return { value: { isPlaced: true } }
   })
@@ -84,13 +94,18 @@ function world(
     panes.delete(e.id)
     return { value: undefined }
   })
-  on('ui.panes', () => ({ value: [...panes].map(id => ({ id, title: 'Kanon', isShown: true, isFocused: false, isPlaced: true })) }))
+  on('ui.panes', () => {
+    if (opts.panesRefused?.() === true) throw new Error('$.ui.panes is not available in this mode: no session is bound in this process')
+    return { value: [...panes].map(id => ({ id, title: 'Kanon', isShown: true, isFocused: false, isPlaced: true })) }
+  })
   on('process.run', async (_$, e) => {
     const argv = [...e.argv]
     runs.push(argv)
-    if (argv[0] === 'bun' && opts.bareBun === false) throw Object.assign(new Error('spawn bun ENOENT'), { code: 'ENOENT' })
+    // A refusal is how the kit rejects the mod's call with a reason; a throw here would only skip this hook.
+    if (argv[0] === 'bun' && opts.bareBun === false) return { deny: 'spawn bun ENOENT' }
+    if (argv[0] === 'bun' && opts.bunError !== undefined) return { deny: opts.bunError.message }
     const sub = argv[2]
-    if (sub === 'report') return { value: ran('kanon report\n  LOADED  CLAUDE.md\n') }
+    if (sub === 'report') return { value: opts.report ?? ran('kanon report\n  LOADED  CLAUDE.md\n') }
     if (sub === 'ack') return { value: ran(`kanon: acknowledged ${argv[argv.length - 1]}\n`) }
     expect(sub, `a command the mod should not run: ${argv.join(' ')}`).toBe('model')
     inFlight++
@@ -314,4 +329,78 @@ test('a refresh never starts while another is in flight', async ($, on) => {
   expect(w.mostInFlight()).toBe(1)
   // The turns that ended during the read are answered by one more read after it, never two at once.
   expect(w.modelRuns()).toHaveLength(2)
+})
+
+test('a pane the engine still holds when the session starts (a hot reload) is read at once, with no turn', async ($, on) => {
+  const w = world(on, { heldPanes: [PANE] })
+  await $.session.start(START)
+  await w.clock.settle()
+  expect(w.modelRuns()).toHaveLength(1)
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a held pane is adopted when a refused registration finally lands', async ($, on) => {
+  // Right after a hot reload nothing is bound yet: the registration and the pane listing are both refused at start.
+  let unbound = true
+  const w = world(on, { refuseRegister: () => unbound, panesRefused: () => unbound, heldPanes: [PANE] })
+  await $.session.start(START)
+  await w.clock.settle()
+  expect(w.modelRuns()).toHaveLength(0)
+  unbound = false
+  await w.clock.advance(1_000)
+  expect(w.registered).toEqual(['kanon'])
+  expect(w.modelRuns()).toHaveLength(1)
+})
+
+// The kit cannot raise the person's close (its `$.ui` carries no `close`), so this closes through /kanon, whose
+// `$.ui.close` runs the same `ui.close` chain, origin `plugin`, that the person's close mark runs with origin `person`.
+test('a closed pane stops its spinner and drops a read that lands after', async ($, on) => {
+  const w = world(on, { model: () => w.clock.sleep(5_000).then(() => ran(modelJson())) })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  await slash($)
+  const ui = await mountPane($)
+  const spun = (await ui.find({ type: 'Text', text: /^ \S $/ }))?.text
+  await w.clock.advance(300)
+  expect((await ui.find({ type: 'Text', text: /^ \S $/ }))?.text).toBe(spun)
+  await w.clock.advance(5_000)
+  // The read that landed after the close is not shown: the pane, if drawn, still reads as fresh.
+  expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a pane the engine did not place is not taken for open', async ($, on) => {
+  const w = world(on, { placed: false })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  expect(w.modelRuns()).toHaveLength(0)
+  await slash($)
+  expect(w.opened).toEqual([PANE, PANE])
+})
+
+test('a bare bun that timed out is not run again from ~/.bun/bin', async ($, on) => {
+  const w = world(on, { bunError: new Error('process timed out after 10000 ms') })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  expect(w.modelRuns().map(r => r[0])).toEqual(['bun'])
+  const ui = await mountPane($)
+  // The reason wraps across rows: read it whole.
+  const shown = (await ui.findAll({ type: 'Text' })).map(t => t.text.trim()).join(' ')
+  expect(shown).toMatch(/timed\s+out after 10000 ms/)
+  await ui.unmount()
+})
+
+test('a report that crashed says why instead of printing an empty fence', async ($, on) => {
+  const w = world(on, { surfaces: [], report: { exitCode: 1, stdout: '', stderr: 'error: \x1b[31mModule not found\n', isStdoutTruncated: false, isStderrTruncated: false } })
+  await $.session.start(START)
+  const out = await slash($)
+  await w.clock.settle()
+  expect(out.text).toContain('Module not found')
+  expect(out.text).not.toContain('```')
+  expect(out.text).not.toContain('\x1b')
 })
