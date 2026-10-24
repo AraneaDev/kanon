@@ -12,7 +12,9 @@ set -eu
 root=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
 claude=${CLAUDE_BIN:-claude}
 stage=$(mktemp -d)
-trap 'rm -rf "$stage"' EXIT INT TERM
+trap 'rm -rf "$stage"' EXIT
+# A signal exits (and so runs the EXIT trap) rather than letting the script go on.
+trap 'exit 130' INT TERM
 
 (cd "$root" && git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf -) | tar -xf - -C "$stage"
 rm -rf "$stage/test"
