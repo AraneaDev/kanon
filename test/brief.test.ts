@@ -46,7 +46,7 @@ const GONE_NOTE =
   'the item so the warning does not return. Do not raise gone items before you need them.'
 
 /** The ack command, on a line of its own so the wrap can never split it. */
-const ackLine = (root: string) => `  bun "${CLI}" ack --cwd "${root}" "<path>"`
+const ackLine = (root: string) => `  bun '${CLI}' ack --cwd '${root}' '<path>'`
 
 /** The wrapped notes under the rows, rejoined into the sentences they were cut from. */
 function prose(out: string): string {
@@ -119,6 +119,12 @@ test('a gone item alone does not tell Claude to raise it in its first response',
 test('the ack command in the notes names the CLI and the root', () => {
   const out = brief(input({ root: '/srv/checkout', steered: [memory('a.md', { verdict: goneVerdict('x.sh') })] }))
   expect(out.split('\n')).toContain(ackLine('/srv/checkout'))
+})
+
+/** A root with a quote or a substitution in it reaches the shell as one literal argument. */
+test('the ack command quotes the root for sh', () => {
+  const out = brief(input({ root: "/srv/it's $(x)", steered: [memory('a.md', { verdict: goneVerdict('x.sh') })] }))
+  expect(out.split('\n')).toContain(`  bun '${CLI}' ack --cwd '/srv/it'\\''s $(x)' '<path>'`)
 })
 
 test('an acknowledged gone item is not raised', () => {

@@ -1167,7 +1167,7 @@ test('brief --hook names a memory whose named file is gone, and caches the steer
 test('the ack command in the brief names this CLI and the resolved root', async () => {
   const { repo, env, transcript } = withGoneMemory('kanon-cli-gone-ack-')
   const out = context(await run(['brief', '--cwd', repo, '--hook', '--transcript', transcript], env))
-  expect(out.split('\n')).toContain(`  bun "${CLI}" ack --cwd "${sessionRoot(repo)}" "<path>"`)
+  expect(out.split('\n')).toContain(`  bun '${CLI}' ack --cwd '${sessionRoot(repo)}' '<path>'`)
 })
 
 /** The ack file is keyed by the resolved root, the same key the brief reads it by. */
@@ -1269,7 +1269,7 @@ test('warn names a gone memory once per compaction epoch, and again after every 
 
   const first = await warn(memory, repo, env)
   expect(first.trim()).toBe(
-    `KANON  ${memory} names \`scripts/release.sh\`, which no longer exists. Before relying on it, ask the user whether it still holds. If it does, run: bun "${CLI}" ack --cwd "${sessionRoot(repo)}" "${memory}"`,
+    `KANON  ${memory} names \`scripts/release.sh\`, which no longer exists. Before relying on it, ask the user whether it still holds. If it does, run: bun '${CLI}' ack --cwd '${sessionRoot(repo)}' '${memory}'`,
   )
   expect(await warn(memory, repo, env)).toBe('')
 

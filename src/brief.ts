@@ -1,6 +1,7 @@
 import { stripControl } from './colour'
 import { short } from './paths'
 import type { Steered } from './steering'
+import { ackCommand } from './warning'
 import type { Candidate, Classified } from './types'
 
 /**
@@ -141,7 +142,7 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   const units: Unit[] = []
   for (const s of gone) {
     // The evidence quotes a name taken from a file Kanon did not write.
-    units.push({ keep: Keep.Gone, kind: 'gone', lines: [row('gone', short(s.path, root)), `${INDENT}${stripControl(s.verdict!.evidence)}`] })
+    units.push({ keep: Keep.Gone, kind: 'gone', lines: [row('gone', stripControl(short(s.path, root))), `${INDENT}${stripControl(s.verdict!.evidence)}`] })
   }
   for (const f of foreign) {
     const quote = excerpt(f.path)
@@ -185,7 +186,7 @@ export function brief(input: BriefInput, excerpt: Excerpt = () => null): string 
   }
   // The ack command goes on a line of its own, outside the wrap, which would
   // otherwise split it at any of its spaces.
-  const ack = gone.length > 0 ? [`  bun "${input.cli}" ack --cwd "${root}" "<path>"`] : []
+  const ack = gone.length > 0 ? [`  ${ackCommand(input.cli, root, '<path>')}`] : []
   return fit(header, units, ['', ...wrap(notes.join(' ')), ...ack])
 }
 

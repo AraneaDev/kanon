@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-615%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-617%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -185,7 +185,7 @@ your first response. Before you rely on a gone item, ask the user whether it
 still holds, naming the item and what is gone. If they say it does, record
 that with the command below, then offer to update or delete the item so the
 warning does not return. Do not raise gone items before you need them.
-  bun "/home/you/.claude/plugins/kanon/src/cli.ts" ack --cwd "/home/you/project" "<path>"
+  bun '/home/you/.claude/plugins/kanon/src/cli.ts' ack --cwd '/home/you/project' '<path>'
 ```
 
 A FOREIGN file is raised in Claude's first response. A `gone` item is raised only when Claude is
@@ -357,7 +357,7 @@ and never allows, asks or denies.
 If the item still holds, the warning carries the command that says so:
 
 ```bash
-bun "<plugin>/src/cli.ts" ack --cwd "<repo>" "<path>"
+bun '<plugin>/src/cli.ts' ack --cwd '<repo>' '<path>'
 ```
 
 `kanon ack` takes the path as the brief shows it, relative to the repository, under `~/`, or
