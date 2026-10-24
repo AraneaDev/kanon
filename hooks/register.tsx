@@ -11,7 +11,7 @@ import type { Action } from './lib/types'
 import { reportText } from './mod/cli'
 import { drawRows } from './mod/draw'
 import type { Port } from './mod/port'
-import { act, adoptOpenPane, endTurn, scrollContent, startRegistration, toggle } from './mod/session'
+import { act, adoptOpenPane, endTurn, scrollContent, startRegistration, textFor, toggle } from './mod/session'
 import { mod, PANE, paneClosed } from './mod/state'
 
 /** The pane's height when the surface names none. */
@@ -72,12 +72,12 @@ export const register: Register = on => {
     return closed
   })
 
-  // The person's wheel over the text scrolls the text; anywhere else the pane scrolls as it would.
+  // The person's wheel over a detail scrolls its text (the details stay put); over the list the pane scrolls as it would.
   // The literal is PANE, as below.
   on('ui.scroll', { component: 'Pane', requestId: 'kanon' }, async ($, e, next) => {
-    if (e.origin.kind !== 'person' || mod.view.kind !== 'content') return next(e)
+    if (e.origin.kind !== 'person' || mod.view.kind !== 'detail') return next(e)
     // The layout never draws more rows than the pane has, so there is no page behind the text to hand the wheel to.
-    scrollContent(portOf($), mod.view.scroll + e.by)
+    scrollContent(portOf($), (mod.view.scroll ?? 0) + e.by)
     return {}
   }).catch(($, e, next) => (next.called ? {} : next(e)))
 
@@ -85,18 +85,21 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: 'kanon' }, async ($, e) => {
     const io = portOf($)
     const onAction = (action: Action) => void act(io, action).catch(() => undefined)
+    const columns = e.props.bodyColumns
+    const rows = e.props.scroll.bodyRows ?? DEFAULT_ROWS
+    // What `n`, `p` and the wheel page by, and what a preview's read is chosen at: the size this render lays out for.
+    mod.drawn = { columns, rows }
     const frame = {
       view: mod.view,
-      columns: e.props.bodyColumns,
-      rows: e.props.scroll.bodyRows ?? DEFAULT_ROWS,
+      columns,
+      rows,
       feedback: mod.feedback,
       frame: mod.frame,
-      content: mod.content,
+      // The text of what this frame shows details of, only ever that item's; a read is asked for when it is not held.
+      content: textFor(io, { status: mod.status, view: mod.view, columns }),
       // A hotkey works only while the pane holds the keyboard; the footer says when it does not.
       focused: e.props.isFocused,
     }
-    // What `n`, `p` and the wheel page by: the size this render lays out for.
-    mod.drawn = { columns: frame.columns, rows: frame.rows }
     // A model with a field missing can make the layout throw, and a skipped
     // render draws nothing at all. The error view says so instead, and its
     // retry reads the model again.

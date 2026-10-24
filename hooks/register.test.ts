@@ -439,45 +439,48 @@ test('a report that crashed says why instead of printing an empty fence', async 
 
 // ------------------------------------------------------- reading an item
 
-/** Opens the pane, presses the file name, then `v`: the text of the memory, read. */
-async function openText($: Engine, w: ReturnType<typeof world>) {
+/** Opens the pane and presses the file name: the memory's details, and its text read under them. */
+async function openText($: Engine, w: ReturnType<typeof world>, bodyColumns = 60) {
   await $.session.start(START)
   await slash($)
   await w.clock.settle()
-  const ui = await mountPane($)
+  const ui = await mountPane($, bodyColumns)
   const name = await ui.find({ type: 'Button', text: /notes\.md|it's a/ })
   await ui.press({ key: name!.key! })
-  const v = await ui.find({ type: 'Button', text: 'view' })
-  expect(v).toBeDefined()
-  await ui.press({ key: v!.key! })
   await w.clock.settle()
   return ui
 }
 
 const SCROLL = { component: 'Pane', requestId: PANE, offset: 0, bodyRows: 30, contentRows: 30, origin: { kind: 'person' }, pointer: { row: 5, column: 5 } } as const
 
-test('v runs kanon show with the realpath as one argument and draws the text, and n and p page it by the visible height', async ($, on) => {
+test('opening a file runs kanon show with the realpath as one argument and draws its text under its details, and n and p page the text', async ($, on) => {
   const w = world(on, { model: () => ran(modelJson([memoryItem(ODD, "it's a $(x).md", true)])) })
   const ui = await openText($, w)
   expect(w.showRuns()).toHaveLength(1)
   expect(w.showRuns()[0]!.slice(2)).toEqual(['show', '--cwd', ROOT, '--path', ODD])
   expect(w.showRuns()[0]!).toHaveLength(7)
-  // 30 rows: the footer, the gap, title and the row under it, the position line: 25 lines of text.
-  expect(await ui.find({ type: 'Text', text: /lines 1–25 of 100/ })).toBeDefined()
+  // The details and the text in one view, with no key between them.
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: 'view' })).toBeUndefined()
+  // 30 rows: the footer, the gap, the title and the row under it, six fields, the rule, the position line: 18 lines of text.
+  expect(await ui.find({ type: 'Text', text: /lines 1–18 of 100/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', text: 'previous' })).toBeUndefined()
   await ui.press({ key: (await ui.find({ type: 'Button', text: 'next' }))!.key! })
-  expect(await ui.find({ type: 'Text', text: /lines 26–50 of 100/ })).toBeDefined()
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'next' }))!.key! })
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'next' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /lines 19–36 of 100/ })).toBeDefined()
+  // The details stay put while the text moves.
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  for (let i = 0; i < 4; i++) await ui.press({ key: (await ui.find({ type: 'Button', text: 'next' }))!.key! })
   // The last page is full: it ends at the last line, and there is no n past it.
-  expect(await ui.find({ type: 'Text', text: /lines 76–100 of 100/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /lines 83–100 of 100/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', text: 'next' })).toBeUndefined()
   await ui.press({ key: (await ui.find({ type: 'Button', text: 'previous' }))!.key! })
-  expect(await ui.find({ type: 'Text', text: /lines 51–75 of 100/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /lines 65–82 of 100/ })).toBeDefined()
+  // Opened once, read once: paging reads nothing more.
+  expect(w.showRuns()).toHaveLength(1)
   await ui.unmount()
 })
 
-test('an injected row opens its detail, and v shows its most recent injection by the index the model gave it', async ($, on) => {
+test('an injected row opens its details and the text of its most recent injection, by the index the model gave it', async ($, on) => {
   const injected = [{ plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 3, chars: 120, index: 7 }]
   const model = JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], injected, skills: [], compactions: [] })
   const w = world(on, { model: () => ran(model), show: () => ran(JSON.stringify({ v: 1, title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false })) })
@@ -486,34 +489,51 @@ test('an injected row opens its detail, and v shows its most recent injection by
   await w.clock.settle()
   const ui = await mountPane($)
   await ui.press({ key: (await ui.find({ type: 'Button', text: 'unattributed' }))!.key! })
-  expect(await ui.find({ type: 'Text', text: /most recent/ })).toBeDefined()
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'view' }))!.key! })
   await w.clock.settle()
+  expect(await ui.find({ type: 'Text', text: /most recent of 3/ })).toBeDefined()
   expect(w.showRuns().map(r => r.slice(2))).toEqual([['show', '--cwd', ROOT, '--session', SESSION, '--injection', '7']])
   expect(await ui.find({ type: 'Text', text: /Remember the house style\./ })).toBeDefined()
   await ui.unmount()
 })
 
-test('the wheel over the text scrolls it, held inside it', async ($, on) => {
-  const w = world(on)
+test('while the text is read the detail says so, and the details show at once', async ($, on) => {
+  const w = world(on, { show: () => w.clock.sleep(3_000).then(() => ran(TEXT)) })
   const ui = await openText($, w)
-  await $.ui.scroll({ ...SCROLL, by: 3 })
-  expect(await ui.find({ type: 'Text', text: /lines 4–28 of 100/ })).toBeDefined()
-  await $.ui.scroll({ ...SCROLL, by: -10 })
-  expect(await ui.find({ type: 'Text', text: /lines 1–25 of 100/ })).toBeDefined()
-  await $.ui.scroll({ ...SCROLL, by: 500 })
-  expect(await ui.find({ type: 'Text', text: /lines 76–100 of 100/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Reading…/ })).toBeDefined()
+  await w.clock.advance(3_000)
+  expect(await ui.find({ type: 'Text', text: /Reading…/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /lines 1–18 of 100/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('b steps back one level at a time: the text to the detail, the detail to the list', async ($, on) => {
+test('a text that could not be read says why under the details', async ($, on) => {
+  const w = world(on, { show: () => ran(JSON.stringify({ v: 1, error: 'kanon could not read notes.md' })) })
+  const ui = await openText($, w)
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /could not read notes\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the wheel over the detail scrolls its text, held inside it', async ($, on) => {
   const w = world(on)
   const ui = await openText($, w)
-  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeDefined()
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'back' }))!.key! })
-  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeUndefined()
+  await $.ui.scroll({ ...SCROLL, by: 3 })
+  expect(await ui.find({ type: 'Text', text: /lines 4–21 of 100/ })).toBeDefined()
+  await $.ui.scroll({ ...SCROLL, by: -10 })
+  expect(await ui.find({ type: 'Text', text: /lines 1–18 of 100/ })).toBeDefined()
+  await $.ui.scroll({ ...SCROLL, by: 500 })
+  expect(await ui.find({ type: 'Text', text: /lines 83–100 of 100/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('b goes back to the list in one press', async ($, on) => {
+  const w = world(on)
+  const ui = await openText($, w)
+  expect(await ui.find({ type: 'Text', text: /lines 1–18/ })).toBeDefined()
   await ui.press({ key: (await ui.find({ type: 'Button', text: 'back' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /lines 1–18/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeUndefined()
   expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', text: 'back' })).toBeUndefined()
@@ -527,21 +547,63 @@ test('text that arrives after the person went back is not shown, and a closed pa
   await w.clock.settle()
   const ui = await mountPane($)
   await ui.press({ key: (await ui.find({ type: 'Button', text: /notes\.md/ }))!.key! })
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'view' }))!.key! })
   expect(await ui.find({ type: 'Text', text: /Reading…/ })).toBeDefined()
   await ui.press({ key: (await ui.find({ type: 'Button', text: 'back' }))!.key! })
   await w.clock.advance(3_000)
-  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
-  // Into the text again, then the pane closes and opens: it starts from the list.
-  await ui.press({ key: (await ui.find({ type: 'Button', text: 'view' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /line 1\b/ })).toBeUndefined()
+  // Opened again, the late read from before is not taken for this one: it reads afresh.
+  await ui.press({ key: (await ui.find({ type: 'Button', text: /notes\.md/ }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /Reading…/ })).toBeDefined()
   await w.clock.advance(3_000)
-  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /lines 1–18/ })).toBeDefined()
+  expect(w.showRuns()).toHaveLength(2)
+  // The pane closes and opens: it starts from the list.
   await slash($)
   await slash($)
   await w.clock.settle()
-  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /lines 1–18/ })).toBeUndefined()
   expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the wide preview reads the previewed item’s text and draws its first lines beside the list', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($, 140)
+  await w.clock.settle()
+  expect(w.showRuns().map(r => r.slice(2))).toEqual([['show', '--cwd', ROOT, '--path', NOTES]])
+  expect(await ui.find({ type: 'Text', text: /line 1\b/ })).toBeDefined()
+  // Drawn again, it reads nothing more: the text it holds is the previewed item's.
+  await $.turn.complete(TURN)
+  await w.clock.settle()
+  expect(w.showRuns()).toHaveLength(1)
+  await ui.unmount()
+})
+
+test('a preview read for an item no longer previewed is dropped, and what is shown now is read', async ($, on) => {
+  const injected = [{ plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 1, chars: 30, index: 2 }]
+  const model = JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [memoryItem(NOTES, '~/notes.md', true)], injected, skills: [], compactions: [] })
+  let reads = 0
+  const w = world(on, {
+    model: () => ran(model),
+    show: () => (++reads === 1 ? w.clock.sleep(3_000).then(() => ran(TEXT)) : ran(JSON.stringify({ v: 1, title: 'x', lines: ['Remember the house style.'], truncated: false }))),
+  })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($, 140)
+  await w.clock.settle()
+  // The preview's read is in flight; the person opens the injection instead.
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'unattributed' }))!.key! })
+  await w.clock.advance(3_000)
+  expect(w.showRuns().map(r => r.slice(2))).toEqual([
+    ['show', '--cwd', ROOT, '--path', NOTES],
+    ['show', '--cwd', ROOT, '--session', SESSION, '--injection', '2'],
+  ])
+  expect(await ui.find({ type: 'Text', text: /Remember the house style\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /line 1\b/ })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -553,12 +615,8 @@ test('text that arrives after the person went back is not shown, and a closed pa
  */
 test('a key Button is labelled with the bare word and carries its hotkey', async ($, on) => {
   const w = world(on)
-  await $.session.start(START)
-  await slash($)
-  await w.clock.settle()
-  const ui = await mountPane($)
-  await ui.press({ key: (await ui.find({ type: 'Button', text: /notes\.md/ }))!.key! })
-  for (const [hotkey, label] of [['b', 'back'], ['v', 'view']] as const) {
+  const ui = await openText($, w, 100)
+  for (const [hotkey, label] of [['n', 'next'], ['a', 'acknowledge'], ['b', 'back']] as const) {
     const button = await ui.find({ type: 'Button', text: label })
     expect(button).toBeDefined()
     expect(button!.props.hotkey).toBe(hotkey)

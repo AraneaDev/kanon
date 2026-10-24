@@ -17,10 +17,14 @@
  * dropped; what is left grows every list a row at a time in turn. A cut list
  * ends `n more ↓`. Only the wide tier has a marker: it marks the item the
  * right half previews. Narrower, each file name is its own open button.
+ *
+ * An opened item is one view, full width: its details in a card, a rule,
+ * then its text, windowed when it is longer than the room left. There the
+ * text gives way before the card does (see `detailGeometry`).
  */
 import type { InjectedGroup, PaneItem, PaneModel } from '../../src/model'
 import { stripControl } from './control'
-import { besideRows, cardInner, cardRows, gridColumns, moreRows, type Section } from './cards'
+import { besideRows, cardInner, cardRows, FRAME, gridColumns, moreRows, type Section } from './cards'
 import { MARK, mark, type Mark } from './marks'
 import { ACCENT, HEADING } from './palette'
 import { button, clip, dimRow, segmentsWidth, spread, walkedRow } from './rows'
@@ -31,19 +35,26 @@ import type { Action, Row, Segment } from './types'
 export type { Action, Row, Segment } from './types'
 export { rowWidth } from './rows'
 
-/** What a detail or the content view is about: an item by its realpath, or a collapsed injection by its key ({@link injectionKey}). */
+/** What a detail is about: an item by its realpath, or a collapsed injection by its key ({@link injectionKey}). */
 export type Target = { real: string } | { injection: string }
 /**
- * The list; one item or injection opened in place; or the text of one, read
- * from `scroll`, the first row shown. `b` steps back one level: content to
- * detail to list.
+ * The list, or one item or injection opened in place: its details and, under
+ * them, its text read from `scroll`, the first row of the text shown (0 when
+ * absent). `b` goes back to the list in one step.
+ *
+ * The text was once a view of its own behind `v`. Live, the person opened an
+ * item and then had to find a second key to see what it says: opening it now
+ * shows both.
  */
-export type View = { kind: 'list' } | ({ kind: 'detail' } & Target) | ({ kind: 'content'; scroll: number } & Target)
+export type View = { kind: 'list' } | ({ kind: 'detail'; scroll?: number } & Target)
 /**
- * The text the content view shows, as `kanon show` printed it, independent of
- * the model's status: the lines, still reading, or why it could not be read.
+ * An item's text as `kanon show` printed it, independent of the model's
+ * status: the lines, still reading, or why it could not be read.
  */
 export type Content = { title: string; lines: string[]; truncated: boolean } | { loading: true } | { error: string }
+
+/** The one string a target is known by, so the mod can tell whether the text it holds is the text of what is shown. */
+export const targetKey = (t: Target): string => ('real' in t ? `real:${t.real}` : `injection:${t.injection}`)
 /** What the mod knows about the session: still reading it, the model, or why it could not read it. */
 export type Status = { kind: 'loading' } | { kind: 'ready'; model: PaneModel } | { kind: 'error'; reason: string }
 export interface LayoutInput {
@@ -55,7 +66,11 @@ export interface LayoutInput {
   feedback: string | null
   /** The loading spinner's frame; the mod advances it on a clock while loading, so the layout needs none. */
   frame: number
-  /** The content view's text; null (or absent) outside it. */
+  /**
+   * The text of what the pane shows details of ({@link textTarget}): the
+   * opened item, or the wide tier's previewed one. Null or absent reads as
+   * still reading. The mod hands in only text it read for that target.
+   */
   content?: Content | null
   /**
    * Whether the pane holds the keyboard (the engine's `isFocused`). A hotkey
@@ -118,8 +133,43 @@ export function layout(input: LayoutInput): Row[] {
   const model = shown(status.model)
   // The footer's right edge: the basis, or how to give the pane the keyboard.
   const note = input.focused === false ? FOCUS_HINT : model.basis
-  if (input.view.kind === 'content') return contentRows(model, input.view, input.content ?? { loading: true }, width, height, input.feedback, note)
-  return readyRows(model, input.view, width, height, input.feedback, note)
+  const content = input.content ?? { loading: true }
+  const opened = openedOf(model, input.view)
+  if (opened !== null) return detailView(opened, input.view.kind === 'detail' ? (input.view.scroll ?? 0) : 0, content, width, height, input.feedback, note)
+  return listView(model, content, width, height, input.feedback, note)
+}
+
+/** An item or a collapsed injection, as a detail shows it. */
+type Opened = { kind: 'item'; item: PaneItem } | { kind: 'injection'; group: ShownInjection }
+
+/** What the view has open, as the model has it now; null for the list, or for an item the model no longer has (the list shows instead). */
+function openedOf(model: ShownModel, view: View): Opened | null {
+  if (view.kind !== 'detail') return null
+  if ('real' in view) {
+    const item = [...model.instructions, ...model.memory].find(i => i.real === view.real)
+    return item === undefined ? null : { kind: 'item', item }
+  }
+  const group = model.injected.find(g => g.key === view.injection)
+  return group === undefined ? null : { kind: 'injection', group }
+}
+
+/** The item the wide tier previews beside the list: the first flagged one. */
+const previewOf = (model: ShownModel): PaneItem | null => [...model.instructions, ...model.memory].find(flagged) ?? null
+
+/**
+ * Whose text the pane shows at `columns`, so the mod knows what to read: the
+ * opened item or injection at any tier, else in the wide tier the previewed
+ * item, else none. The same decisions {@link layout} makes, from the same
+ * input, so the two can never disagree about which text belongs where.
+ */
+export function textTarget(input: Pick<LayoutInput, 'status' | 'view' | 'columns'>): Target | null {
+  if (input.status.kind !== 'ready') return null
+  const model = shown(input.status.model)
+  const opened = openedOf(model, input.view)
+  if (opened !== null) return opened.kind === 'item' ? { real: opened.item.real } : { injection: opened.group.key }
+  if (tierOf(Math.max(0, Math.floor(input.columns))) !== 'wide') return null
+  const previewed = previewOf(model)
+  return previewed === null ? null : { real: previewed.real }
 }
 
 /**
@@ -171,24 +221,20 @@ function errorRows(reason: string, width: number, height: number): Row[] {
   return rows
 }
 
-function readyRows(model: ShownModel, view: Exclude<View, { kind: 'content' }>, width: number, height: number, feedback: string | null, note: string): Row[] {
+/**
+ * The list. The wide tier previews an item beside it, the first flagged one:
+ * its details and the first lines of its text. Only there is there a marker,
+ * an `o` that opens the previewed item, and an `a` for it; narrower, each
+ * file name is its own open button.
+ */
+function listView(model: ShownModel, content: Content, width: number, height: number, feedback: string | null, note: string): Row[] {
   const items = [...model.instructions, ...model.memory]
-  const opened = view.kind === 'detail' && 'real' in view ? (items.find(i => i.real === view.real) ?? null) : null
-  const openedInjection = view.kind === 'detail' && 'injection' in view ? (model.injected.find(g => g.key === view.injection) ?? null) : null
   const tier = tierOf(width)
-  // The wide tier previews an item beside the list: the opened one, else the first flagged one.
-  // Only there is there a marker, an `o` that opens the previewed item, and an `a` for it;
-  // narrower, each file name is its own open button.
-  const previewed = tier === 'wide' && openedInjection === null ? (opened ?? items.find(flagged) ?? null) : null
-  const keys: Segment[][] =
-    opened !== null
-      ? detailKeys(opened).map(k => [k])
-      : openedInjection !== null
-        ? INJECTION_KEYS
-        : [
-            ...(items.length + model.injected.length > 0 ? LIST_KEYS : []),
-            ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
-          ]
+  const previewed = tier === 'wide' ? previewOf(model) : null
+  const keys: Segment[][] = [
+    ...(items.length + model.injected.length > 0 ? LIST_KEYS : []),
+    ...(previewed !== null ? [[button({ kind: 'open', real: previewed.real }, 'open', 'o')], ...ackKey(previewed).map(k => [k])] : []),
+  ]
   const footer = footerRow(keys, note, feedback, width)
   if (height === 1) return [footer]
 
@@ -196,17 +242,9 @@ function readyRows(model: ShownModel, view: Exclude<View, { kind: 'content' }>, 
   let body: Row[]
   if (tier === 'wide') {
     const [left, right] = gridColumns(width, LIST_SHARE)
-    const detail =
-      openedInjection !== null
-        ? injectionDetailRows(openedInjection, right, tier, budget)
-        : previewed !== null
-          ? detailRows(previewed, right, tier, budget)
-          : hintRows(right, items.length === 0)
-    body = besideRows(listRows(model, left, tier, budget, previewed?.real ?? openedInjection?.key ?? null), detail, left)
-  } else if (opened !== null) {
-    body = detailRows(opened, width, tier, budget)
-  } else if (openedInjection !== null) {
-    body = injectionDetailRows(openedInjection, width, tier, budget)
+    // A preview is read from its top: it has no keys to page it, so it never scrolls.
+    const detail = previewed !== null ? detailBody({ kind: 'item', item: previewed }, 0, content, right, tier, budget).rows : hintRows(right, items.length === 0)
+    body = besideRows(listRows(model, left, tier, budget, previewed?.real ?? null), detail, left)
   } else {
     body = listRows(model, width, tier, budget, null)
   }
@@ -257,14 +295,10 @@ const engineKey = (key: string, label: string): Segment[] => [{ text: key, color
  */
 const LIST_KEYS: Segment[][] = [engineKey('tab', 'move'), engineKey('enter', 'open')]
 
-const viewKey = (): Segment => button({ kind: 'view' }, 'view', 'v')
 const backKey = (): Segment => button({ kind: 'back' }, 'back', 'b')
-const INJECTION_KEYS: Segment[][] = [[viewKey()], [backKey()]]
 
 /** `a: acknowledge`, for an item with a verdict not yet acknowledged; else nothing. */
 const ackKey = (item: PaneItem): Segment[] => (item.verdict !== null && !item.acknowledged ? [button({ kind: 'ack', real: item.real }, 'acknowledge', 'a')] : [])
-
-const detailKeys = (item: PaneItem): Segment[] => [...ackKey(item), viewKey(), backKey()]
 
 /** Needs the person's eye: a verdict not yet acknowledged, or a file from a dependency. */
 const flagged = (item: PaneItem): boolean => (item.verdict !== null && !item.acknowledged) || item.origin === 'foreign'
@@ -489,20 +523,29 @@ function fieldOf(inner: number): (key: string, label: string, segments: Segment[
   })
 }
 
-/** A detail card in `budget` rows: the spacing goes before any of the content does. */
-function detailCard(section: Section, width: number, tier: Tier, budget: number): Row[] {
-  const lines = DENSITIES.map(d => cardLines(section, width, tier, d))
-  return (lines.find(l => l.length <= budget) ?? lines[lines.length - 1]!).slice(0, budget)
-}
-
 /** The name a card shows for an item: its file name. */
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
 
-/** An item opened in place: what it is, where it came from, and for a flag its evidence and whether it was acknowledged. */
-function detailRows(item: PaneItem, width: number, tier: Tier, budget: number): Row[] {
-  const inner = cardInner(width, tier)
-  const value = inner - 2 - LABEL_COLUMN
+/** A detail's card with its fields and nothing under them yet: the title, the note, the labelled rows. */
+function cardOf(opened: Opened, inner: number): Section {
   const field = fieldOf(inner)
+  if (opened.kind === 'injection') {
+    // Whose it is, which hook, how often it fired and how much it added; when
+    // it fired more than once, the text under the card is its most recent.
+    const g = opened.group
+    const many = g.count > 1
+    const rows: Row[] = [
+      field('plugin', 'plugin', [{ text: g.plugin }]),
+      field('hook', 'hook', [{ text: g.hookName }]),
+      field('count', 'injected', many ? [{ text: `${grouped(g.count)} times` }] : [{ text: 'once' }]),
+      field('size', 'size', [{ text: grouped(g.chars), color: HEADING }, { text: many ? ' chars in total' : ' chars', dim: true }]),
+      ...(many ? [field('shown', 'shown', [{ text: `most recent of ${grouped(g.count)}` }])] : []),
+    ]
+    return { key: 'detail', title: g.hookName, subtitle: 'injection', body: rows }
+  }
+  // What the item is, where it came from, and for a flag its evidence and whether it was acknowledged.
+  const item = opened.item
+  const value = inner - 2 - LABEL_COLUMN
   const rows: Row[] = [
     field('path', 'path', pathSegments(item, value)),
     field('origin', 'origin', [{ text: item.origin }]),
@@ -518,68 +561,57 @@ function detailRows(item: PaneItem, width: number, tier: Tier, budget: number): 
   }
   const state = markOf(item)
   const note = state === MARK.none ? [] : [mark(state, ' '), { text: state.legend, dim: true }]
-  return detailCard({ key: 'detail', title: baseName(item.path), subtitle: item.kind, note, body: rows }, width, tier, budget)
+  return { key: 'detail', title: baseName(item.path), subtitle: item.kind, note, body: rows }
+}
+
+/** The fewest rows of text a detail keeps before it gives up the spacing around its title. */
+const TEXT_MIN = 3
+
+/** The text as rows of a card: each line cut into rows of `width` cells, each row remembering the line it came from; or the dim rows that stand in for it. */
+type TextRows = { kind: 'lines'; all: Array<{ text: string; line: number }>; of: number; truncated: boolean } | { kind: 'note'; rows: Row[] }
+
+function textRowsOf(content: Content, width: number): TextRows {
+  if ('lines' in content) {
+    if (content.lines.length === 0) return { kind: 'note', rows: [{ key: 'text-empty', segments: [{ text: ' nothing to show', dim: true }] }] }
+    const all = content.lines.flatMap((l, line) => {
+      const parts = wrapCells(stripControl(l), width)
+      return (parts.length === 0 ? [''] : parts).map(text => ({ text, line }))
+    })
+    return { kind: 'lines', all, of: content.lines.length, truncated: content.truncated }
+  }
+  if ('error' in content) return { kind: 'note', rows: wrap(stripControl(content.error), width).map((line, i): Row => ({ key: `text-error-${i}`, segments: [{ text: ` ${line}`, dim: true }] })) }
+  return { kind: 'note', rows: [{ key: 'text-loading', segments: [{ text: ' Reading…', dim: true }] }] }
 }
 
 /**
- * A collapsed injection opened in place: whose it is, which hook, how often
- * it fired and how much it added. `v` shows the most recent one's text, so
- * the count says which one that will be.
+ * How a detail spends `budget` rows `width` wide: the card's spacing, the
+ * rows left for the text under the rule, and how many of them are lines of
+ * text (`page`, what `n` and `p` move by) when the text needs a position line
+ * under it.
+ *
+ * The text gives way first. The spacing goes before the text drops under
+ * {@link TEXT_MIN} rows; past that the text shrinks, then goes with its rule,
+ * and only then is the card itself cut. A finding's evidence is never pushed
+ * off the pane to make room for the file it is about.
  */
-function injectionDetailRows(g: ShownInjection, width: number, tier: Tier, budget: number): Row[] {
-  const field = fieldOf(cardInner(width, tier))
-  const many = g.count > 1
-  const rows: Row[] = [
-    field('plugin', 'plugin', [{ text: g.plugin }]),
-    field('hook', 'hook', [{ text: g.hookName }]),
-    field('count', 'injected', many ? [{ text: `${grouped(g.count)} times` }, { text: ', v shows the most recent', dim: true }] : [{ text: 'once' }]),
-    field('size', 'size', [{ text: grouped(g.chars), color: HEADING }, { text: many ? ' chars in total' : ' chars', dim: true }]),
-  ]
-  return detailCard({ key: 'detail', title: g.hookName, subtitle: 'injection', body: rows }, width, tier, budget)
-}
-
-// ------------------------------------------------------------- the content
-
-/** The fewest rows of text the content view keeps before it gives up the spacing around its title. */
-const CONTENT_MIN = 3
-
-/** How the content view uses a pane `columns` by `rows`: its tier, the cells a line of text gets, the card's spacing, and how many rows of text show. */
-function contentGeometry(columns: number, rows: number): { width: number; tier: Tier; inner: number; text: number; density: Density; page: number } {
-  const width = Math.max(0, Math.floor(columns))
-  const budget = Math.max(0, heightOf(width, rows) - 1)
-  const tier = tierOf(width)
+function detailGeometry(opened: Opened, content: Content, width: number, tier: Tier, budget: number) {
   const inner = cardInner(width, tier)
+  const section = cardOf(opened, inner)
+  const text = textRowsOf(content, Math.max(1, inner - 1))
+  const need = text.kind === 'lines' ? text.all.length : text.rows.length
   const head = (d: Density) => (d.gap ? 1 : 0) + 1 + (d.under ? 1 : 0)
-  // The position line under the text takes one row.
-  const density = DENSITIES.find(d => head(d) + 1 + CONTENT_MIN <= budget) ?? DENSITIES[DENSITIES.length - 1]!
-  return { width, tier, inner, text: Math.max(1, inner - 1), density, page: Math.max(1, budget - head(density) - 1) }
+  // What is left under the card and its rule.
+  const roomAt = (d: Density) => budget - head(d) - section.body.length - 1
+  const density = DENSITIES.find(d => roomAt(d) >= Math.min(need, TEXT_MIN)) ?? DENSITIES[DENSITIES.length - 1]!
+  const room = Math.max(0, roomAt(density))
+  // Cut short, the text gives one of its rows to the line saying where it is, when it has a row to give.
+  const positioned = text.kind === 'lines' && need > room && room >= 2
+  const page = text.kind === 'lines' && need > room ? (positioned ? room - 1 : room) : need
+  return { inner, section, text, density, room, page, positioned, total: text.kind === 'lines' ? text.all.length : 0 }
 }
 
-/** The rows of text the content view shows at once in a pane `columns` by `rows`: what `n` and `p` page by. */
-export function contentPage(columns: number, rows: number): number {
-  return contentGeometry(columns, rows).page
-}
-
-/** Each line of the text cut into rows of `width` cells, each row remembering the line it came from. */
-function contentLines(lines: string[], width: number): Array<{ text: string; line: number }> {
-  return lines.flatMap((l, line) => {
-    const parts = wrapCells(stripControl(l), width)
-    return (parts.length === 0 ? [''] : parts).map(text => ({ text, line }))
-  })
-}
-
-/**
- * `scroll` held inside the text: never before its first row, never so far
- * that the last page is not full. The mod stores only what this returns, so
- * `p` after scrolling past the end moves at once.
- */
-export function contentScroll(input: { content: Content | null; columns: number; rows: number }, scroll: number): number {
-  const { content } = input
-  if (content === null || !('lines' in content)) return 0
-  const g = contentGeometry(input.columns, input.rows)
-  const total = contentLines(content.lines, g.text).length
-  return Math.min(Math.max(0, Math.floor(scroll) || 0), Math.max(0, total - g.page))
-}
+/** `scroll` held inside a text `total` rows long shown `page` at a time: never before its first row, never so far that the last page is not full. */
+const clampScroll = (scroll: number, total: number, page: number): number => (page <= 0 ? 0 : Math.min(Math.max(0, Math.floor(scroll) || 0), Math.max(0, total - page)))
 
 /** `lines 41–80 of 212`, by the lines of the text the rows came from, not by the rows. */
 function position(first: number, last: number, of: number): string {
@@ -588,48 +620,83 @@ function position(first: number, last: number, of: number): string {
 }
 
 /**
- * The content view: the text of an item or an injection as a card titled
- * with it, the rows from `scroll`, where in the text they are, and a footer
- * of the keys that apply. Full width at every tier: reading wants the room
- * more than it wants the list beside it.
+ * A detail's rows: the card, then a rule, then the text from `scroll` and,
+ * when it is cut, where in it the rows are. With whether there is more text
+ * after (`next`) and before (`previous`) what shows.
  */
-function contentRows(model: ShownModel, view: Extract<View, { kind: 'content' }>, content: Content, columns: number, rows: number, feedback: string | null, note: string): Row[] {
-  const g = contentGeometry(columns, rows)
-  const height = heightOf(g.width, rows)
-  const keys: Segment[][] = []
-  let body: Row[]
-  if ('lines' in content) {
-    const all = contentLines(content.lines, g.text)
-    const start = contentScroll({ content, columns, rows }, view.scroll)
-    const shown = all.slice(start, start + g.page)
-    if (start + g.page < all.length) keys.push([button({ kind: 'next' }, 'next', 'n')])
-    if (start > 0) keys.push([button({ kind: 'previous' }, 'previous', 'p')])
-    const first = shown[0]
-    const last = shown[shown.length - 1]
-    const at = first === undefined || last === undefined ? 'nothing to show' : `${position(first.line + 1, last.line + 1, content.lines.length)}${content.truncated ? ' · truncated' : ''}`
-    body = [...shown.map((r, i): Row => ({ key: `content-${start + i}`, segments: [{ text: ' ' }, { text: r.text }] })), dimRow('content-at', ` ${at}`, g.inner)]
-  } else if ('error' in content) {
-    body = wrap(stripControl(content.error), g.text).map((line, i): Row => ({ key: `content-error-${i}`, segments: [{ text: ` ${line}`, dim: true }] }))
-  } else {
-    body = [dimRow('content-loading', ' Reading…', g.inner)]
+function detailBody(opened: Opened, scroll: number, content: Content, width: number, tier: Tier, budget: number): { rows: Row[]; next: boolean; previous: boolean } {
+  const g = detailGeometry(opened, content, width, tier, budget)
+  let under: Row[] = []
+  let next = false
+  let previous = false
+  if (g.room > 0) {
+    const rule: Row = { key: 'detail-rule', segments: [{ text: '─'.repeat(g.inner), color: FRAME }] }
+    let text: Row[]
+    if (g.text.kind === 'lines') {
+      const start = clampScroll(scroll, g.total, g.page)
+      const shown = g.text.all.slice(start, start + g.page)
+      next = start + g.page < g.total
+      previous = start > 0
+      text = shown.map((r, i): Row => ({ key: `text-${start + i}`, segments: [{ text: ' ' }, { text: r.text }] }))
+      const first = shown[0]
+      const last = shown[shown.length - 1]
+      if (g.positioned && first !== undefined && last !== undefined) {
+        text.push(dimRow('text-at', ` ${position(first.line + 1, last.line + 1, g.text.of)}${g.text.truncated ? ' · truncated' : ''}`, g.inner))
+      }
+    } else {
+      text = g.text.rows.slice(0, g.room)
+    }
+    under = [rule, ...text]
   }
-  keys.push([backKey()])
-  const footer = footerRow(keys, note, feedback, g.width)
-  if (height === 1) return [footer]
-  const section: Section = { key: 'content', ...contentTitle(model, view, content), body }
-  return pinned(cardLines(section, g.width, g.tier, g.density), height - 1, footer)
+  const rows = cardLines({ ...g.section, body: [...g.section.body, ...under] }, width, tier, g.density).slice(0, budget)
+  return { rows, next, previous }
 }
 
-/** The content card's title: the item's file name or the injection's hook, as its detail names it; the text's own title when the model no longer has it. */
-function contentTitle(model: ShownModel, target: Target, content: Content): { title: string; subtitle?: string } {
-  if ('real' in target) {
-    const item = [...model.instructions, ...model.memory].find(i => i.real === target.real)
-    if (item !== undefined) return { title: baseName(item.path), subtitle: item.kind }
-  } else {
-    const g = model.injected.find(i => i.key === target.injection)
-    if (g !== undefined) return { title: g.hookName, subtitle: 'injection' }
-  }
-  return { title: 'title' in content ? stripControl(content.title) : '…' }
+/**
+ * An item or injection opened in place, full width at every tier: reading
+ * wants the room more than it wants the list beside it. The footer offers
+ * `n` and `p` only where they move the text, `a` for an open flag, then `b`.
+ */
+function detailView(opened: Opened, scroll: number, content: Content, width: number, height: number, feedback: string | null, note: string): Row[] {
+  const tier = tierOf(width)
+  const budget = height - 1
+  const body = detailBody(opened, scroll, content, width, tier, Math.max(0, budget))
+  const keys: Segment[][] = [
+    ...(body.next ? [[button({ kind: 'next' }, 'next', 'n')]] : []),
+    ...(body.previous ? [[button({ kind: 'previous' }, 'previous', 'p')]] : []),
+    ...(opened.kind === 'item' ? ackKey(opened.item).map(k => [k]) : []),
+    [backKey()],
+  ]
+  const footer = footerRow(keys, note, feedback, width)
+  if (height === 1) return [footer]
+  return pinned(body.rows, budget, footer)
+}
+
+/** The input the text's paging depends on: what the mod keeps, at the size it last drew. */
+type PagingInput = Pick<LayoutInput, 'status' | 'view' | 'columns' | 'rows'> & { content: Content | null }
+
+/** The geometry of the opened detail's text at the drawn size; null where nothing is open. */
+function pagingOf(input: PagingInput): ReturnType<typeof detailGeometry> | null {
+  if (input.status.kind !== 'ready') return null
+  const opened = openedOf(shown(input.status.model), input.view)
+  if (opened === null) return null
+  const width = Math.max(0, Math.floor(input.columns))
+  return detailGeometry(opened, input.content ?? { loading: true }, width, tierOf(width), Math.max(0, heightOf(width, input.rows) - 1))
+}
+
+/** The rows of text an open detail shows at once at the drawn size: what `n` and `p` page by. */
+export function contentPage(input: PagingInput): number {
+  return Math.max(1, pagingOf(input)?.page ?? 1)
+}
+
+/**
+ * `scroll` held inside the open detail's text, as the layout holds it. The
+ * mod stores only what this returns, so `p` after scrolling past the end
+ * moves at once.
+ */
+export function contentScroll(input: PagingInput, scroll: number): number {
+  const g = pagingOf(input)
+  return g === null || g.text.kind !== 'lines' ? 0 : clampScroll(scroll, g.total, g.page)
 }
 
 /** The wide tier's right half with nothing to preview. */

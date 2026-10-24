@@ -66,7 +66,7 @@ export function parseModel(stdout: string): Status {
 /**
  * What the pane makes of `kanon show`'s stdout: the text, or why not. Parsed
  * as strictly as the model, so a half-shaped answer is an error rather than
- * a content view that draws nothing.
+ * a detail whose text draws nothing.
  */
 export function parseContent(stdout: string): Content {
   const text = stdout.trim()

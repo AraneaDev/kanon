@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { contentPage, contentScroll, injectionKey, layout, rowWidth, type LayoutInput, type Row, type Status, type View } from '../hooks/lib/layout'
+import { contentPage, contentScroll, injectionKey, layout, rowWidth, textTarget, type LayoutInput, type Row, type Status, type View } from '../hooks/lib/layout'
 import type { PaneItem, PaneModel } from '../src/model'
 
 const text = (row: Row): string => row.segments.map(s => s.text).join('')
@@ -186,27 +186,96 @@ describe('the list', () => {
   })
 })
 
-describe('the detail view', () => {
-  const detail = (model: PaneModel, real: string, columns = 100) => run({ model, view: { kind: 'detail', real }, columns, rows: 20 })
 
-  it('shows a gone item with its evidence and offers to acknowledge it', () => {
+/** The footer of a pane `columns` wide: its keys, then the basis against the right edge. */
+const footerText = (keys: string, columns = 100): string => ` ${keys}${blank(columns - 1 - keys.length - 'observed '.length)}observed `
+const numbered = (n: number): string[] => Array.from({ length: n }, (_, i) => `line ${i + 1}`)
+const textOf = (lines: string[], truncated = false) => ({ title: 'notes.md', lines, truncated })
+
+describe('the detail view', () => {
+  const detail = (model: PaneModel, real: string, over: Partial<LayoutInput> = {}) => run({ model, view: { kind: 'detail', real }, rows: 20, content: textOf(numbered(5)), ...over })
+  const CARD = [
+    ' ',
+    `── ◇ notes.md · memory ${dash(67)} ▲ gone ──`,
+    blank(100),
+    '    path     ~/.claude/projects/-home-user-app/memory/notes.md'.padEnd(100),
+    '    origin   user'.padEnd(100),
+    '    reason   session_start'.padEnd(100),
+    '    verdict  ▲ gone'.padEnd(100),
+    '    evidence names scripts/deploy.sh, which no longer exists'.padEnd(100),
+    '    state    not acknowledged'.padEnd(100),
+  ]
+  const RULE = `  ${dash(96)}  `
+
+  it('shows the details, a rule, then the whole text when it fits, with no position line', () => {
     const rows = detail(small, NOTES)
-    expect(rows.slice(0, 9).map(text)).toEqual([
-      ' ',
-      `── ◇ notes.md · memory ${dash(67)} ▲ gone ──`,
-      blank(100),
-      '    path     ~/.claude/projects/-home-user-app/memory/notes.md'.padEnd(100),
-      '    origin   user'.padEnd(100),
-      '    reason   session_start'.padEnd(100),
-      '    verdict  ▲ gone'.padEnd(100),
-      '    evidence names scripts/deploy.sh, which no longer exists'.padEnd(100),
-      '    state    not acknowledged'.padEnd(100),
-    ])
-    expect(rows).toHaveLength(20)
+    expect(rows.map(text)).toEqual([...CARD, RULE, ...numbered(5).map(l => `   ${l}`.padEnd(100)), ...Array.from({ length: 4 }, () => ' '), footerText('a: acknowledge  b: back')])
     const footer = rows.at(-1)!
-    expect(text(footer)).toBe(` a: acknowledge  v: view  b: back${blank(58)}observed `)
     expect(footer.segments.find(s => s.hotkey === 'a')?.press).toEqual({ kind: 'ack', real: NOTES })
     expect(footer.segments.find(s => s.hotkey === 'b')?.press).toEqual({ kind: 'back' })
+    expect(rows.find(r => r.key === 'detail-rule')?.segments.find(s => s.text.startsWith('─'))?.color).toBe('subtle')
+  })
+
+  it('windows a long text under the details, says where it is, and offers n', () => {
+    const rows = detail(small, NOTES, { content: textOf(numbered(100)) })
+    expect(rows.map(text)).toEqual([...CARD, RULE, ...numbered(8).map(l => `   ${l}`.padEnd(100)), '   lines 1–8 of 100'.padEnd(100), footerText('n: next  a: acknowledge  b: back')])
+    expect(rows.find(r => r.key === 'text-at')?.segments.find(s => s.text.includes('lines'))?.dim).toBe(true)
+    expect(rows.at(-1)!.segments.filter(s => s.press !== undefined).map(s => s.hotkey)).toEqual(['n', 'a', 'b'])
+  })
+
+  it('pages the text within its bounds while the details stay put', () => {
+    const at = (scroll: number) => run({ view: { kind: 'detail', real: NOTES, scroll }, rows: 20, content: textOf(numbered(100)) }).map(text)
+    const middle = at(8)
+    expect(middle.slice(0, 10)).toEqual([...CARD, RULE])
+    expect(middle.slice(10, 19)).toEqual([...numbered(16).slice(8).map(l => `   ${l}`.padEnd(100)), '   lines 9–16 of 100'.padEnd(100)])
+    expect(middle.at(-1)).toBe(footerText('n: next  p: previous  a: acknowledge  b: back'))
+    const end = at(10_000)
+    expect(end.slice(0, 10)).toEqual([...CARD, RULE])
+    expect(end[18]).toBe('   lines 93–100 of 100'.padEnd(100))
+    expect(end.at(-1)).toBe(footerText('p: previous  a: acknowledge  b: back'))
+    expect(at(-5)[10]).toBe('   line 1'.padEnd(100))
+  })
+
+  it('agrees with the mod about the page and the bounds', () => {
+    const input = { status: ready(small), view: { kind: 'detail', real: NOTES } as View, content: textOf(numbered(100)), columns: 100, rows: 20 }
+    expect(contentPage(input)).toBe(8)
+    expect(contentScroll(input, 10_000)).toBe(92)
+    expect(contentScroll(input, -3)).toBe(0)
+    expect(contentScroll({ ...input, content: { loading: true } }, 5)).toBe(0)
+    expect(contentScroll({ ...input, content: textOf(numbered(5)) }, 5)).toBe(0)
+  })
+
+  it('says it is reading, or why it could not, under the details', () => {
+    const loading = detail(small, NOTES, { content: { loading: true } })
+    expect(loading.slice(0, 10).map(text)).toEqual([...CARD, RULE])
+    expect(text(loading[10]!)).toBe('   Reading…'.padEnd(100))
+    expect(loading[10]!.segments.find(s => s.text.includes('Reading'))?.dim).toBe(true)
+    expect(text(loading.at(-1)!)).toBe(footerText('a: acknowledge  b: back'))
+    const failed = detail(small, NOTES, { content: { error: 'kanon could not read notes.md' } })
+    expect(failed.slice(0, 10).map(text)).toEqual([...CARD, RULE])
+    expect(failed[10]!.segments.find(s => s.text.includes('could not read'))?.dim).toBe(true)
+    // Absent text reads as still reading, never as an empty file.
+    expect(text(detail(small, NOTES, { content: null })[10]!)).toBe('   Reading…'.padEnd(100))
+  })
+
+  it('wraps a long line within the width and counts the lines of the text, not the rows', () => {
+    const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')
+    const rows = detail(small, NOTES, { columns: 60, rows: 30, content: textOf(['short', long, 'end'], true) })
+    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(60)
+    const shown = rows.map(text).map(t => t.trim())
+    const first = shown.indexOf('short')
+    const last = shown.indexOf('end')
+    expect(first).toBeGreaterThan(0)
+    expect(shown.slice(first + 1, last).join(' ').replace(/\s+/g, ' ')).toBe(long)
+    expect(shown).not.toContain('lines 1–3 of 3 · truncated')
+    const cut = detail(small, NOTES, { columns: 60, rows: 16, content: textOf(['short', long, 'end'], true) }).map(text).map(t => t.trim())
+    expect(cut.some(t => /^lines 1–\d of 3 · truncated$/.test(t))).toBe(true)
+  })
+
+  it('strips control characters from the text', () => {
+    const rows = detail(small, NOTES, { content: textOf(['bad\x1b[31m\rline']) })
+    // eslint-disable-next-line no-control-regex
+    for (const r of rows) expect(/[\u0000-\u001F\u007F-\u009F]/.test(text(r))).toBe(false)
   })
 
   it('offers no acknowledge for an acknowledged item', () => {
@@ -214,12 +283,64 @@ describe('the detail view', () => {
     const rows = detail({ ...small, memory: [acked] }, NOTES).map(text)
     expect(rows.some(t => t.includes('a: acknowledge'))).toBe(false)
     expect(rows.some(t => t.includes('state    ✓ acknowledged, still holds'))).toBe(true)
-    expect(rows.at(-1)).toStartWith(' v: view  b: back')
+    expect(rows.at(-1)).toBe(footerText('b: back'))
   })
 
   it('offers no acknowledge for an item with no verdict', () => {
     const rows = detail(small, '/home/user/app/node_modules/pkg/CLAUDE.md').map(text)
     expect(rows.some(t => t.includes('a: acknowledge'))).toBe(false)
+  })
+
+  it('has no v anywhere: no key, no word, no action', () => {
+    for (const view of [LIST, { kind: 'detail', real: NOTES } as View, { kind: 'detail', injection: injectionKey(small.injected[0]!) } as View])
+      for (const columns of [60, 100, 140]) {
+        const rows = run({ view, columns, content: textOf(numbered(100)) })
+        const segments = rows.flatMap(r => r.segments)
+        expect(segments.some(s => s.hotkey === 'v')).toBe(false)
+        expect(segments.some(s => (s.press?.kind as string) === 'view')).toBe(false)
+        expect(rows.map(text).some(t => t.includes('v: view') || t.includes('v shows'))).toBe(false)
+      }
+  })
+
+  it('opens full width at every tier, the list gone', () => {
+    for (const columns of [60, 100, 140]) {
+      const rows = detail(small, NOTES, { columns }).map(text)
+      expect(rows.some(t => t.includes('◇ Instructions'))).toBe(false)
+      expect(rows[1]).toStartWith('── ◇ notes.md · memory ')
+      expect(rows.some(t => t.trim() === 'line 5')).toBe(true)
+    }
+  })
+})
+
+describe('the wide preview', () => {
+  it('shows the previewed item’s details and the first lines of its text beside the list', () => {
+    const rows = run({ columns: 140, rows: 30, content: { title: 'CLAUDE.md', lines: numbered(100), truncated: false } })
+    const right = rows.map(r => text(r).slice(64))
+    expect(right.some(t => t.includes('◇ CLAUDE.md · instruction'))).toBe(true)
+    expect(right.some(t => t.includes('origin   foreign'))).toBe(true)
+    expect(right.some(t => t.trim() === 'line 1')).toBe(true)
+    expect(right.some(t => /lines 1–\d+ of 100/.test(t))).toBe(true)
+    // A preview is read, not paged: its footer offers no n or p.
+    expect(rows.at(-1)!.segments.some(s => s.hotkey === 'n' || s.hotkey === 'p')).toBe(false)
+  })
+
+  it('says it is reading while the previewed text has not arrived', () => {
+    expect(run({ columns: 140, rows: 30, content: null }).map(text).some(t => t.includes('Reading…'))).toBe(true)
+  })
+
+  it('names the text it shows: the opened item at any tier, the previewed item in the wide list, else none', () => {
+    const at = (view: View, columns: number) => textTarget({ status: ready(small), view, columns })
+    expect(at(LIST, 140)).toEqual({ real: '/home/user/app/node_modules/pkg/CLAUDE.md' })
+    expect(at(LIST, 100)).toBeNull()
+    expect(at({ kind: 'detail', real: NOTES }, 60)).toEqual({ real: NOTES })
+    expect(at({ kind: 'detail', real: NOTES }, 140)).toEqual({ real: NOTES })
+    expect(at({ kind: 'detail', injection: injectionKey(small.injected[0]!) }, 100)).toEqual({ injection: injectionKey(small.injected[0]!) })
+    // An item no longer in the model falls back to the list, and so does its text.
+    expect(at({ kind: 'detail', real: '/home/user/app/missing.md' }, 100)).toBeNull()
+    expect(at({ kind: 'detail', real: '/home/user/app/missing.md' }, 140)).toEqual({ real: '/home/user/app/node_modules/pkg/CLAUDE.md' })
+    expect(textTarget({ status: { kind: 'loading' }, view: { kind: 'detail', real: NOTES }, columns: 100 })).toBeNull()
+    const quiet = { ...small, instructions: [small.instructions[0]!], memory: [] }
+    expect(textTarget({ status: ready(quiet), view: LIST, columns: 140 })).toBeNull()
   })
 })
 
@@ -273,28 +394,46 @@ function big(n: number): PaneModel {
   }
 }
 
+
 describe('the width sweep', () => {
   const model = big(30)
   const flagged = {
     instructions: model.instructions.filter(i => i.origin === 'foreign' || i.verdict !== null).map(i => i.real),
     memory: model.memory.filter(i => i.verdict !== null).map(i => i.real),
   }
+  const many = { title: 'CLAUDE.md', lines: Array.from({ length: 300 }, (_, i) => `${'long words here '.repeat(i % 12)}${i}`), truncated: true }
   const views: View[] = [LIST, { kind: 'detail', real: '/home/user/.claude/projects/app/memory/gone.md' }, { kind: 'detail', injection: injectionKey(model.injected[3]!) }]
+  const contents = [many, { loading: true as const }, { error: 'kanon could not read the file' }]
+  /** The field rows of a detail: everything its card holds above the rule. */
+  const fields = (view: View): string[] =>
+    layout({ status: ready(model), view, columns: 200, rows: 200, feedback: null, frame: 0, content: { loading: true } })
+      .map(r => r.key)
+      .filter(k => k.startsWith('detail-') && !['detail-head', 'detail-under', 'detail-rule'].includes(k))
   for (const columns of [40, 60, 80, 100, 130, 140, 200])
     for (const height of [8, 24, 60])
       for (const view of views)
         it(`${columns}x${height} ${view.kind}`, () => {
-          const rows = layout({ status: ready(model), view, columns, rows: height, feedback: null, frame: 0 })
-          for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(columns)
-          expect(rows.length).toBeLessThanOrEqual(height)
-          expect(rows.at(-1)!.key).toBe('footer')
-          if (view.kind === 'detail') expect(text(rows.at(-1)!)).toContain('b: back')
-          for (const [group, reals] of Object.entries(flagged)) {
-            const shown = rows.some(r => r.key.includes(`${group}-head`) || r.key.includes(`${group}:`))
-            if (shown) expect(rows.some(r => reals.some(real => r.key.includes(`${group}:${real}`)))).toBe(true)
-          }
+          const expected = view.kind === 'detail' ? fields(view) : []
+          for (const content of contents)
+            for (const scroll of [0, 50, 10_000]) {
+              const v = view.kind === 'detail' ? { ...view, scroll } : view
+              const rows = layout({ status: ready(model), view: v, columns, rows: height, feedback: null, frame: 0, content })
+              for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(columns)
+              expect(rows.length).toBeLessThanOrEqual(height)
+              expect(rows.at(-1)!.key).toBe('footer')
+              if (view.kind === 'detail') {
+                expect(text(rows.at(-1)!)).toContain('b: back')
+                // The text gives way first: a row of it shows only under every field of the card.
+                if (rows.some(r => r.key.startsWith('text-'))) for (const k of expected) expect(rows.some(r => r.key === k)).toBe(true)
+              }
+              for (const [group, reals] of Object.entries(flagged)) {
+                const shown = rows.some(r => r.key.includes(`${group}-head`) || r.key.includes(`${group}:`))
+                if (shown) expect(rows.some(r => reals.some(real => r.key.includes(`${group}:${real}`)))).toBe(true)
+              }
+            }
         })
 })
+
 
 describe('a short, narrow pane', () => {
   /** 15 plain instructions, one foreign, one may be stale; 15 plain memories, one gone. */
@@ -377,10 +516,12 @@ describe('text Kanon did not write', () => {
   })
 })
 
+
 describe('the injection detail', () => {
   const prompt = { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 88, chars: 3520, index: 97 }
   const once = { plugin: 'example', hookName: 'SessionStart', count: 1, chars: 900, index: 0 }
   const model: PaneModel = { ...small, injected: [prompt, once] }
+  const said = { title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false }
 
   it('makes each injected row a button on its plugin name that opens its detail', () => {
     const presses = run({ model }).flatMap(r => r.segments).filter(s => s.press?.kind === 'open' && 'injection' in s.press)
@@ -390,134 +531,32 @@ describe('the injection detail', () => {
     ])
   })
 
-  it('names the plugin, the hook, how often and how much, with v to read the most recent and b to go back', () => {
-    const rows = run({ model, view: { kind: 'detail', injection: injectionKey(prompt) }, rows: 12 })
-    expect(rows.slice(0, 7).map(text)).toEqual([
+  it('names the plugin, the hook, how often and how much, which one it shows, then its text, with b to go back', () => {
+    const rows = run({ model, view: { kind: 'detail', injection: injectionKey(prompt) }, rows: 12, content: said })
+    expect(rows.map(text)).toEqual([
       ' ',
       `── ◇ UserPromptSubmit · injection ${dash(64)}──`,
       blank(100),
       '    plugin   unattributed'.padEnd(100),
       '    hook     UserPromptSubmit'.padEnd(100),
-      '    injected 88 times, v shows the most recent'.padEnd(100),
+      '    injected 88 times'.padEnd(100),
       '    size     3,520 chars in total'.padEnd(100),
+      '    shown    most recent of 88'.padEnd(100),
+      `  ${dash(96)}  `,
+      '   Remember the house style.'.padEnd(100),
+      ' ',
+      footerText('b: back'),
     ])
-    const footer = rows.at(-1)!
-    expect(text(footer)).toBe(` v: view  b: back${blank(74)}observed `)
-    expect(footer.segments.filter(s => s.press !== undefined).map(s => [s.hotkey, s.press])).toEqual([
-      ['v', { kind: 'view' }],
-      ['b', { kind: 'back' }],
-    ])
-    const single = run({ model, view: { kind: 'detail', injection: injectionKey(once) }, rows: 12 }).map(text)
+    expect(rows.at(-1)!.segments.filter(s => s.press !== undefined).map(s => [s.hotkey, s.press])).toEqual([['b', { kind: 'back' }]])
+    const single = run({ model, view: { kind: 'detail', injection: injectionKey(once) }, rows: 12, content: said }).map(text)
     expect(single).toContain('    injected once'.padEnd(100))
     expect(single).toContain('    size     900 chars'.padEnd(100))
+    expect(single.some(t => t.includes('most recent'))).toBe(false)
   })
 
   it('falls back to the list when the injection is no longer in the model', () => {
     const rows = run({ model, view: { kind: 'detail', injection: injectionKey({ plugin: 'gone', hookName: 'Stop' }) } })
     expect(rows.map(text).some(t => t.includes('◇ Instructions'))).toBe(true)
-  })
-})
-
-describe('the content view', () => {
-  const CLAUDE = '/home/user/app/CLAUDE.md'
-  const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`)
-  const content = { title: 'CLAUDE.md', lines, truncated: false }
-  const at = (scroll: number, over: Partial<LayoutInput> = {}) => run({ view: { kind: 'content', real: CLAUDE, scroll }, content, columns: 60, rows: 12, ...over })
-
-  it('draws the item as a card, the lines from scroll, where they are, and only the keys that apply', () => {
-    const rows = at(0)
-    expect(rows.map(text)).toEqual([
-      ' ',
-      `── ◇ CLAUDE.md · instruction ${dash(29)}──`,
-      blank(60),
-      ...lines.slice(0, 7).map(l => ` ${l}`),
-      ' lines 1–7 of 20',
-      ` n: next  b: back${blank(34)}observed `,
-    ])
-    expect(rows.at(-1)!.segments.filter(s => s.press !== undefined).map(s => [s.hotkey, s.press])).toEqual([
-      ['n', { kind: 'next' }],
-      ['b', { kind: 'back' }],
-    ])
-  })
-
-  it('pages within its bounds: p appears past the start, n goes at the end, and a scroll past the end is clamped', () => {
-    const middle = at(7).map(text)
-    expect(middle.slice(3, 11)).toEqual([...lines.slice(7, 14).map(l => ` ${l}`), ' lines 8–14 of 20'])
-    expect(middle.at(-1)).toStartWith(' n: next  p: previous  b: back ')
-    const end = at(100).map(text)
-    expect(end.slice(3, 11)).toEqual([...lines.slice(13, 20).map(l => ` ${l}`), ' lines 14–20 of 20'])
-    expect(end.at(-1)).toStartWith(' p: previous  b: back ')
-    expect(at(-5).map(text)[3]).toBe(' line 1')
-  })
-
-  it('agrees with the mod about the page and the bounds', () => {
-    expect(contentPage(60, 12)).toBe(7)
-    const input = { content, columns: 60, rows: 12 }
-    expect(contentScroll(input, 100)).toBe(13)
-    expect(contentScroll(input, -3)).toBe(0)
-    expect(contentScroll({ ...input, content: { loading: true } }, 5)).toBe(0)
-  })
-
-  it('wraps a long line within the width and counts the lines of the text, not the rows', () => {
-    const long = Array.from({ length: 26 }, (_, i) => `word${i}`).join(' ')
-    const rows = at(0, { content: { title: 'CLAUDE.md', lines: ['short', long, 'end'], truncated: true } })
-    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(60)
-    const shown = rows.map(text)
-    expect(shown[3]).toBe(' short')
-    expect(shown.slice(4, 7).join(' ').replace(/\s+/g, ' ').trim()).toBe(long)
-    expect(shown).toContain(' end')
-    expect(shown).toContain(' lines 1–3 of 3 · truncated')
-  })
-
-  it('cuts a word too long for a row without exceeding the width', () => {
-    const rows = at(0, { columns: 30, content: { title: 'x', lines: ['y'.repeat(100)], truncated: false } })
-    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(30)
-    expect(rows.map(text).filter(t => t.includes('yyy')).join('').replace(/ /g, '')).toBe('y'.repeat(100))
-  })
-
-  it('says it is reading, or why it could not, with only b in the footer', () => {
-    const loading = at(0, { content: { loading: true } }).map(text)
-    expect(loading.some(t => t.includes('Reading…'))).toBe(true)
-    expect(loading.at(-1)).toStartWith(' b: back ')
-    const failed = at(0, { content: { error: 'kanon could not read CLAUDE.md' } })
-    expect(failed.flatMap(r => r.segments).find(s => s.text.includes('could not read'))?.dim).toBe(true)
-    expect(text(failed.at(-1)!)).toStartWith(' b: back ')
-  })
-
-  it('opens an injection under its hook name', () => {
-    const prompt = { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 2, chars: 80, index: 3 }
-    const rows = run({ model: { ...small, injected: [prompt] }, view: { kind: 'content', injection: injectionKey(prompt), scroll: 0 }, content: { title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false }, columns: 60, rows: 12 }).map(text)
-    expect(rows[1]).toStartWith('── ◇ UserPromptSubmit · injection ')
-    expect(rows).toContain(' Remember the house style.')
-    expect(rows).toContain(' line 1 of 1')
-  })
-
-  it('strips control characters from the lines', () => {
-    const rows = at(0, { content: { title: 'x', lines: ['bad\x1b[31m\rline'], truncated: false } })
-    for (const r of rows) expect(/[\u0000-\u001F\u007F-\u009F]/.test(text(r))).toBe(false)
-  })
-
-  for (const columns of [20, 40, 60, 80, 100, 130, 140, 200])
-    for (const height of [1, 2, 4, 8, 24, 60])
-      it(`holds the width and height at ${columns}x${height}`, () => {
-        const many = { title: 'CLAUDE.md', lines: Array.from({ length: 300 }, (_, i) => `${'long words here '.repeat(i % 12)}${i}`), truncated: true }
-        for (const scroll of [0, 50, 10_000]) {
-          const rows = run({ view: { kind: 'content', real: CLAUDE, scroll }, content: many, columns, rows: height })
-          for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(columns)
-          expect(rows.length).toBeLessThanOrEqual(height)
-          expect(rows.at(-1)!.key).toBe('footer')
-          expect(text(rows.at(-1)!)).toContain('b: back')
-        }
-      })
-})
-
-describe('v in the detail view', () => {
-  it('is offered for an instruction file and a memory, beside a and b', () => {
-    const memory = run({ view: { kind: 'detail', real: NOTES }, rows: 20 }).at(-1)!
-    expect(text(memory)).toStartWith(' a: acknowledge  v: view  b: back ')
-    expect(memory.segments.find(s => s.hotkey === 'v')?.press).toEqual({ kind: 'view' })
-    const file = run({ view: { kind: 'detail', real: '/home/user/app/CLAUDE.md' }, rows: 20 }).at(-1)!
-    expect(text(file)).toStartWith(' v: view  b: back ')
   })
 })
 

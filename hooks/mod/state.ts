@@ -7,7 +7,7 @@
  * and reset on a hot reload, which is what the pane wants. It never
  * remembers being open, so a fresh load starting from "closed" is correct.
  */
-import type { Content, Status, View } from '../lib/layout'
+import type { Content, Status, Target, View } from '../lib/layout'
 import type { Port, Timer } from './port'
 
 /** The pane's id, and the `requestId` its render hook matches. */
@@ -22,14 +22,24 @@ export const mod = {
   view: { kind: 'list' } as View,
   feedback: null as string | null,
   frame: 0,
-  /** The content view's text (`kanon show`'s answer), or null outside it. */
-  content: null as Content | null,
   /**
-   * Bumped whenever the text being read is let go (back, close, another
-   * view): a `show` that lands under another number belongs to text nobody is
-   * reading any more, and is dropped.
+   * The text the pane shows under a detail (the opened item, or the wide
+   * tier's previewed one): whose it is (`key`, by `targetKey`), and
+   * `kanon show`'s answer, still reading, or why it could not.
    */
-  reading: 0,
+  text: {
+    key: null as string | null,
+    target: null as Target | null,
+    content: null as Content | null,
+    /**
+     * Bumped whenever the text wanted changes (open, back, another preview,
+     * close): a `show` that lands under another number belongs to text
+     * nobody is reading any more, and is dropped.
+     */
+    ticket: 0,
+    /** Single flight: one `show` at a time; whatever is wanted when it lands is read next. */
+    running: false,
+  },
   /** The pane's size at its last render: what `n`, `p` and the wheel page and clamp by. */
   drawn: { columns: 60, rows: 40 },
   /** Whether the pane is open, as this module last saw it opened or closed. */
@@ -108,8 +118,7 @@ export function paneOpened(io: Port): void {
   mod.open = true
   mod.view = { kind: 'list' }
   mod.feedback = null
-  mod.content = null
-  mod.reading += 1
+  forgetText()
   setStatus(io, { kind: 'loading' })
 }
 
@@ -123,7 +132,14 @@ export function paneClosed(): void {
   mod.feedback = null
   mod.status = { kind: 'loading' }
   mod.view = { kind: 'list' }
-  mod.content = null
-  mod.reading += 1
+  forgetText()
   mod.refresh.again = false
+}
+
+/** No text wanted any more: what is held goes, and a read in flight lands under an old ticket. */
+export function forgetText(): void {
+  mod.text.key = null
+  mod.text.target = null
+  mod.text.content = null
+  mod.text.ticket += 1
 }

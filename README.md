@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-859%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-813%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -82,14 +82,16 @@ Compaction. Four glyphs carry the findings:
 | `!` | foreign |
 | `✓` | acknowledged |
 
-Each file name is a button that opens its detail in place, and so is the plugin name on each row
-under Injected by hooks. `tab` moves between them and `enter` opens the one you are on; the footer
-always lists the keys that work. In a detail, `v` shows the text itself: the file, or for an injected
-row the most recent of its injections. In that text, `n` and `p` page forward and back, and the mouse
-wheel scrolls it. `b` steps back one level, from the text to the detail and from the detail to the
-list. The other keys are `o` (on a wide terminal, open the previewed item), `a` (acknowledge a
-flagged item, the same record `kanon ack` writes) and `r` (retry). On a terminal wider than 130
-columns the detail of the previewed item sits beside the list. The pane refreshes when a turn ends.
+Each file name is a button that opens it in place, and so is the plugin name on each row under
+Injected by hooks. `tab` moves between them and `enter` opens the one you are on; the footer always
+lists the keys that work. An opened item shows its details at the top (path, origin, reason, verdict,
+evidence and state, or for an injected row its plugin, hook, size and which of its injections you are
+looking at) and its text under them: the file itself, or the most recent of the row's injections.
+When the text is longer than the room left, `n` and `p` page it forward and back and the mouse wheel
+scrolls it, while the details stay where they are. `b` goes back to the list. The other keys are `o`
+(on a wide terminal, open the previewed item), `a` (acknowledge a flagged item, the same record
+`kanon ack` writes) and `r` (retry). On a terminal wider than 130 columns the previewed item sits
+beside the list, its details and the first lines of its text. The pane refreshes when a turn ends.
 
 The keys work only while the pane has the keyboard. Escape, or a click in the prompt, gives the
 keyboard back to the prompt, and a `b` typed then goes into your message instead. The footer says
@@ -97,11 +99,11 @@ keyboard back to the prompt, and a `b` typed then goes into your message instead
 keyboard back.
 
 <p align="center">
-  <img src="assets/pane-detail.svg" alt="The Kanon pane with one memory opened in place: release-flow.md, marked gone. It shows the path, the origin user, the reason not observed, the evidence that it names scripts/release.sh which no longer exists, and the state not acknowledged. The footer offers a: acknowledge, v: view and b: back" width="640">
+  <img src="assets/pane-detail.svg" alt="The Kanon pane with one memory opened in place: release-flow.md, marked gone. It shows the path, the origin user, the reason not observed, the evidence that it names scripts/release.sh which no longer exists, and the state not acknowledged. Under a rule follows the memory's text, one line telling Claude to cut a release with scripts/release.sh. The footer offers a: acknowledge and b: back" width="640">
 </p>
 
 The pane runs `kanon model --json` and lays out what comes back, so it never re-implements Kanon.
-The text behind `v` comes from `kanon show`, which you can run yourself. It prints JSON and writes
+The text under the details comes from `kanon show`, which you can run yourself. It prints JSON and writes
 nothing:
 
 ```bash

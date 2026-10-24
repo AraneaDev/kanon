@@ -19,10 +19,14 @@
  * because an SVG cannot follow a terminal's theme. One `<text>` per line, its
  * runs as `<tspan>`s, so the columns stay true.
  *
+ * With `--detail`, one item is opened in place, as a press on its name opens
+ * it; `--content` is what a real `kanon show` printed for it, the text the
+ * detail draws under the item's details.
+ *
  * Usage: bun tools/screenshots/pane-svg.ts <model.json> <out.svg>
- *          [--columns 96] [--rows 34] [--chat brief.txt] [--detail <real>]
+ *          [--columns 96] [--rows 34] [--chat brief.txt] [--detail <real>] [--content show.json]
  */
-import { layout, type Row, type Segment, type View } from '../../hooks/lib/layout'
+import { layout, type Content, type Row, type Segment, type View } from '../../hooks/lib/layout'
 import { cells } from '../../hooks/lib/text'
 import type { PaneModel } from '../../src/model'
 
@@ -63,18 +67,27 @@ const option = (name: string): string | undefined => {
   return i === -1 ? undefined : argv[i + 1]
 }
 if (modelPath === undefined || out === undefined) {
-  throw new Error('usage: pane-svg.ts <model.json> <out.svg> [--columns n] [--rows n] [--chat brief.txt] [--detail real]')
+  throw new Error('usage: pane-svg.ts <model.json> <out.svg> [--columns n] [--rows n] [--chat brief.txt] [--detail real] [--content show.json]')
 }
 const columns = Number(option('columns') ?? 96)
 const rows = Number(option('rows') ?? 34)
 const chatFile = option('chat')
 const detail = option('detail')
+const contentFile = option('content')
 
 const model = JSON.parse(await Bun.file(modelPath).text()) as PaneModel & { error?: string }
 if (model.error !== undefined) throw new Error(`kanon model failed: ${model.error}`)
 const view: View = detail === undefined ? { kind: 'list' } : { kind: 'detail', real: detail }
-const pane: Row[] = layout({ status: { kind: 'ready', model }, view, columns, rows, feedback: null, frame: 0 })
+/** `kanon show`'s JSON as the pane holds it (hooks/mod/cli.ts parseContent): the lines, or why they could not be read. */
+async function contentOf(file: string): Promise<Content> {
+  const shown = JSON.parse(await Bun.file(file).text()) as { title?: string; lines?: string[]; truncated?: boolean; error?: string }
+  if (shown.error !== undefined) throw new Error(`kanon show failed: ${shown.error}`)
+  return { title: shown.title ?? '', lines: shown.lines ?? [], truncated: shown.truncated === true }
+}
+const content = contentFile === undefined ? null : await contentOf(contentFile)
+const pane: Row[] = layout({ status: { kind: 'ready', model }, view, columns, rows, feedback: null, frame: 0, content })
 if (detail !== undefined && !pane.some((r) => r.key === 'detail-path')) throw new Error(`no item with real ${detail} in the model`)
+if (content !== null && !pane.some((r) => r.key.startsWith('text-'))) throw new Error('the text did not fit under the details: give the pane more rows')
 
 /** Words wrapped to `width`, the first line led by `lead` and the rest indented to match. */
 function wrap(text: string, width: number, lead: Segment, rest: Omit<Segment, 'text'> = {}): Line[] {
