@@ -118,6 +118,8 @@ type ShownModel = Omit<PaneModel, 'hooks'> & { hooks: ShownHook[] }
 
 /** What a hook's detail shows under its card when it added nothing: there is no text to read. */
 const NOTHING_ADDED: Content = { error: 'It added nothing to the context this run.' }
+/** And when what it added cannot be told from another plugin's (MarkedHook.shared). */
+const SHARED: Content = { error: "Another plugin's hook runs the same command, so what each added cannot be told apart. The injection is listed under the other row." }
 
 /** The rows of the pane's height a layout `columns` wide can use: `rows`, or fewer when the text budget caps it. */
 function heightOf(columns: number, rows: number): number {
@@ -142,7 +144,7 @@ export function layout(input: LayoutInput): Row[] {
   const content = input.content ?? { loading: true }
   const opened = openedOf(model, input.view)
   if (opened !== null) {
-    const shownContent = opened.kind === 'hook' && opened.hook.injected === null ? NOTHING_ADDED : content
+    const shownContent = opened.kind === 'hook' && opened.hook.injected === null ? (opened.hook.shared ? SHARED : NOTHING_ADDED) : content
     return detailView(opened, input.view.kind === 'detail' ? (input.view.scroll ?? 0) : 0, shownContent, width, height, input.feedback, note)
   }
   return listView(model, content, width, height, input.feedback, note)
@@ -389,14 +391,14 @@ function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
       rows: (width, limit, marked) => sorted.slice(0, limit).map(it => itemRow(key, it, width, it.real === marked, origin)),
     }
   }
-  const plainGroup = <T>(key: string, title: string, list: T[], row: (x: T, width: number) => Segment[], id?: (x: T) => string): Group => ({
+  const plainGroup = <T>(key: string, title: string, list: T[], row: (x: T, width: number) => Segment[], id?: (x: T) => string, acted?: (x: T) => boolean): Group => ({
     key,
     title,
     length: list.length,
     flagged: 0,
     note: [],
     rows: (width, limit, marked) =>
-      list.slice(0, limit).map((x, i) => (id === undefined ? plainRow(`${key}:${i}`, row(x, width), width) : walkedRow(`${key}:${id(x)}`, id(x) === marked, [{ text: ' ' }, ...row(x, width)], width))),
+      kept(list, limit, acted).map((x, i) => (id === undefined ? plainRow(`${key}:${i}`, row(x, width), width) : walkedRow(`${key}:${id(x)}`, id(x) === marked, [{ text: ' ' }, ...row(x, width)], width))),
   })
 
   // Where a hook or skill comes from, in its first column as an origin is in
@@ -407,7 +409,7 @@ function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
   const injected = model.hooks.flatMap(h => (h.injected === null ? [] : [h.injected]))
   const cw = Math.max(0, ...injected.map(i => cells(times(i.count))))
   const kw = Math.max(0, ...injected.map(i => cells(`${kilo(i.chars)} chars`)))
-  const markWidth = injected.length === 0 ? 0 : cw + 2 + kw
+  const markWidth = Math.max(injected.length === 0 ? 0 : cw + 2 + kw, model.hooks.some(h => h.shared && h.injected === null) ? cells(SHARED_MARK) : 0)
   const sw = Math.min(NAME_MAX, Math.max(0, ...model.skills.map(s => cells(whoOf(s)))))
   const tw = Math.min(NAME_MAX, Math.max(0, ...model.compactions.map(c => cells(c.trigger))))
   const memory = sortFlagged(model.memory)
@@ -433,20 +435,20 @@ function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
       const i = h.injected
       const said: Segment[] =
         i === null
-          ? markWidth === 0 ? [] : [{ text: spaces(markWidth) }]
+          ? h.shared ? [{ text: padEnd(SHARED_MARK, markWidth), dim: true }] : markWidth === 0 ? [] : [{ text: spaces(markWidth) }]
           : [{ text: padEnd(times(i.count), cw + 2), dim: true }, { text: kilo(i.chars), color: HEADING }, { text: padEnd(' chars', kw - cells(kilo(i.chars))), dim: true }]
       // Narrow gives up the command before what the hook added: the names and the count are the row.
       const room = width - 1 - segmentsWidth(names) - segmentsWidth(said) - (markWidth === 0 ? 0 : 2)
-      if (tier === 'narrow' || h.command === '' || room < 4) return i === null ? names : [...names, ...said]
+      if (tier === 'narrow' || h.command === '' || room < 4) return i === null && !h.shared ? names : [...names, ...said]
       return [...names, ...said, ...(markWidth === 0 ? [] : [{ text: '  ' }]), { text: fit(h.command, room), dim: true }]
-    }, h => h.key),
+    }, h => h.key, h => h.injected !== null),
     plainGroup('skills', 'Skills', model.skills, (s, width) => {
       const who: Segment[] = showWho ? [{ text: padEnd(fit(whoOf(s), sw), sw + 2), dim: true }] : []
       const ran: Segment[] = s.invoked ? [{ text: '  ' }, { text: 'invoked', color: ACCENT }] : []
       const name = fit(s.name, Math.max(1, width - 1 - segmentsWidth(who) - segmentsWidth(ran)))
       // A skill Claude Code ran that no directory explains has no file to open.
       return [...who, s.real === '' ? { text: name } : button({ kind: 'open', real: s.real }, name), ...ran]
-    }, s => (s.real === '' ? `name:${s.name}` : s.real)),
+    }, s => (s.real === '' ? `name:${s.name}` : s.real), s => s.invoked),
     plainGroup('compaction', 'Compaction', model.compactions, c => {
       const time = /T(\d\d:\d\d)/.exec(c.t)?.[1]
       return [
@@ -459,6 +461,23 @@ function groupsOf(model: ShownModel, tier: Tier, inner: number): Group[] {
       ]
     }),
   ]
+}
+
+/** A hook's mark where an injection may be its own but cannot be told from another plugin's. */
+const SHARED_MARK = 'shared'
+
+/**
+ * The first `limit` of `list` to show, in its own order. When the card is
+ * cut, the rows that `acted` (a hook that injected, a skill that ran) are
+ * kept before the quiet ones: in scope order the silent hooks came first, and
+ * a pane 24 rows tall showed two of 45 hooks and none that had injected.
+ */
+function kept<T>(list: T[], limit: number, acted?: (x: T) => boolean): T[] {
+  if (acted === undefined || limit >= list.length) return list.slice(0, limit)
+  const loud = list.filter(acted).slice(0, limit)
+  const quiet = new Set(list.filter(x => !acted(x)).slice(0, limit - loud.length))
+  const keep = new Set(loud)
+  return list.filter(x => keep.has(x) || quiet.has(x))
 }
 
 /** How many injections a hook's row stands for: `×88`. */
@@ -626,7 +645,7 @@ function cardOf(opened: Opened, inner: number): Section {
       field('from', 'from', [{ text: whoOf(h) }]),
       ...wrap(h.command, value).map((line, n) => field(`command-${n}`, n === 0 ? 'command' : '', [{ text: line }])),
       ...(h.source === '' ? [] : [field('source', 'source', [{ text: fitStart(h.source, value) }])]),
-      field('count', 'injected', i === null ? [{ text: 'nothing this run', dim: true }] : many ? [{ text: `${grouped(i.count)} times` }] : [{ text: 'once' }]),
+      field('count', 'injected', i === null ? [{ text: h.shared ? 'cannot be told apart' : 'nothing this run', dim: true }] : many ? [{ text: `${grouped(i.count)} times` }] : [{ text: 'once' }]),
       ...(i === null ? [] : [field('size', 'size', [{ text: grouped(i.chars), color: HEADING }, { text: many ? ' chars in total' : ' chars', dim: true }])]),
       ...(many ? [field('shown', 'shown', [{ text: `most recent of ${grouped(i.count)}` }])] : []),
     ]

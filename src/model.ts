@@ -41,6 +41,8 @@ export interface PaneHook {
   /** The file it was configured in, as short() spells it; empty for `other`. */
   source: string
   injected: MarkedHook['injected']
+  /** An injection may be this hook's, but another plugin's hook runs the same command (MarkedHook). */
+  shared: boolean
 }
 
 export interface PaneSkill {
@@ -133,6 +135,7 @@ export function paneModel(report: Report | null, basis: PaneModel['basis'], root
       command: shortCommand(h.command, root),
       source: h.source === '' ? '' : short(h.source, root),
       injected: h.injected,
+      shared: h.shared,
     })),
     // A transcript can name a skill by a path that is no file (`plugin:x:y`); such a row has nothing to open.
     skills: inv.skills.map((s) => {

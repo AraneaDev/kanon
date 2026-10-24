@@ -86,18 +86,18 @@ test('the inventory arrives as given, paths shortened and realpathed', () => {
   writeFileSync(skill, 'x\n')
   const inv: Inventoried = {
     hooks: [
-      { scope: 'project', plugin: null, event: 'Stop', matcher: 'Bash', command: `${root}/tools/done.sh`, source: join(root, '.claude', 'settings.json'), injected: { count: 2, chars: 40, index: 1 } },
-      { scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "${CLAUDE_PLUGIN_ROOT}/a.sh"', source: '/p/hooks/hooks.json', injected: null },
-      { scope: 'other', plugin: 'unattributed', event: 'Stop', matcher: null, command: '', source: '', injected: { count: 1, chars: 3, index: 0 } },
+      { scope: 'project', plugin: null, event: 'Stop', matcher: 'Bash', command: `${root}/tools/done.sh`, source: join(root, '.claude', 'settings.json'), injected: { count: 2, chars: 40, index: 1 }, shared: false },
+      { scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "${CLAUDE_PLUGIN_ROOT}/a.sh"', source: '/p/hooks/hooks.json', injected: null, shared: false },
+      { scope: 'other', plugin: 'unattributed', event: 'Stop', matcher: null, command: '', source: '', injected: { count: 1, chars: 3, index: 0 }, shared: false },
     ],
     skills: [{ scope: 'project', plugin: null, name: 'deploy', path: skill, invoked: true }],
     agentMemory: [{ scope: 'project', agent: 'rev', path: rule }],
   }
   const m = paneModel(null, 'predicted', root, [], inv)
   expect(m.hooks).toEqual([
-    { scope: 'project', plugin: null, event: 'Stop', matcher: 'Bash', command: 'tools/done.sh', source: '.claude/settings.json', injected: { count: 2, chars: 40, index: 1 } },
-    { scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "a.sh"', source: '/p/hooks/hooks.json', injected: null },
-    { scope: 'other', plugin: 'unattributed', event: 'Stop', matcher: null, command: '', source: '', injected: { count: 1, chars: 3, index: 0 } },
+    { scope: 'project', plugin: null, event: 'Stop', matcher: 'Bash', command: 'tools/done.sh', source: '.claude/settings.json', injected: { count: 2, chars: 40, index: 1 }, shared: false },
+    { scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "a.sh"', source: '/p/hooks/hooks.json', injected: null, shared: false },
+    { scope: 'other', plugin: 'unattributed', event: 'Stop', matcher: null, command: '', source: '', injected: { count: 1, chars: 3, index: 0 }, shared: false },
   ])
   expect(m.skills).toEqual([{ scope: 'project', plugin: null, name: 'deploy', path: '.claude/skills/deploy/SKILL.md', real: skill, invoked: true }])
   expect(m.agentMemory).toEqual([{ scope: 'project', agent: 'rev', path: '.claude/rules/style.md', real: rule }])

@@ -32,6 +32,7 @@ const hook = (over: Partial<PaneHook> = {}): PaneHook => ({
   command: 'hooks/start.sh',
   source: '~/.claude/plugins/cache/market/example/1.0.0/hooks/hooks.json',
   injected: { count: 1, chars: 9100, index: 0 },
+  shared: false,
   ...over,
 })
 const START = hook()
@@ -597,6 +598,23 @@ describe('text Kanon did not write', () => {
 })
 
 
+describe('a card cut short', () => {
+  it('keeps the hooks that injected and the skills that ran, still in scope order', () => {
+    const quiet = Array.from({ length: 12 }, (_, i) => hook({ scope: 'user', plugin: null, event: `Quiet${i}`, injected: null }))
+    const loud = hook({ plugin: 'zed', event: 'Loud' })
+    const skills = [...Array.from({ length: 12 }, (_, i) => skill({ name: `quiet-${i}` })), skill({ scope: 'plugin', plugin: 'zed', name: 'zed:ran', invoked: true })]
+    const m: PaneModel = { ...small, instructions: [], memory: [], compactions: [], hooks: [...quiet, loud], skills }
+    const rows = run({ model: m, rows: 22 }).map(text)
+    const at = (needle: string) => rows.findIndex(t => t.includes(needle))
+    expect(at('Loud')).toBeGreaterThan(-1)
+    expect(at('zed:ran')).toBeGreaterThan(-1)
+    // The quiet rows that are kept come first, as their scope does.
+    expect(at('Quiet0')).toBeGreaterThan(-1)
+    expect(at('Quiet0')).toBeLessThan(at('Loud'))
+    expect(rows.some(t => t.includes('more ↓'))).toBe(true)
+  })
+})
+
 describe('the hook, skill and agent memory details', () => {
   const prompt = hook({ scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', command: '', source: '', injected: { count: 88, chars: 3520, index: 97 } })
   const once = hook({ injected: { count: 1, chars: 900, index: 0 } })
@@ -659,6 +677,16 @@ describe('the hook, skill and agent memory details', () => {
     expect(rows).toContain('    agent    reviewer'.padEnd(100))
     expect(rows).toContain('    scope    project'.padEnd(100))
     expect(rows).toContain('    path     .claude/agent-memory/reviewer/MEMORY.md'.padEnd(100))
+  })
+
+  it('says a hook whose command another plugin shares cannot be told apart, rather than that it added nothing', () => {
+    const shared = hook({ plugin: 'one', command: 'sh "s.sh"', injected: null, shared: true })
+    const m = { ...small, hooks: [shared] }
+    expect(run({ model: m }).map(text)).toContain('    one  SessionStart  shared  sh "s.sh"'.padEnd(100))
+    const rows = run({ model: m, view: { kind: 'detail', hook: hookKey(shared) }, rows: 14, content: null }).map(text)
+    expect(rows).toContain('    injected cannot be told apart'.padEnd(100))
+    expect(rows.some(t => t.includes('It added nothing'))).toBe(false)
+    expect(rows.some(t => t.includes('runs the same command'))).toBe(true)
   })
 
   it('falls back to the list when the hook is no longer in the model', () => {

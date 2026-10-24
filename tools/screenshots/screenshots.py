@@ -295,7 +295,7 @@ def drifted(home, repo, claude):
     also trip the reachability NOTE and the COULD NOT READ section, and this
     shot is about drift.
     """
-    base = loaded_session(repo) + [wrap_config(str(repo), "skills", str(claude / "skills" / "nl-taal" / "SKILL.md"))]
+    base = loaded_session(repo) + [wrap_config(str(repo), "skills", str(claude / "skills" / "house-style" / "SKILL.md"))]
     retired = repo / ".claude" / "rules" / "legacy.md"
     write(retired, "# Legacy\n\nSuperseded by the style rules.\n")
 

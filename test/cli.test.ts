@@ -1716,7 +1716,7 @@ test('model --json lists every hook, skill and agent memory, on either basis', a
   mkdirSync(join(repo, '.claude', 'agent-memory', 'rev'), { recursive: true })
   writeFileSync(join(repo, '.claude', 'agent-memory', 'rev', 'MEMORY.md'), 'x\n')
   const m = JSON.parse(await run(['model', '--json', '--session', 'never-recorded', '--cwd', repo], env))
-  expect(m.hooks).toEqual([{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', source: join(claude, 'settings.json'), injected: null }])
+  expect(m.hooks).toEqual([{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', source: join(claude, 'settings.json'), injected: null, shared: false }])
   expect(m.skills.map((s: { name: string; invoked: boolean }) => [s.name, s.invoked])).toEqual([['deploy', false]])
   expect(m.agentMemory.map((a: { agent: string; path: string }) => [a.agent, a.path])).toEqual([['rev', '.claude/agent-memory/rev/MEMORY.md']])
 })

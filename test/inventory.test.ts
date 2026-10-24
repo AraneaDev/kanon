@@ -70,12 +70,12 @@ describe('inventory: hooks', () => {
     expect(inventory(w).hooks.map((h) => [h.scope, h.plugin, h.command])).toEqual([['plugin', 'plug', 'sh "$CLAUDE_PLUGIN_ROOT/a.sh"']])
   })
 
-  test("a manifest's hooks path is read instead of hooks/hooks.json", () => {
+  test("a manifest's hooks path is read beside hooks/hooks.json", () => {
     const w = world()
     put(join(w.plugRoot, 'hooks', 'hooks.json'), hooksOf('Stop', 'default'))
     put(join(w.plugRoot, 'config', 'h.json'), hooksOf('Stop', 'from-manifest'))
     put(join(w.plugRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'plug', hooks: './config/h.json' }))
-    expect(inventory(w).hooks.map((h) => h.command)).toEqual(['from-manifest'])
+    expect(inventory(w).hooks.map((h) => h.command)).toEqual(['default', 'from-manifest'])
   })
 })
 
@@ -212,17 +212,6 @@ describe('marks', () => {
     ])
   })
 
-  test('an unattributed shared command marks nothing and lists as other', () => {
-    const shared = 'sh "$CLAUDE_PLUGIN_ROOT/s.sh"'
-    const hooks = [hook({ scope: 'plugin', plugin: 'one', command: shared }), hook({ scope: 'plugin', plugin: 'two', command: shared })]
-    const marked = markHooks(hooks, [inj('SessionStart', shared, 'unattributed')])
-    expect(marked.map((h) => [h.scope, h.injected?.count ?? 0])).toEqual([
-      ['plugin', 0],
-      ['plugin', 0],
-      ['other', 1],
-    ])
-  })
-
   test('within a scope the most injected characters come first', () => {
     const hooks = [hook({ command: 'small' }), hook({ command: 'none' }), hook({ command: 'big' })]
     const marked = markHooks(hooks, [inj('SessionStart', 'small', 'u', 3), inj('SessionStart', 'big', 'u', 30)])
@@ -231,7 +220,7 @@ describe('marks', () => {
 
   test('a null command injection is other with an empty command', () => {
     expect(markHooks([], [inj('UserPromptSubmit', null, 'unattributed')])).toEqual([
-      { scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', matcher: null, command: '', source: '', injected: { count: 1, chars: 10, index: 0 } },
+      { scope: 'other', plugin: 'unattributed', event: 'UserPromptSubmit', matcher: null, command: '', source: '', injected: { count: 1, chars: 10, index: 0 }, shared: false },
     ])
   })
 
@@ -248,5 +237,49 @@ describe('marks', () => {
 
   test('an invoked skill the inventory does not list closes the list as other', () => {
     expect(markSkills([], [{ name: 'run', path: '' }])).toEqual([{ scope: 'other', plugin: null, name: 'run', path: '', invoked: true }])
+  })
+})
+
+describe('marks, as Claude Code runs hooks', () => {
+  const hook = (over: Partial<Hook>): Hook => ({ scope: 'plugin', plugin: 'p', event: 'PreToolUse', matcher: null, command: 'c', source: '/s', ...over })
+  const inj = (hookName: string, command: string | null, plugin: string, chars = 10) => ({ hookName, command, plugin, chars })
+
+  test('one command under several matchers marks the hook whose matcher the tool name meets', () => {
+    const hooks = [hook({ matcher: 'Bash' }), hook({ matcher: 'Read|Grep' }), hook({ matcher: 'mcp__.*' })]
+    const marked = markHooks(hooks, [inj('PreToolUse:Grep', 'c', 'p'), inj('PreToolUse:mcp__x__y', 'c', 'p')])
+    expect(marked.map((h) => [h.matcher, h.injected?.count ?? 0])).toEqual([
+      ['Read|Grep', 1],
+      ['mcp__.*', 1],
+      ['Bash', 0],
+    ])
+    expect(marked.some((h) => h.scope === 'other')).toBe(false)
+  })
+
+  test('a command two plugins share, unattributed, marks neither, says so on both, and names both on the other row', () => {
+    const shared = 'sh "$CLAUDE_PLUGIN_ROOT/s.sh"'
+    const hooks = [hook({ plugin: 'one', event: 'SessionStart', command: shared }), hook({ plugin: 'two', event: 'SessionStart', command: shared })]
+    const marked = markHooks(hooks, [inj('SessionStart:startup', shared, 'unattributed')])
+    expect(marked.map((h) => [h.scope, h.plugin, h.injected?.count ?? 0, h.shared])).toEqual([
+      ['plugin', 'one', 0, true],
+      ['plugin', 'two', 0, true],
+      ['other', 'one or two', 1, false],
+    ])
+  })
+
+  test('a hook no injection could belong to is not shared', () => {
+    expect(markHooks([hook({})], []).map((h) => h.shared)).toEqual([false])
+  })
+})
+
+describe('plugin hooks from the manifest', () => {
+  test('a manifest hooks path is merged with hooks/hooks.json, inline objects included', () => {
+    const w = world()
+    put(join(w.plugRoot, 'hooks', 'hooks.json'), hooksOf('Stop', 'default'))
+    put(join(w.plugRoot, 'config', 'h.json'), hooksOf('Stop', 'from-file'))
+    put(
+      join(w.plugRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'plug', hooks: ['./config/h.json', { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'inline' }] }] } }, './hooks/hooks.json'] }),
+    )
+    expect(inventory(w).hooks.map((h) => h.command)).toEqual(['default', 'from-file', 'inline'])
   })
 })

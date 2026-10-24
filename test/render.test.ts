@@ -440,7 +440,7 @@ test('MEMORY lists every memory that steers the session, and no instruction file
 
 test('HOOKS lists every hook by scope, with what each injected', () => {
   const r = base()
-  const hook = (over: Partial<MarkedHook>): MarkedHook => ({ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', source: '/s', injected: null, ...over })
+  const hook = (over: Partial<MarkedHook>): MarkedHook => ({ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: 'echo done', source: '/s', injected: null, shared: false, ...over })
   r.inventory.hooks = [
     hook({}),
     hook({ scope: 'project', event: 'PreToolUse', matcher: 'Read', command: '/repo/tools/guard.sh', injected: { count: 2, chars: 8600, index: 3 } }),
@@ -460,25 +460,31 @@ test('HOOKS lists every hook by scope, with what each injected', () => {
 
 test('a plugin hook command is written from its plugin root, in either spelling', () => {
   const r = base()
-  r.inventory.hooks = [{ scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "$CLAUDE_PLUGIN_ROOT/hooks/scripts/turn.sh"', source: '/s', injected: null }]
+  r.inventory.hooks = [{ scope: 'plugin', plugin: 'p', event: 'Stop', matcher: null, command: 'sh "$CLAUDE_PLUGIN_ROOT/hooks/scripts/turn.sh"', source: '/s', injected: null, shared: false }]
   expect(render(r)).toContain('  p               Stop                  sh "hooks/scripts/turn.sh"')
+})
+
+test('a hook whose command another plugin shares says so where it cannot be marked', () => {
+  const r = base()
+  r.inventory.hooks = [{ scope: 'plugin', plugin: 'one', event: 'SessionStart', matcher: null, command: 'sh "s.sh"', source: '/s', injected: null, shared: true }]
+  expect(render(r)).toContain(`  one             SessionStart          ${'sh "s.sh"'.padEnd(37)}shared`)
 })
 
 test('a hook command under the home directory is written from ~', () => {
   const r = base()
-  r.inventory.hooks = [{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: `bun ${homedir()}/x.mjs`, source: '/s', injected: null }]
+  r.inventory.hooks = [{ scope: 'user', plugin: null, event: 'Stop', matcher: null, command: `bun ${homedir()}/x.mjs`, source: '/s', injected: null, shared: false }]
   expect(render(r)).toContain('  user            Stop                  bun ~/x.mjs')
 })
 
 test('SKILLS lists every skill by scope, the invoked ones marked', () => {
   const r = base()
   r.inventory.skills = [
-    { scope: 'user', plugin: null, name: 'nl-taal', path: '/h/s/SKILL.md', invoked: false },
+    { scope: 'user', plugin: null, name: 'house-style', path: '/h/s/SKILL.md', invoked: false },
     { scope: 'plugin', plugin: 'superpowers', name: 'superpowers:brainstorming', path: '/p/SKILL.md', invoked: true },
   ]
   const lines = render(r).split('\n')
   const at = lines.indexOf('SKILLS')
-  expect(lines.slice(at, at + 3)).toEqual(['SKILLS', '  user            nl-taal', '  superpowers     superpowers:brainstorming  invoked'])
+  expect(lines.slice(at, at + 3)).toEqual(['SKILLS', '  user            house-style', '  superpowers     superpowers:brainstorming  invoked'])
 })
 
 test('COMPACTION names each compaction with its tokens', () => {
@@ -507,7 +513,7 @@ test('each steering section is omitted when it has nothing to say', () => {
 test('the steering sections sit after LOADED and before DRIFT, in a fixed order', () => {
   const r = base()
   r.steered = [item('/repo/memory/a.md', 'memory', { level: 'gone', evidence: 'e' })]
-  r.inventory.hooks = [{ scope: 'other', plugin: 'unattributed', event: 'SessionStart', matcher: null, command: '', source: '', injected: { count: 1, chars: 10, index: 0 } }]
+  r.inventory.hooks = [{ scope: 'other', plugin: 'unattributed', event: 'SessionStart', matcher: null, command: '', source: '', injected: { count: 1, chars: 10, index: 0 }, shared: false }]
   r.inventory.skills = [{ scope: 'other', plugin: null, name: 's', path: '', invoked: true }]
   r.compactions = [{ t: '2026-10-24T21:40:00Z', trigger: 'manual', preTokens: 1000, postTokens: 1000 }]
   r.drift = { appeared: [{ path: '/repo/new.md', origin: 'project', sha256: 'a' }], vanished: [], changed: [] }
@@ -515,4 +521,12 @@ test('the steering sections sit after LOADED and before DRIFT, in a fixed order'
   const order = ['LOADED', 'STALE', 'MEMORY', 'HOOKS', 'SKILLS', 'COMPACTION', 'DRIFT'].map((h) => lines.indexOf(h))
   expect(order.every((i) => i > -1)).toBe(true)
   expect([...order].sort((a, b) => a - b)).toEqual(order)
+})
+
+test('an agent memory path reaches the report without control characters', () => {
+  const r = base()
+  r.inventory.agentMemory = [{ scope: 'user', agent: 'rev', path: '/elsewhere/\x1b[31mx\r.md' }]
+  const out = render(r)
+  expect(out).not.toContain('\x1b')
+  expect(out).toContain('/elsewhere/[31mx.md  agent rev, user')
 })

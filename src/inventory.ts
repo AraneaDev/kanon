@@ -198,12 +198,26 @@ function inside(plugin: Plugin, rel: string): string | null {
   return abs === plugin.root || abs.startsWith(`${plugin.root}/`) ? abs : null
 }
 
+/**
+ * Every hook a plugin declares. hooks/hooks.json loads first and the
+ * manifest's `hooks` key adds to it, as Claude Code merges them: a path, an
+ * inline object, or an array of either. A file named twice is read once.
+ */
 function pluginHooks(plugin: Plugin): Hook[] {
-  const manifest = obj(readJson(join(plugin.root, '.claude-plugin', 'plugin.json')))
-  const declared = manifest?.hooks
-  if (obj(declared)) return hooksIn(obj(declared)!.hooks ?? declared, 'plugin', plugin.name, join(plugin.root, '.claude-plugin', 'plugin.json'))
-  const files = pathList(declared).map((r) => inside(plugin, r)).filter((f): f is string => f !== null)
-  return (files.length ? files : [join(plugin.root, 'hooks', 'hooks.json')]).flatMap((f) => hooksIn(obj(readJson(f))?.hooks, 'plugin', plugin.name, f))
+  const manifestPath = join(plugin.root, '.claude-plugin', 'plugin.json')
+  const declared = obj(readJson(manifestPath))?.hooks
+  const defaultFile = join(plugin.root, 'hooks', 'hooks.json')
+  const files = [defaultFile]
+  const inline: unknown[] = []
+  for (const d of Array.isArray(declared) ? declared : declared === undefined ? [] : [declared]) {
+    if (obj(d)) inline.push(d)
+    const f = typeof d === 'string' ? inside(plugin, d) : null
+    if (f !== null && !files.includes(f)) files.push(f)
+  }
+  return [
+    ...files.flatMap((f) => hooksIn(obj(readJson(f))?.hooks, 'plugin', plugin.name, f)),
+    ...inline.flatMap((d) => hooksIn(obj(d)!.hooks ?? d, 'plugin', plugin.name, manifestPath)),
+  ]
 }
 
 const NAME = /^[\w.:-]+$/
@@ -287,6 +301,13 @@ export function inventory(p: Places): Inventory {
 export interface MarkedHook extends Hook {
   /** Its injections this run: how many, their characters together, the index of the most recent. */
   injected: { count: number; chars: number; index: number } | null
+  /**
+   * Another plugin's hook runs the same command for the same event, and an
+   * injection came from one of them: the transcript names a command, never a
+   * plugin, so which one added it cannot be told. The injection is listed
+   * under `other`, and this hook does not claim it added nothing.
+   */
+  shared: boolean
 }
 
 export interface MarkedSkill extends Skill {
@@ -316,20 +337,29 @@ interface Ran { hookName: string; command: string | null; plugin: string; chars:
  * characters come first, since that is the hook costing the most context.
  */
 export function markHooks(hooks: Hook[], injections: ReadonlyArray<Ran>): MarkedHook[] {
-  const marked: MarkedHook[] = hooks.map((h) => ({ ...h, injected: null }))
+  const marked: MarkedHook[] = hooks.map((h) => ({ ...h, injected: null, shared: false }))
   const others = new Map<string, MarkedHook>()
   const add = (h: MarkedHook, chars: number, index: number) => {
     h.injected = h.injected === null ? { count: 1, chars, index } : { count: h.injected.count + 1, chars: h.injected.chars + chars, index }
   }
+  // Narrow `xs` by `keep`, unless that would leave none: a hint that rules out everything is no hint.
+  const narrow = (xs: MarkedHook[], keep: (h: MarkedHook) => boolean) => (xs.some(keep) ? xs.filter(keep) : xs)
   injections.forEach((inj, index) => {
     const event = eventOf(inj.hookName)
-    const same = inj.command === null ? [] : marked.filter((h) => h.command === inj.command && h.event === event)
-    const owned = same.length > 1 ? same.filter((h) => h.plugin === inj.plugin) : same
-    if (owned.length === 1) return add(owned[0]!, inj.chars, index)
-    const key = JSON.stringify([inj.plugin, event, inj.command ?? ''])
+    const target = inj.hookName.slice(event.length + 1)
+    let found = inj.command === null ? [] : marked.filter((h) => h.command === inj.command && h.event === event)
+    found = narrow(found, (h) => h.plugin === inj.plugin)
+    // `PreToolUse:Grep` ran the hooks whose matcher meets `Grep`: one script
+    // under nine matchers is one plugin's nine groups, not nine candidates.
+    found = narrow(found, (h) => matches(h.matcher, target))
+    const owners = [...new Set(found.map((h) => h.plugin ?? h.scope))]
+    if (owners.length === 1) return add(found[0]!, inj.chars, index)
+    for (const h of found) h.shared = true
+    const plugin = owners.length > 1 ? owners.sort().join(' or ') : inj.plugin
+    const key = JSON.stringify([plugin, event, inj.command ?? ''])
     let other = others.get(key)
     if (other === undefined) {
-      other = { scope: 'other', plugin: inj.plugin, event, matcher: null, command: inj.command ?? '', source: '', injected: null }
+      other = { scope: 'other', plugin, event, matcher: null, command: inj.command ?? '', source: '', injected: null, shared: false }
       others.set(key, other)
     }
     add(other, inj.chars, index)
@@ -337,6 +367,21 @@ export function markHooks(hooks: Hook[], injections: ReadonlyArray<Ran>): Marked
   const chars = (h: MarkedHook) => h.injected?.chars ?? 0
   // byScope is stable, so sorting by characters first leaves them ordered inside each scope.
   return byScope([...marked, ...others.values()].sort((a, b) => chars(b) - chars(a)))
+}
+
+/**
+ * Whether a hook's matcher selects `target` (a tool name, or SessionStart's
+ * source): no matcher, an empty one or `*` selects everything, else it is
+ * the regular expression Claude Code tests, whole. One that does not compile
+ * is compared as a literal name.
+ */
+function matches(matcher: string | null, target: string): boolean {
+  if (matcher === null || matcher === '' || matcher === '*') return true
+  try {
+    return new RegExp(`^(?:${matcher})$`).test(target)
+  } catch {
+    return matcher === target
+  }
 }
 
 /**

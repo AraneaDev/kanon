@@ -106,7 +106,8 @@ const scopeLabel = (x: { scope: string; plugin: string | null }): string => stri
 function hookLines(report: Report, paint: Paint): string[] {
   return report.inventory.hooks.map((h) => {
     const event = stripControl(h.matcher === null ? h.event : `${h.event}:${h.matcher}`)
-    const mark = h.injected === null ? '' : `${pad(`×${h.injected.count}`, COUNT_WIDTH)}${paint.note(`${(h.injected.chars / 1000).toFixed(1)}k chars`)}`
+    // `shared`: an injection under `other` may be this hook's, and the transcript cannot say whose.
+    const mark = h.injected !== null ? `${pad(`×${h.injected.count}`, COUNT_WIDTH)}${paint.note(`${(h.injected.chars / 1000).toFixed(1)}k chars`)}` : h.shared ? paint.note('shared') : ''
     const line = `  ${pad(scopeLabel(h), PLUGIN_WIDTH)}${pad(event, HOOK_WIDTH)}${mark === '' ? hookCommand(h.command, report.root) : pad(hookCommand(h.command, report.root), PATH_WIDTH) + mark}`
     return line.trimEnd()
   })
@@ -133,7 +134,7 @@ function steeringSections(report: Report, paint: Paint): string[] {
   section('STALE', report.steered.filter((s) => s.verdict !== null).map((s) => staleLine(s, root, paint)))
   section('MEMORY', [
     ...report.steered.filter((s) => s.kind === 'memory').map((s) => `  ${paint.path(short(s.path, root))}`),
-    ...report.inventory.agentMemory.map((m) => `  ${paint.path(short(m.path, root))}  ${paint.note(stripControl(`agent ${m.agent}, ${m.scope}`))}`),
+    ...report.inventory.agentMemory.map((m) => `  ${paint.path(stripControl(short(m.path, root)))}  ${paint.note(stripControl(`agent ${m.agent}, ${m.scope}`))}`),
   ])
   section('HOOKS', hookLines(report, paint))
   section('SKILLS', skillLines(report, paint))
