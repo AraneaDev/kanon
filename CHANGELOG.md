@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.22](https://github.com/AraneaDev/kanon/compare/v0.0.21...v0.0.22) (2026-10-24)
+
+
+### Fixes
+
+* make the Kanon pane usable after its first live run ([#55](https://github.com/AraneaDev/kanon/issues/55)) ([6f3786e](https://github.com/AraneaDev/kanon/commit/6f3786ebc63f9005c991c859b0d4583214505aff))
+
 ## [0.0.21](https://github.com/AraneaDev/kanon/compare/v0.0.20...v0.0.21) (2026-10-24)
 
 
