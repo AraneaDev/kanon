@@ -3,11 +3,11 @@
  * command toggling the pane, what a press does, and the end of a turn.
  * register.tsx wires each event to one of these and does nothing else.
  */
-import { contentPage, contentScroll, type Target } from '../lib/layout'
+import { contentPage, contentScroll, targetKey, textTarget, type Content, type LayoutInput, type Target } from '../lib/layout'
 import type { Action } from '../lib/types'
 import { acknowledge, readContent, refresh } from './cli'
 import type { Port } from './port'
-import { mod, PANE, paneClosed, paneOpened, setStatus, setView } from './state'
+import { forgetText, mod, PANE, paneClosed, paneOpened, setStatus, setView } from './state'
 
 /** How long to wait before each retry of a refused registration; after the last, turn ends retry. */
 const REGISTER_RETRY_MS = [500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000] as const
@@ -119,60 +119,116 @@ export async function endTurn(io: Port, agentId: string | undefined, isAborted: 
 
 /** What pressing a Button (or its hotkey) does. */
 export async function act(io: Port, action: Action): Promise<void> {
-  if (action.kind === 'open') return setView(io, 'real' in action ? { kind: 'detail', real: action.real } : { kind: 'detail', injection: action.injection })
+  if (action.kind === 'open') return open(io, 'real' in action ? { real: action.real } : { injection: action.injection })
   if (action.kind === 'back') return back(io)
   if (action.kind === 'ack') return acknowledge(io, action.real)
-  if (action.kind === 'view') return view(io)
   if (action.kind === 'next' || action.kind === 'previous') return page(io, action.kind === 'next' ? 1 : -1)
   setStatus(io, { kind: 'loading' })
   await refresh(io)
 }
 
-const targetOf = (v: Target): Target => ('real' in v ? { real: v.real } : { injection: v.injection })
+/**
+ * Opening an item or an injection: its details at once, from the top of its
+ * text, and the text read now, afresh even when a preview already holds it,
+ * so what the person opens is what the file says now.
+ */
+function open(io: Port, target: Target): void {
+  setView(io, { kind: 'detail', ...target, scroll: 0 })
+  wantText(io, target, true)
+}
 
-/** `b`: one level back. The text goes back to the detail it was opened from, the detail to the list. */
+/** `b`: back to the list in one step. The text goes with the detail; a wide pane's render asks for its preview's. */
 function back(io: Port): void {
-  const v = mod.view
-  if (v.kind === 'content') {
-    mod.content = null
-    mod.reading += 1
-    return setView(io, { kind: 'detail', ...targetOf(v) })
-  }
+  wantText(io, null)
   setView(io, { kind: 'list' })
 }
 
 /**
- * `v`: the text of what the detail shows. The content view opens at once,
- * reading, and the text replaces that when `kanon show` answers, unless the
- * person has gone back or closed the pane meanwhile.
+ * Asks for the text of `target` (none for null). Nothing happens when it is
+ * already the text held or being read, unless `fresh`. Otherwise what is held
+ * goes, the pane says it is reading, and one `show` runs for it: after the
+ * one in flight, if there is one, whose answer is then dropped.
  */
-async function view(io: Port): Promise<void> {
-  const v = mod.view
-  if (v.kind !== 'detail') return
-  const target = targetOf(v)
-  const reading = ++mod.reading
-  mod.content = { loading: true }
-  setView(io, { kind: 'content', ...target, scroll: 0 })
-  const content = await readContent(io, target)
-  if (reading !== mod.reading || !mod.open) return
-  mod.content = content
+export function wantText(io: Port, target: Target | null, fresh = false): void {
+  const key = target === null ? null : targetKey(target)
+  if (!fresh && key === mod.text.key) return
+  forgetText()
+  if (target === null) return
+  mod.text.key = key
+  mod.text.target = target
+  mod.text.content = { loading: true }
   io.ui.invalidate('ui.render')
-}
-
-/** `n` and `p`: a page of the text forward or back, a page being the rows the pane showed at its last render. */
-function page(io: Port, dir: 1 | -1): void {
-  if (mod.view.kind !== 'content') return
-  scrollContent(io, mod.view.scroll + dir * contentPage(mod.drawn.columns, mod.drawn.rows))
+  void readText(io).catch(() => undefined)
 }
 
 /**
- * Moves the text to `to`, held inside it; false outside the content view.
- * The wheel and the page keys both land here, so they clamp alike.
+ * Reads what is wanted, one `show` at a time, until what is wanted is read.
+ * An answer that lands under another ticket (the person went back, opened
+ * something else, or the preview moved on) or for a pane that has closed
+ * since is dropped, and whatever is wanted now is read next.
+ */
+async function readText(io: Port): Promise<void> {
+  if (mod.text.running) return
+  mod.text.running = true
+  try {
+    while (mod.open && mod.text.target !== null && mod.text.content !== null && 'loading' in mod.text.content) {
+      const { ticket, target } = mod.text
+      const generation = mod.generation
+      const content = await readContent(io, target)
+      if (ticket !== mod.text.ticket || generation !== mod.generation || !mod.open) continue
+      mod.text.content = content
+      io.ui.invalidate('ui.render')
+    }
+  } finally {
+    mod.text.running = false
+  }
+}
+
+/**
+ * At a render: the text the frame about to be drawn shows, and a read asked
+ * for when that is not the text held. The wide tier's preview follows the
+ * list (its first flagged item changes as the model does), and only a render
+ * knows the width, so the render is where a preview's read is asked for. It
+ * is asked for on the clock, off the render, which must stay pure drawing.
+ */
+export function textFor(io: Port, input: Pick<LayoutInput, 'status' | 'view' | 'columns'>): Content | null {
+  let target: Target | null
+  try {
+    target = textTarget(input)
+  } catch {
+    // A model the layout cannot draw: the render's error view shows instead, and it has no text.
+    return null
+  }
+  if (target === null) return null
+  const key = targetKey(target)
+  if (key === mod.text.key) return mod.text.content
+  try {
+    // The pane may have moved on before the clock runs: what is asked for is what it shows then.
+    io.clock.after(0, () => (mod.open ? wantText(io, textTarget({ status: mod.status, view: mod.view, columns: mod.drawn.columns })) : undefined))
+  } catch {
+    // No clock (the session torn down): the preview says it is reading, and nothing else is lost.
+  }
+  return { loading: true }
+}
+
+/** `n` and `p`: a page of the text forward or back, a page being the rows of text the pane showed at its last render. */
+function page(io: Port, dir: 1 | -1): void {
+  const v = mod.view
+  if (v.kind !== 'detail') return
+  scrollContent(io, (v.scroll ?? 0) + dir * contentPage(pagingInput()))
+}
+
+/** What the paging depends on, as the mod holds it, at the size of the last render. */
+const pagingInput = () => ({ status: mod.status, view: mod.view, content: mod.text.content, ...mod.drawn })
+
+/**
+ * Moves the text to `to`, held inside it; false outside a detail. The wheel
+ * and the page keys both land here, so they clamp alike.
  */
 export function scrollContent(io: Port, to: number): boolean {
   const v = mod.view
-  if (v.kind !== 'content') return false
-  const scroll = contentScroll({ content: mod.content, ...mod.drawn }, to)
-  if (scroll !== v.scroll) setView(io, { ...v, scroll })
+  if (v.kind !== 'detail') return false
+  const scroll = contentScroll(pagingInput(), to)
+  if (scroll !== (v.scroll ?? 0)) setView(io, { ...v, scroll })
   return true
 }

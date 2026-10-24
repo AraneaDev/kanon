@@ -534,7 +534,7 @@ def pane_svg(model, out, *args):
 
 
 def shot_pane():
-    """The Kanon pane, as SVG: the hero beside a chat, and one gone memory opened.
+    """The Kanon pane, as SVG: the hero beside a chat, and one gone memory opened, its text under it.
 
     The pane is a terminal UI and pyte cannot run it, so these two are drawn
     by pane-svg.ts instead, from the pane's own layout() over the JSON the
@@ -555,7 +555,10 @@ def shot_pane():
     gone = next(i["real"] for i in json.loads(model.read_text())["memory"]
                 if (i["verdict"] or {}).get("level") == "gone")
     pane_svg(model, ASSETS / "pane.svg", "--columns", "96", "--rows", "29", "--chat", str(brief))
-    pane_svg(model, ASSETS / "pane-detail.svg", "--columns", "96", "--rows", "12", "--detail", gone)
+    # The detail shows the memory's text under its details, as the pane reads it: from `kanon show`.
+    shown = home / "show.json"
+    shown.write_bytes(run_cli(["show", "--cwd", str(repo), "--path", gone], home, claude, False))
+    pane_svg(model, ASSETS / "pane-detail.svg", "--columns", "96", "--rows", "12", "--detail", gone, "--content", str(shown))
 
 
 SHOTS = {"report": shot_report, "brief": shot_brief, "admits": shot_admits, "audit": shot_audit, "pane": shot_pane}

@@ -9,10 +9,9 @@ import type { Tone } from './palette'
  */
 /**
  * What pressing a segment does: open an item in place (by its realpath) or a
- * collapsed injection (by its key), go back one level, acknowledge an item
- * (the record `kanon ack` writes), retry a failed read, view the text of what
- * is open, or page that text. The mod turns a segment carrying one into a
- * Button.
+ * collapsed injection (by its key), go back to the list, acknowledge an
+ * item (the record `kanon ack` writes), retry a failed read, or page the
+ * text of what is open. The mod turns a segment carrying one into a Button.
  */
 export type Action =
   | { kind: 'open'; real: string }
@@ -20,7 +19,6 @@ export type Action =
   | { kind: 'back' }
   | { kind: 'ack'; real: string }
   | { kind: 'retry' }
-  | { kind: 'view' }
   | { kind: 'next' }
   | { kind: 'previous' }
 
