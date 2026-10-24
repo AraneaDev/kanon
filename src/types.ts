@@ -90,6 +90,8 @@ export interface Report {
    * statements: the first is "I cannot say", the second is "nothing moved".
    */
   drift: Drift | null
+  /** Loaded paths Claude Code called auto-memory (`AutoMem`), which drift leaves out. */
+  autoMemory: string[]
   /**
    * Everything else that steered the session, shown between LOADED and
    * DRIFT. All four are empty when nothing was found or nothing could be

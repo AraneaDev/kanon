@@ -154,7 +154,7 @@ export function buildReport(
     if (
       (!candidate || candidate.label === 'unreachable') &&
       !hasDependencySegment(p, root) &&
-      claimedType.get(p) !== 'AutoMem'
+      claimedType.get(p) !== AUTO_MEMORY
     ) {
       // Kanon's candidate model was wrong about this path. That is a fault
       // in layer two, the prediction, not in layer one: origin
@@ -193,9 +193,26 @@ export function buildReport(
   // Drift is computed from what actually loaded, never from candidates, so
   // it can never inherit layer two's fallibility. `existsSync` is injected
   // rather than called inside diff() so that diff stays pure.
-  const drift: Drift | null = previous === null ? null : diff(previous, digest(loaded), existsSync)
+  const autoMemory = loadedOrder.filter((p) => claimedType.get(p) === AUTO_MEMORY)
+  const drift: Drift | null = previous === null ? null : diff(previous, digest(driftable(loaded, autoMemory)), existsSync)
 
   // What else steered the session is filled in by cli.ts, which holds the
   // transcript and the steering cache; this function stays about loads.
-  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift, steered: [], injections: [], skills: [], compactions: [] }
+  return { root, ruleset: RULESET, loaded, missing, quiet, config, modelDisagrees, originDisagrees, skipped, drift, autoMemory, steered: [], injections: [], skills: [], compactions: [] }
+}
+
+/** Claude Code's own word for a MEMORY.md load. */
+const AUTO_MEMORY = 'AutoMem'
+
+/**
+ * The loads that drift is measured on: every one but the auto-memory.
+ * Claude Code rewrites MEMORY.md as it learns, so its digest would read
+ * `changed` in nearly every session and bury the changes a person made. The
+ * memory section and STALE still show it. Shared by the diff here and the
+ * snapshot commit in cli.ts, so the two sides of the comparison never
+ * disagree about what is in it. AGENTS.md arrives the same way and stays in.
+ */
+export function driftable(loaded: Classified[], autoMemory: string[]): Classified[] {
+  const skip = new Set(autoMemory)
+  return loaded.filter((c) => !skip.has(c.path))
 }

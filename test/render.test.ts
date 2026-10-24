@@ -16,6 +16,7 @@ function base(): Report {
     config: [],
     modelDisagrees: [],
     originDisagrees: [],
+    autoMemory: [],
     skipped: [],
     drift: null,
     steered: [],
@@ -129,6 +130,7 @@ test('reproduces the worked example from the design doc column-for-column', () =
       { path: '/root/Knossos-MCP/vendor/phpstan/phpstan/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal', viaImport: null, gitIgnored: false, gitTracked: false },
     ],
     originDisagrees: [],
+    autoMemory: [],
     missing: [{ path: '/root/Knossos-MCP/.claude/rules/testing.md', label: 'launch', rule: 'rules-dir' }],
     quiet: [
       { path: '/root/Knossos-MCP/docs/CLAUDE.md', label: 'on-demand', rule: 'subdirectory' },

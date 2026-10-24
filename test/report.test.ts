@@ -429,3 +429,32 @@ test('an event load outside root is still reported, whatever the transcript says
   ])
   expect(r.loaded.map((f) => [f.path, f.reason])).toEqual([['/elsewhere/CLAUDE.md', 'session_start']])
 })
+
+/**
+ * Auto-memory rewrites MEMORY.md as it learns, so a digest of it would read
+ * `changed` in nearly every session. It stays out of drift on both sides;
+ * AGENTS.md, which arrives the same way, stays in.
+ */
+test('an AutoMem MEMORY.md is left out of drift, and AGENTS.md is not', () => {
+  const dir = tmp('kanon-report-automem-')
+  const root = join(dir, 'repo')
+  const home = join(dir, 'claude')
+  mkdirSync(root, { recursive: true })
+  mkdirSync(join(home, 'projects', 'x', 'memory'), { recursive: true })
+  const agents = join(root, 'AGENTS.md')
+  const memory = join(home, 'projects', 'x', 'memory', 'MEMORY.md')
+  writeFileSync(agents, 'new agents\n')
+  writeFileSync(memory, 'new memory\n')
+  const previous = [
+    { path: agents, origin: 'project' as const, sha256: 'old', lastSeen: '2026-08-27T00:00:00Z', state: 'present' as const },
+    { path: memory, origin: 'user' as const, sha256: 'old', lastSeen: '2026-08-27T00:00:00Z', state: 'present' as const },
+  ]
+  const r = buildReport([], [], root, home, new Map(), [], previous, [
+    { path: agents, type: 'Project' },
+    { path: memory, type: 'AutoMem' },
+  ])
+  expect(r.drift?.changed.map((f) => f.path)).toEqual([agents])
+  expect(r.drift?.appeared).toEqual([])
+  expect(r.autoMemory).toEqual([memory])
+  expect(r.loaded.map((f) => f.path)).toEqual([agents, memory])
+})

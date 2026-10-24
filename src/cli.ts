@@ -17,7 +17,7 @@ import { gitProbe, lastCommit } from './probe'
 import { render } from './render'
 import { renderAudit, type AuditEntry } from './audit'
 import { matches, renderWhose } from './whose'
-import { buildReport } from './report'
+import { buildReport, driftable } from './report'
 import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, writeAcks, writeSnapshot, writeSteering, writeWarned, writeWatermark } from './state'
 import { acknowledge, namedDigests, steer, type Steered } from './steering'
 import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
@@ -554,7 +554,7 @@ function commitSnapshot(report: Report, session: string): void {
       // than of this session. Without it the session that visited fewest
       // directories overwrites a richer snapshot, and the next session
       // announces long-standing files as new.
-      files: merge(previous?.files ?? null, digest(report.loaded), existsSync, new Date(stamp)),
+      files: merge(previous?.files ?? null, digest(driftable(report.loaded, report.autoMemory)), existsSync, new Date(stamp)),
     })
   } catch {
     // Housekeeping, like prune: a snapshot that cannot be written must

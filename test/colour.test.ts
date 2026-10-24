@@ -13,6 +13,7 @@ function base(): Report {
     config: [],
     modelDisagrees: [],
     originDisagrees: [],
+    autoMemory: [],
     skipped: [],
     drift: null,
     steered: [],
