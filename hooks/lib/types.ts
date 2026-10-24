@@ -7,15 +7,22 @@ import type { Tone } from './palette'
  * Knossos's raster, diff, field, hover and wheel members are not here: the pane
  * draws text rows only.
  */
-/** A pressable segment: drawn as a plain Button, `hotkey: label` when it has a hotkey. */
-export type Press = { id: string; label: string; hotkey?: string }
+/**
+ * What pressing a segment does: open an item in place (by its realpath), go
+ * back to the list, acknowledge an item (the record `kanon ack` writes), or
+ * retry a failed read. The mod turns a segment carrying one into a Button.
+ */
+export type Action = { kind: 'open'; real: string } | { kind: 'back' } | { kind: 'ack'; real: string } | { kind: 'retry' }
 
 /**
  * A run of text in one style. `color` is a Claude Code theme key (see
  * `palette.ts`), never a hex value; `dim` marks secondary text, drawn in the
- * theme's `inactive`; `bg` a theme key laid under it.
+ * theme's `inactive`; `bg` a theme key laid under it. A segment with `press`
+ * is a button, drawn exactly as its text (`hotkey: label` when it has a
+ * `hotkey`, one digit or lowercase letter), since a terminal Button does not
+ * show its hotkey itself.
  */
-export type Segment = { text: string; color?: Tone; dim?: boolean; bold?: boolean; bg?: string; press?: Press }
+export type Segment = { text: string; color?: Tone; dim?: boolean; bold?: boolean; bg?: string; press?: Action; hotkey?: string }
 
 /** One line of the pane. */
 export type Row = {

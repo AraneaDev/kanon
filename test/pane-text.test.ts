@@ -175,7 +175,7 @@ describe('the line under a cut list', () => {
 describe('rows', () => {
   it('cuts the last text segment that crosses the edge, and drops a pressable one whole', () => {
     expect(clip([{ text: 'abc' }, { text: 'defgh' }, { text: 'ij' }], 6)).toEqual([{ text: 'abc' }, { text: 'de…' }])
-    const press = button('o', 'open', 'o')
+    const press = button({ kind: 'back' }, 'back', 'b')
     expect(clip([{ text: 'abcd' }, press], 8)).toEqual([{ text: 'abcd' }])
   })
   it('puts the marker before a marked row, tinted to the edge', () => {

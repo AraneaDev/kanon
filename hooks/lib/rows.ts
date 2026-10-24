@@ -8,15 +8,15 @@
  */
 import { ACCENT, SELECTED_BG } from './palette'
 import { cells, fit, spaces } from './text'
-import type { Row, Segment } from './types'
+import type { Action, Row, Segment } from './types'
 
 export const rowWidth = (row: Row): number => row.segments.reduce((n, s) => n + cells(s.text), 0)
 export const segmentsWidth = (segments: Segment[]): number => segments.reduce((n, s) => n + cells(s.text), 0)
 
-/** A pressable segment; its text is what the terminal draws for it. */
-export function button(id: string, label: string, hotkey?: string, style: Omit<Segment, 'text' | 'press'> = {}): Segment {
-  const text = hotkey === undefined ? label : `${hotkey}: ${label}`
-  return { ...style, text, press: hotkey === undefined ? { id, label } : { id, label, hotkey } }
+/** A pressable segment; its text is what the terminal draws for it, `hotkey: label` when it has a hotkey. */
+export function button(action: Action, label: string, hotkey?: string, style: Omit<Segment, 'text' | 'press' | 'hotkey'> = {}): Segment {
+  if (hotkey === undefined) return { ...style, text: label, press: action }
+  return { ...style, text: `${hotkey}: ${label}`, press: action, hotkey }
 }
 
 /** `segments` with `bg` laid under each that has none of its own. */
