@@ -15,7 +15,7 @@ published to npm. `package.json` exists for the toolchain and the version stamp 
 bun install
 bun run check                      # typecheck + full suite; the gate before any commit
 bun run typecheck                  # tsc --noEmit
-bun test                           # ~813 tests, all under test/
+bun test                           # ~909 tests, all under test/
 sh tools/mod-test.sh                # the pane mod tests, via claude plugin test
 bun test test/render.test.ts       # one file
 bun test -t "substring of a name"  # one test
@@ -107,7 +107,10 @@ of the same one.
 - `src/drift.ts` — snapshot digests, `diff()` and `merge()`; what changed since the last session.
 - `src/state.ts` — snapshots and watermarks under `~/.kanon/state/`, all flat regular files.
 - `src/limits.ts` — the size ceiling (`tooLarge`) and `prune()`.
-- `src/model.ts` — `paneModel()`, the data the pane draws, emitted by `kanon model --json`.
+- `src/model.ts` — `paneModel()`, the data the pane draws, emitted by `kanon model --json` (version 2).
+- `src/inventory.ts` — every hook, skill and agent memory a session can see, from settings files and
+  enabled plugins, marked against the run's injections and invoked skills. Pure reads; a malformed
+  file skips only itself. A plugin counts only when `enabledPlugins` sets it to true.
 - `hooks/register.tsx` — the mod entry: registers `/kanon` (toggle the pane; print the report where
   nothing can draw) and the turn-end refresh.
 - `hooks/mod/*` — the pane's side: `cli.ts` runs the CLI, `draw.tsx` draws, `port.ts`, `session.ts`
@@ -244,8 +247,8 @@ of the same one.
 
 ## Conventions
 
-- Conventional Commits, enforced by release-please. `feat`/`fix`/`perf`/`docs`/`test`/`ci`/
-  `refactor` all show in the changelog; `chore` and `style` are hidden. Do not hand-edit
+- Conventional Commits, enforced by release-please. `feat`, `fix`, `perf` and `refactor` show in the
+  changelog and cut a release; `docs`, `test`, `ci`, `chore` and `style` are hidden and cut none. Do not hand-edit
   `CHANGELOG.md`, `package.json`'s version, or `.claude-plugin/plugin.json`'s version: release-please
   keeps the last two in step and CI asserts they agree.
 - The hook scripts are POSIX `sh`, not bash. `/bin/sh` is dash on Ubuntu and bash-in-posix-mode on
