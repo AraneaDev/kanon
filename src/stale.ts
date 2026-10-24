@@ -11,7 +11,7 @@ import type { Origin } from './types'
  * left five false `gone` verdicts in a cache that today's code would never
  * produce, and every reader believed them because nothing said who wrote them.
  */
-export const JUDGE_RULES = 1
+export const JUDGE_RULES = 2
 
 /**
  * The identity of the code that reaches a verdict. The plugin version covers
@@ -315,9 +315,26 @@ function isWellKnown(text: string, root: string, home: string): boolean {
   return isShorthand(text) || WELL_KNOWN_LOCATIONS.some((w) => locate(w, root, home) === at)
 }
 
-/** The names in an item's text that are claims, leaving out Claude Code's own locations. */
+// The user names docs write for "your home directory". `/home/user` in a
+// note asking for synthetic values in public fixtures was called gone, in
+// every session, since that directory never exists on the author's machine.
+const EXAMPLE_USERS = new Set('user you me username yourname your-name name example'.split(' '))
+
+/**
+ * `/home/you/x.md`, `/Users/example/repo`: a path in someone's example home.
+ * The machine's own home is never one, whatever it is called: in a container
+ * whose account really is `user`, `/home/user/...` names real files.
+ */
+function isExampleHome(text: string, home: string): boolean {
+  const [top, user] = text.split('/').filter(Boolean)
+  if (!text.startsWith('/') || (top !== 'home' && top !== 'Users') || !EXAMPLE_USERS.has(user ?? '')) return false
+  const own = home.replace(/\/+$/, '')
+  return text.replace(/\/+$/, '') !== own && !text.startsWith(`${own}/`)
+}
+
+/** The names in an item's text that are claims, leaving out Claude Code's own locations and example homes. */
 function namesOf(text: string, root: string, home: string): Name[] {
-  return extractNames(text).filter((n) => !(n.kind === 'path' && isWellKnown(n.text, root, home)))
+  return extractNames(text).filter((n) => !(n.kind === 'path' && (isWellKnown(n.text, root, home) || isExampleHome(n.text, home))))
 }
 
 /**
