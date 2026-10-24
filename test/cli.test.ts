@@ -1673,6 +1673,23 @@ test('model --json prints the pane contract for an unrecorded session as a predi
   expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
 })
 
+/**
+ * Judging that fails is not a session with nothing in it. The pane once
+ * said "Instructions 0" here, while the brief, on the same failure, listed
+ * the files unjudged.
+ */
+test('model --json on the predicted basis still lists the launch files, unjudged, when judging fails', async () => {
+  const { home, repo, env } = isolated('kanon-cli-model-nojudge-')
+  writeFileSync(join(repo, 'CLAUDE.md'), 'Use `bun test`.\n')
+  const out = await run(['model', '--json', '--session', 'never-recorded', '--cwd', repo], { ...env, KANON_JUDGE_FAIL: '1' })
+  const m = JSON.parse(out)
+  expect(m.basis).toBe('predicted')
+  const file = m.instructions.find((i: { path: string }) => i.path === 'CLAUDE.md')
+  expect(file).toBeDefined()
+  expect(file.verdict).toBeNull()
+  expect(existsSync(steeringPath(home, sessionRoot(repo)))).toBe(false)
+})
+
 test('model --json uses the observed report when the session was recorded', async () => {
   const { home, repo } = seeded()
   const out = await run(['model', '--json', '--session', 's', '--cwd', repo], { KANON_HOME: home, CLAUDE_CONFIG_DIR: join(home, 'no-claude-dir') })

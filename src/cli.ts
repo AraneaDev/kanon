@@ -405,15 +405,18 @@ function writtenAt(root: string, path: string, kind: Steered['kind'], deadline?:
  */
 function steering(root: string, files: Classified[], events: Event[], extra: Classified[] = []): Steered[] {
   const steered = judgeSteering(root, files, events, transcriptFacts(events), extra)
-  if (steered === null) {
-    return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
-  }
+  if (steered === null) return unjudged(files)
   try {
     writeSteering(kanonHome(), root, steered)
   } catch {
     // Housekeeping for the hot path; see above.
   }
   return steered
+}
+
+/** The instruction files with no verdicts: what is shown when judging failed, rather than nothing. */
+function unjudged(files: Classified[]): Steered[] {
+  return files.map((f) => ({ path: realPath(f.path), kind: 'instruction', origin: f.origin, digest: null, verdict: null, acknowledged: false }))
 }
 
 /**
@@ -446,6 +449,10 @@ function judgeSteering(
   // discovery, judging and the cache write stay inside SessionStart's 5 s.
   const deadline = Date.now() + judgeBudget()
   try {
+    // Every path inside steer() is guarded, so no fixture can make it throw;
+    // this lets a test reach the fallback the guard below exists for. It is
+    // not a user setting.
+    if (process.env.KANON_JUDGE_FAIL === '1') throw new Error('judging forced to fail')
     return steer({
       root,
       // The user's home, not the Claude config dir: a note's `~/` means the
@@ -630,7 +637,9 @@ function buildModel(cwd: string): PaneModel {
   const launch = new Set(files.map((f) => f.path))
   const extra = loadableFiles(candidates, root, home).filter((f) => !launch.has(f.path))
   const events = runEvents(session)
-  const steered = readSteering(kanonHome(), root) ?? judgeSteering(root, files, events, transcriptFacts(events), extra) ?? []
+  // A failed judging lists the files unjudged, exactly as steering() does: an
+  // empty list would tell the person the session has no instruction files.
+  const steered = readSteering(kanonHome(), root) ?? judgeSteering(root, files, events, transcriptFacts(events), extra) ?? unjudged(files)
   return paneModel(null, 'predicted', root, steered)
 }
 
