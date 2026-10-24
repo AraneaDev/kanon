@@ -1,4 +1,6 @@
 // Copied from Knossos-MCP hooks/lib/types.ts at a4412478, trimmed to what Kanon's pane uses.
+import type { Tone } from './palette'
+
 /**
  * The shapes the pane draws with: styled segments and the rows they make up.
  * Types only; `rows.ts` and `text.ts` hold the primitives that build them.
@@ -13,7 +15,7 @@ export type Press = { id: string; label: string; hotkey?: string }
  * `palette.ts`), never a hex value; `dim` marks secondary text, drawn in the
  * theme's `inactive`; `bg` a theme key laid under it.
  */
-export type Segment = { text: string; color?: string; dim?: boolean; bold?: boolean; bg?: string; press?: Press }
+export type Segment = { text: string; color?: Tone; dim?: boolean; bold?: boolean; bg?: string; press?: Press }
 
 /** One line of the pane. */
 export type Row = {

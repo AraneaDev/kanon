@@ -18,10 +18,10 @@ const m = (glyph: string, meaning: string, tone: MarkTone, legend: string = mean
 
 /** What an item needs from the person: gone, may be stale, foreign, acknowledged, or nothing to say. */
 export const MARK = {
-  gone: m('▲', 'an expected file that never arrived', 'alert', 'gone'),
+  gone: m('▲', 'an expected file that never arrived', 'warn', 'gone'),
   stale: m('≈', 'it may be stale', 'warn', 'stale'),
   foreign: m('!', "a file from a dependency, not the project's own", 'alert', 'foreign'),
-  acked: m('✓', 'acknowledged: the person said it still holds', 'ok', 'acknowledged'),
+  acked: m('✓', 'acknowledged: the person said it still holds', 'dim', 'acknowledged'),
   none: m('◦', 'nothing to say', 'dim', 'quiet'),
 } as const
 

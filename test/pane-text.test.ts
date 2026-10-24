@@ -200,10 +200,10 @@ describe('the mark registry', () => {
     expect(Object.values(MARK).some(m => m.glyph === CARD_GLYPH)).toBe(false)
   })
   it('colours a mark by its tone, as a theme key, and never by colour alone', () => {
-    expect(mark(MARK.gone)).toEqual({ text: '▲', color: STATUS_COLOURS.alert })
+    expect(mark(MARK.gone)).toEqual({ text: '▲', color: STATUS_COLOURS.warn })
     expect(mark(MARK.stale, ' ')).toEqual({ text: '≈ ', color: STATUS_COLOURS.warn })
     expect(mark(MARK.foreign)).toEqual({ text: '!', color: STATUS_COLOURS.alert })
-    expect(mark(MARK.acked)).toEqual({ text: '✓', color: STATUS_COLOURS.ok })
+    expect(mark(MARK.acked)).toEqual({ text: '✓', dim: true })
     expect(mark(MARK.none)).toEqual({ text: '◦', dim: true })
     for (const m of Object.values(MARK)) expect(mark(m).text.trim(), m.meaning).toBe(m.glyph)
   })
