@@ -38,7 +38,7 @@ function seeded() {
  * Two separate repositories recording into the same ~/.kanon, with repo B's
  * session file made strictly newer than repo A's. A fallback that picks
  * "the newest session file" without checking which repository it was
- * recorded in would hand repo A's `/kanon` run repo B's events.
+ * recorded in would hand repo A's `/kanon:report` run repo B's events.
  */
 function twoRepos() {
   const home = tmp('kanon-cli-multi-')
@@ -150,7 +150,7 @@ test('alarm --hook is silent for an unknown session', async () => {
 
 test('report falls back to the most recently written session when --session is omitted', async () => {
   // Claude Code does not expose a running session's own id to the Bash
-  // tool or a slash command, so `/kanon` cannot pass --session at all.
+  // tool or a slash command, so `/kanon:report` cannot pass --session at all.
   const { home, repo } = seeded()
   const out = await run(['report', '--cwd', repo], { KANON_HOME: home })
   expect(out).toContain('FOREIGN')
@@ -524,7 +524,7 @@ test('alarm fails silently on stdout so a hook can never paste an error into a s
   expect(out).toBe('')
 })
 
-/** An empty --session is the shape `/kanon` passes when it has no id at all. */
+/** An empty --session is the shape `/kanon:report` passes when it has no id at all. */
 test('an empty --session value falls back to the recorded session rather than looking for one named ""', async () => {
   const { home, repo } = seeded()
   const out = await run(['report', '--session', '', '--cwd', repo], { KANON_HOME: home })
@@ -572,7 +572,7 @@ test('an old session log is pruned on the next run', async () => {
 // --- colour is a property of the terminal, never of the report ---------------
 
 /**
- * The gate that matters. `/kanon` runs this through Claude Code's Bash tool,
+ * The gate that matters. `/kanon:report` runs this through Claude Code's Bash tool,
  * so stdout is a pipe and the text is on its way into a model's context --
  * where escape codes cost tokens and come back out as literal garbage rather
  * than colour. Every test above this one already depends on it silently;
@@ -705,7 +705,7 @@ test('report --commit-state writes a snapshot for this root', async () => {
 })
 
 /**
- * /kanon runs `report` with no flag, mid-session. If that committed a
+ * /kanon:report runs `report` with no flag, mid-session. If that committed a
  * snapshot it would erase the baseline the end-of-session report is about
  * to describe, and every later run would say nothing changed.
  */

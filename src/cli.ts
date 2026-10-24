@@ -145,13 +145,13 @@ function recordedRoot(path: string): string | undefined {
  * command or the Bash tool (as of this ruleset there is no
  * `CLAUDE_SESSION_ID` in that environment; hooks get it separately, on
  * their stdin JSON, which is how the Recorder and the two session hooks
- * get theirs). `/kanon` therefore has no id to pass, so an omitted or
+ * get theirs). `/kanon:report` therefore has no id to pass, so an omitted or
  * empty `--session` falls back to a recorded session file instead.
  *
  * Picking merely the most recently written file is not safe: with two
  * Claude Code sessions open in two different repositories, the newer file
  * belongs to whichever session last recorded an event, which has nothing
- * to do with which repository `/kanon` is being run from. Handing repo A's
+ * to do with which repository `/kanon:report` is being run from. Handing repo A's
  * report repo B's events doesn't just name the wrong session, it fabricates
  * a FOREIGN alarm on repo B's own legitimate file and reports repo A's real
  * CLAUDE.md as missing -- a false alarm is worse than none, so the fallback
@@ -532,7 +532,7 @@ function alarmLines(report: Report): string[] {
 }
 
 /**
- * Only SessionEnd commits. /kanon runs this same command mid-session,
+ * Only SessionEnd commits. /kanon:report runs this same command mid-session,
  * and a commit there would erase the baseline this very report is
  * describing, making every subsequent run say "nothing changed".
  * An unobserved session (nothing recorded, or a log that recorded

@@ -240,7 +240,7 @@ else. That is not a preference, it is what the other readers need:
 | Where it goes | Coloured |
 | --- | --- |
 | A terminal you are looking at | yes |
-| `/kanon`, which runs the report into a model's context when the command expands | no |
+| `/kanon:report`, which runs the report into a model's context when the command expands | no |
 | `~/.kanon/reports/<id>.txt`, read back long after the terminal is gone | no |
 | The `--hook` JSON, and the brief inside it | no |
 
@@ -267,9 +267,9 @@ Hooks bind when a session starts, so start a new session before Kanon sees anyth
 sessions that began after it was installed, and there is no way to reconstruct what happened
 before that.
 
-## The `/kanon` command
+## The `/kanon:report` command
 
-`/kanon` prints the report for the current session.
+`/kanon:report` prints the report for the current session.
 
 With no arguments it picks the most recent session recorded from the repository you are in. It
 will not fall back to a session from a different repository, because reporting one repository's

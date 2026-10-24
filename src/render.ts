@@ -186,7 +186,7 @@ function skipLine(s: Skipped, root: string, paint: Paint): string {
  * `paint` defaults to PLAIN, which is the identity, so the default output is
  * byte-for-byte what it has always been. Only `report`'s stdout, and only
  * when that is an interactive terminal, is rendered with COLOUR; the
- * persisted report file and the piped `/kanon` path both keep the default.
+ * persisted report file and the piped `/kanon:report` path both keep the default.
  * See src/colour.ts for why.
  */
 export function render(report: Report, paint: Paint = PLAIN): string {
