@@ -21,7 +21,7 @@ import { buildReport } from './report'
 import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, writeAcks, writeSnapshot, writeSteering, writeWarned, writeWatermark } from './state'
 import { acknowledge, namedDigests, steer, type Steered } from './steering'
 import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
-import type { Classified, Event, Origin, Report } from './types'
+import type { Candidate, Classified, Event, Origin, Report } from './types'
 import { warning } from './warning'
 
 /** Absolute path to this file, so a command Kanon prints for Claude runs as printed. */
@@ -306,10 +306,28 @@ function unobserved(path: string, origin: Origin, reason: string): Classified {
  * exactly as a real load would be.
  */
 function predictedFiles(cwd: string, home: string, root: string): Classified[] {
-  const { candidates } = discover(cwd, home)
+  return launchFiles(discover(cwd, home).candidates, root, home)
+}
+
+function launchFiles(candidates: Candidate[], root: string, home: string): Classified[] {
   return candidates
     .filter((c) => c.label === 'launch')
     .map((c) => unobserved(c.path, classify(c.path, root, home), 'expected at launch'))
+}
+
+/**
+ * Every candidate that can load in this session: at launch, on a path
+ * match, or when Claude enters a subdirectory. A path-scoped rule or a
+ * nested CLAUDE.md never loads at session start, so judging only the launch
+ * set left the mid-session notice and the report's STALE with nothing to
+ * say about them. An excluded file never loads, and an unreachable one
+ * cannot, so neither is judged.
+ */
+const JUDGED_LABELS: ReadonlySet<Candidate['label']> = new Set(['launch', 'path-scoped', 'on-demand'])
+function loadableFiles(candidates: Candidate[], root: string, home: string): Classified[] {
+  return candidates
+    .filter((c) => JUDGED_LABELS.has(c.label))
+    .map((c) => unobserved(c.path, classify(c.path, root, home), c.label))
 }
 
 /**
@@ -445,7 +463,14 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
   const home = claudeHome()
   // Both come from sessionRoot(), so both are already realpathed.
   const root = report ? report.root : sessionRoot(cwd)
-  const files = report ? report.loaded : predictedFiles(cwd, home, root)
+  const { candidates } = discover(cwd, home)
+  const files = report ? report.loaded : launchFiles(candidates, root, home)
+  // Everything that can load is judged into the cache, for the notice and
+  // the report; the brief speaks only of what governs the session now --
+  // the files above and the memories -- so its count and rows are those.
+  // `files` go first, so an observed load keeps its own classification.
+  const judged = steering(root, [...files, ...loadableFiles(candidates, root, home)], runEvents(session))
+  const shown = new Set(files.map((f) => realPath(f.path)))
   // Drift is no longer the brief's to tell: the report carries it, and the
   // brief names only what is gone or foreign.
   return {
@@ -453,7 +478,7 @@ function briefInput(session: string | undefined, cwd: string): BriefInput {
     basis: report ? 'observed' : 'predicted',
     files,
     missing: report ? report.missing : [],
-    steered: steering(root, files, runEvents(session)),
+    steered: judged.filter((s) => s.kind === 'memory' || shown.has(s.path)),
     cli: CLI,
   }
 }

@@ -1620,3 +1620,42 @@ test('brief with an exhausted judging budget still speaks and caches unjudged ro
   expect(cached?.length).toBe(2)
   expect(cached?.every((s) => s.verdict === null)).toBe(true)
 })
+
+// --- every discovered candidate is judged, the brief counts launch files ----
+
+/**
+ * A path-scoped rule and a nested CLAUDE.md, each naming a script that does
+ * not exist. Neither loads at launch, so neither belongs in the brief's
+ * count, but both are judged into the cache so a later load can warn.
+ */
+function withScopedGone(prefix: string) {
+  const { home, repo, env } = withGoneMemory(prefix)
+  mkdirSync(join(repo, '.claude', 'rules'), { recursive: true })
+  mkdirSync(join(repo, 'sub'), { recursive: true })
+  const rule = join(repo, '.claude', 'rules', 'api.md')
+  writeFileSync(rule, '---\npaths:\n  - "src/api/**"\n---\n\nDeploy with `scripts/deploy-api.sh`.\n')
+  const nested = join(repo, 'sub', 'CLAUDE.md')
+  writeFileSync(nested, 'Build with `scripts/build-sub.sh`.\n')
+  return { home, repo, env, rule: realpathSync(rule), nested: realpathSync(nested) }
+}
+
+test('brief judges path-scoped rules and nested CLAUDE.md into the cache, but counts only launch files', async () => {
+  const { home, repo, env, rule, nested } = withScopedGone('kanon-cli-scoped-')
+  const out = context(await run(['brief', '--cwd', repo, '--hook'], env))
+  expect(out).toStartWith('KANON  1 instruction file steers this session (predicted)')
+  expect(out).not.toContain('deploy-api.sh')
+  expect(out).not.toContain('build-sub.sh')
+  const cached = readSteering(home, sessionRoot(repo)) ?? []
+  expect(cached.find((s) => s.path === rule)?.verdict?.level).toBe('gone')
+  expect(cached.find((s) => s.path === nested)?.verdict?.level).toBe('gone')
+})
+
+test('a path_glob_match load of a gone path-scoped rule makes notice warn', async () => {
+  const { home, repo, env, rule } = withScopedGone('kanon-cli-scoped-notice-')
+  starts(home, repo, 'startup')
+  await run(['brief', '--session', 's', '--cwd', repo, '--hook'], env)
+  const line = { t: '2026-10-24T00:00:00Z', hook: 'InstructionsLoaded', raw: { session_id: 's', hook_event_name: 'InstructionsLoaded', cwd: repo, file_path: rule, load_reason: 'path_glob_match' } }
+  appendFileSync(join(home, 'sessions', 's.jsonl'), `${JSON.stringify(line)}\n`)
+  const out = await run(['notice', '--session', 's', '--cwd', repo], env)
+  expect(out).toContain('names `scripts/deploy-api.sh`, which no longer exists')
+})
