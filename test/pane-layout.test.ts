@@ -75,6 +75,18 @@ describe('the list', () => {
     expect(text(rows[39]!)).toBe(`${blank(91)}observed `)
   })
 
+  it('counts an injection under 1,000 characters as itself, and from 1,000 in thousands with one decimal', () => {
+    for (const [chars, shown] of [
+      [42, '42 chars'],
+      [999, '999 chars'],
+      [1000, '1.0k chars'],
+      [9100, '9.1k chars'],
+    ] as const) {
+      const rows = run({ model: { ...small, injected: [{ plugin: 'example', hookName: 'SessionStart', chars }] } })
+      expect(rows.map(text)).toContain(`    example  SessionStart  ${shown}`.padEnd(100))
+    }
+  })
+
   it('makes each file name a button that opens it, with no marker and no o outside the wide tier', () => {
     for (const columns of [60, 100]) {
       const rows = run({ columns })

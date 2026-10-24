@@ -270,8 +270,8 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
   ]
 }
 
-/** `9.1k`: characters in thousands, one decimal. */
-const kilo = (n: number): string => `${(n / 1000).toFixed(1)}k`
+/** `42` below a thousand, `9.1k` from there: in thousands, under 50 would read `0.0k`. */
+const kilo = (n: number): string => (n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`)
 
 /**
  * An item's row: the marker, its glyph, its origin while there is room, and
