@@ -18,7 +18,9 @@ import {
   writeWarned,
   writeWatermark,
 } from '../src/state'
+import { JUDGE, JUDGE_RULES } from '../src/stale'
 import type { Ack, Steered } from '../src/steering'
+import pkg from '../package.json'
 import { tmp } from './tmp'
 
 function snap(over: Partial<Snapshot> = {}): Snapshot {
@@ -194,6 +196,24 @@ test('a malformed or wrong-version steering cache reads as absent', () => {
   }
 })
 
+test('a steering cache written by other judging code reads as absent', () => {
+  const home = tmp('kanon-state-')
+  writeSteering(home, '/repo', [steered])
+  const file = JSON.parse(readFileSync(steeringPath(home, '/repo'), 'utf8'))
+  expect(file.judge).toBe(JUDGE)
+  expect(readSteering(home, '/repo')).toEqual([steered])
+  // An older build's verdicts, or a file from before the stamp existed.
+  for (const judge of ['0.0.1+0', undefined, 7]) {
+    corrupt(steeringPath(home, '/repo'), JSON.stringify({ ...file, judge }))
+    expect(readSteering(home, '/repo')).toBeNull()
+  }
+})
+
+test('the judge stamp names the plugin version and the rules revision', () => {
+  expect(JUDGE).toBe(`${pkg.version}+${JUDGE_RULES}`)
+  expect(JUDGE_RULES).toBeGreaterThanOrEqual(1)
+})
+
 test('acknowledgements round trip, and anything unreadable is none', () => {
   const home = tmp('kanon-state-')
   expect(readAcks(home, '/repo')).toEqual([])
@@ -219,7 +239,7 @@ test('the warned record round trips, and anything unreadable is epoch 0 with not
 test('a steering cache keeps its good items and drops malformed ones', () => {
   const home = tmp('kanon-state-')
   const bad = [null, { ...steered, kind: 'other' }, { ...steered, verdict: { level: 'x', evidence: 'e' } }, { ...steered, acknowledged: 'no' }, { ...steered, digest: 3 }]
-  corrupt(steeringPath(home, '/repo'), JSON.stringify({ v: 1, root: '/repo', t: 'x', items: [steered, ...bad, { ...steered, verdict: null, digest: null }] }))
+  corrupt(steeringPath(home, '/repo'), JSON.stringify({ v: 1, root: '/repo', judge: JUDGE, t: 'x', items: [steered, ...bad, { ...steered, verdict: null, digest: null }] }))
   expect(readSteering(home, '/repo')).toEqual([steered, { ...steered, verdict: null, digest: null }])
 })
 

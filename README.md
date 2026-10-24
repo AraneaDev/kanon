@@ -7,14 +7,14 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-758%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-857%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![Status](https://img.shields.io/badge/status-pre--release-orange)](#install)
 
-<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, one hook injection, one skill and no compactions" width="880">
+<img src="assets/pane.svg" alt="A Claude Code session with the Kanon pane docked beside it. In the chat, Claude is asked to cut a release and stops to ask whether memory/release-flow.md still holds, because the script it names no longer exists. The pane on the right groups what steers the session: eight instruction files with a vendored CLAUDE.md flagged foreign, three memories with one marked gone and one marked stale, two rows of hook injections (a prompt reminder injected twelve times collapses into one row), one skill and no compactions. The footer lists tab: move and enter: open" width="880">
 
 <sub>The Kanon pane, opened with <code>/kanon</code>. The pane is drawn by its own layout code from what the real CLI printed for a planted session. The chat beside it is a scripted exchange that shows what the gone flag is for.</sub>
 
@@ -82,16 +82,30 @@ Compaction. Four glyphs carry the findings:
 | `!` | foreign |
 | `✓` | acknowledged |
 
-Each file name is a button that opens its detail in place. The keys are `o` (on a wide terminal, open
-the previewed item), `a` (acknowledge a flagged item, the same record `kanon ack` writes), `b` (back)
-and `r` (retry). On a terminal wider than 130 columns the detail of the previewed item sits beside the
-list. The pane refreshes when a turn ends.
+Each file name is a button that opens its detail in place, and so is the plugin name on each row
+under Injected by hooks. `tab` moves between them and `enter` opens the one you are on; the footer
+always lists the keys that work. In a detail, `v` shows the text itself: the file, or for an injected
+row the most recent of its injections. In that text, `n` and `p` page forward and back, and the mouse
+wheel scrolls it. `b` steps back one level, from the text to the detail and from the detail to the
+list. The other keys are `o` (on a wide terminal, open the previewed item), `a` (acknowledge a
+flagged item, the same record `kanon ack` writes) and `r` (retry). On a terminal wider than 130
+columns the detail of the previewed item sits beside the list. The pane refreshes when a turn ends.
 
 <p align="center">
-  <img src="assets/pane-detail.svg" alt="The Kanon pane with one memory opened in place: release-flow.md, marked gone. It shows the path, the origin user, the reason not observed, the evidence that it names scripts/release.sh which no longer exists, and the state not acknowledged. The footer offers a: acknowledge and b: back" width="640">
+  <img src="assets/pane-detail.svg" alt="The Kanon pane with one memory opened in place: release-flow.md, marked gone. It shows the path, the origin user, the reason not observed, the evidence that it names scripts/release.sh which no longer exists, and the state not acknowledged. The footer offers a: acknowledge, v: view and b: back" width="640">
 </p>
 
 The pane runs `kanon model --json` and lays out what comes back, so it never re-implements Kanon.
+The text behind `v` comes from `kanon show`, which you can run yourself. It prints JSON and writes
+nothing:
+
+```bash
+bun '<plugin>/src/cli.ts' show --cwd '<repo>' --path CLAUDE.md                # a file, up to the 4 MiB ceiling
+bun '<plugin>/src/cli.ts' show --cwd '<repo>' --session <id> --injection <n>  # the n-th injection of this run
+```
+
+The model gives each row under Injected by hooks the `index` of its most recent injection, which is
+the number `--injection` takes.
 Text Kanon did not write, such as a file name or a line from a rule, has its control characters
 stripped before it is drawn.
 
@@ -234,10 +248,10 @@ MEMORY
   ~/.claude/projects/-home-you-project/memory/release-flow.md
 
 INJECTED
-  example-plugin  SessionStart          8.6k chars
-  kanon           SessionStart          0.3k chars
-  unattributed    UserPromptSubmit      0.3k chars
-  kanon           PreToolUse:Read       0.2k chars
+  example-plugin  SessionStart          ×1   8.6k chars
+  unattributed    UserPromptSubmit      ×6   0.3k chars
+  kanon           SessionStart          ×1   0.3k chars
+  kanon           PreToolUse:Read       ×1   0.2k chars
 
 SKILLS
   example-plugin:brainstorming
@@ -271,7 +285,8 @@ longer exists, `may-be-stale` (printed as `may-stale` to fit the column) when a 
 script it names occurs nowhere any more or a file it names has commits since it was written (names
 come from inline code spans, `@imports` and bare path-shaped words, never from fenced code blocks),
 and `ok` once you have acknowledged it with `kanon ack`. `MEMORY` lists the project's memories.
-`INJECTED` totals the text each hook added to the context, per plugin and hook event, attributed
+`INJECTED` collapses the text hooks added to the context into one row per plugin and hook event,
+with how many times it happened and the characters in total, the largest first, attributed
 through the installed plugins' `hooks.json`;
 Kanon's own injections are listed like any other. `SKILLS` and `COMPACTION` name the skills invoked
 and each compaction, with its token counts before and after.
@@ -444,8 +459,8 @@ and Kanon does not tell you whether a rule is a good one.
 
 A directive can also reach a session from a skill, an MCP server, an output style, or another
 plugin's hook. The report lists the hook text, skills and compactions it can read back from the
-transcript, as facts. It reads the transcript from its tail and only as far back as the current
-run, because one transcript spans every run of a session. Kanon does not model skills, servers,
+transcript, as facts. It reads the transcript backwards from its end until it reaches the start of
+the current run (at most 128 MiB), because one transcript spans every run of a session. Kanon does not model skills, servers,
 output styles or hooks as instruction files, and the reason is structural rather than a matter of
 effort: Claude Code fires a hook when an instruction file loads, and fires nothing when a skill's
 text or a server's instructions reach the context. Everything Kanon reports about instruction

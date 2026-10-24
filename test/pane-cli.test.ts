@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { cliArgv, fenced, parseModel } from '../hooks/mod/cli'
+import { cliArgv, fenced, parseContent, parseModel } from '../hooks/mod/cli'
 
 // Synthetic values only: the repository is public.
 const ROOT = '/home/user/.claude/plugins/kanon'
@@ -78,6 +78,22 @@ describe('reasons from output Kanon did not shape', () => {
       const status = parseModel(out)
       expect(status.kind).toBe('error')
       if (status.kind === 'error') expect(CONTROL.test(status.reason)).toBe(false)
+    }
+  })
+})
+
+describe('parseContent', () => {
+  test('a show line is the text', () => {
+    expect(parseContent(`${JSON.stringify({ v: 1, title: 'CLAUDE.md', lines: ['a', 'b'], truncated: false })}\n`)).toEqual({ title: 'CLAUDE.md', lines: ['a', 'b'], truncated: false })
+  })
+
+  test("the CLI's error is shown as it is, stripped", () => {
+    expect(parseContent(JSON.stringify({ v: 1, error: 'kanon could not read \x1b[31mx' }))).toEqual({ error: 'kanon could not read [31mx' })
+  })
+
+  test('nothing, garbage, another version or another shape is an error, never an empty text', () => {
+    for (const out of ['', 'Segmentation fault', '[]', JSON.stringify({ v: 2, title: 't', lines: [], truncated: false }), JSON.stringify({ v: 1, title: 't', lines: [1], truncated: false }), JSON.stringify({ v: 1, title: 't', lines: [] })]) {
+      expect('error' in parseContent(out)).toBe(true)
     }
   })
 })

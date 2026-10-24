@@ -10,7 +10,7 @@
  */
 import type { PaneModel } from '../../src/model'
 import { stripControl } from '../lib/control'
-import type { Status } from '../lib/layout'
+import { injectionKey, type Content, type Status, type Target } from '../lib/layout'
 import type { Port, RunResult } from './port'
 import { mod, say, setStatus } from './state'
 
@@ -21,6 +21,10 @@ const MODEL_TIMEOUT_MS = 10_000
 /** The report and an acknowledge. The report runs inside the command hook, so it stays under the hook's 10 s. */
 const REPORT_TIMEOUT_MS = 8_000
 const ACK_TIMEOUT_MS = 8_000
+/** A `show`: run off the hook like the model, so it may take as long. */
+const SHOW_TIMEOUT_MS = 10_000
+/** The `kanon show` contract version (src/cli.ts SHOW_VERSION; not imported, for the reason MODEL_VERSION is not). */
+const SHOW_VERSION = 1
 /** The most of a reason the pane quotes from output it could not read. */
 const QUOTE_MAX = 200
 
@@ -57,6 +61,30 @@ export function parseModel(stdout: string): Status {
     return { kind: 'error', reason: 'kanon printed JSON that is not a pane model.' }
   }
   return { kind: 'ready', model: parsed as PaneModel }
+}
+
+/**
+ * What the pane makes of `kanon show`'s stdout: the text, or why not. Parsed
+ * as strictly as the model, so a half-shaped answer is an error rather than
+ * a content view that draws nothing.
+ */
+export function parseContent(stdout: string): Content {
+  const text = stdout.trim()
+  if (text === '') return { error: 'kanon printed nothing.' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { error: `kanon printed something that is not JSON: ${firstLine(text)}` }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return { error: 'kanon printed JSON that is not a text to show.' }
+  const o = parsed as Record<string, unknown>
+  if (typeof o.error === 'string') return { error: stripControl(o.error) }
+  if (o.v !== SHOW_VERSION) return { error: `kanon printed show version ${String(o.v)}; this pane reads version ${SHOW_VERSION}.` }
+  if (typeof o.title !== 'string' || !Array.isArray(o.lines) || !o.lines.every(l => typeof l === 'string') || typeof o.truncated !== 'boolean') {
+    return { error: 'kanon printed JSON that is not a text to show.' }
+  }
+  return { title: o.title, lines: o.lines as string[], truncated: o.truncated }
 }
 
 /** `text` in a code fence longer than any run of backticks inside it, so the report cannot close it early. */
@@ -168,6 +196,33 @@ export async function acknowledge(io: Port, real: string): Promise<void> {
     say(io, 'not acknowledged')
   }
   await refresh(io)
+}
+
+/**
+ * The text of what the person asked to read: `kanon show --path <real>` for
+ * a file, or `--injection <index>` for the most recent injection of a
+ * collapsed row, its index looked up in the model as it stands now. Every
+ * argument its own element, as everywhere else.
+ */
+export async function readContent(io: Port, target: Target): Promise<Content> {
+  try {
+    const cwd = await io.session.cwd()
+    let args: string[]
+    if ('real' in target) {
+      args = ['show', '--cwd', cwd, '--path', target.real]
+    } else {
+      const model = mod.status.kind === 'ready' ? mod.status.model : null
+      const group = model?.injected.find(g => injectionKey(g) === target.injection)
+      if (group === undefined) return { error: 'That injection is no longer in this session.' }
+      args = ['show', '--cwd', cwd, '--session', await io.session.id(), '--injection', String(group.index)]
+    }
+    const result = await runCli(io, args, SHOW_TIMEOUT_MS)
+    const content = parseContent(result.stdout)
+    if ('error' in content && result.exitCode !== 0 && result.stderr.trim() !== '') return { error: `kanon exited ${result.exitCode}: ${firstLine(result.stderr)}` }
+    return content
+  } catch (err) {
+    return { error: `kanon could not run: ${message(err)}` }
+  }
 }
 
 /** The report, fenced, for a session with nothing to draw a pane on; or one line saying why there is none. */

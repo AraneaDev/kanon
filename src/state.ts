@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeAtomic } from './atomic'
 import { SNAPSHOT_VERSION, type Snapshot } from './drift'
+import { JUDGE } from './stale'
 import type { Ack, Steered } from './steering'
 
 /**
@@ -157,16 +158,18 @@ function write(kanonHome: string, path: string, value: unknown): void {
  * when there is none to trust. The hot-path hooks only ever read this, so a
  * bad cache must read as "not computed", never as "nothing steers you".
  * The stored root guards against a digest collision handing one checkout
- * another's verdicts.
+ * another's verdicts, and the `judge` stamp against verdicts from code that
+ * no longer judges the same way: a cache without one, or with another, is
+ * not this build's answer and reads as absent.
  */
 export function readSteering(kanonHome: string, root: string): Steered[] | null {
   const o = readObject(steeringPath(kanonHome, root))
-  if (!o || o.v !== STEERING_VERSION || o.root !== root || !Array.isArray(o.items)) return null
+  if (!o || o.v !== STEERING_VERSION || o.root !== root || o.judge !== JUDGE || !Array.isArray(o.items)) return null
   return o.items.filter(isSteered)
 }
 
 export function writeSteering(kanonHome: string, root: string, items: Steered[]): void {
-  write(kanonHome, steeringPath(kanonHome, root), { v: STEERING_VERSION, root, t: new Date().toISOString(), items })
+  write(kanonHome, steeringPath(kanonHome, root), { v: STEERING_VERSION, root, judge: JUDGE, t: new Date().toISOString(), items })
 }
 
 /**

@@ -9,7 +9,7 @@ import { COLOUR, colourEnabled, paintFor, stripControl } from './colour'
 import { discover, subdirCandidates } from './discover'
 import { digest, merge, SNAPSHOT_VERSION } from './drift'
 import { paneModel, MODEL_VERSION, type PaneModel } from './model'
-import { prune, readStart, readTail } from './limits'
+import { prune, readBack, readStart } from './limits'
 import { cleanLine, compactions, currentRun, normalise, transcriptOf } from './normalise'
 import { BRIEFED_REASONS, notice } from './notice'
 import { classify, sessionRoot } from './origin'
@@ -21,7 +21,7 @@ import { matches, renderWhose } from './whose'
 import { buildReport, driftable } from './report'
 import { readAcks, readSnapshot, readSteering, readWarned, readWatermark, writeAcks, writeSnapshot, writeSteering, writeWarned, writeWatermark } from './state'
 import { acknowledge, namedDigests, steer, type Steered } from './steering'
-import { EMPTY_FACTS, readTranscript, type TranscriptFacts } from './transcript'
+import { EMPTY_FACTS, injectionTexts, reachesBefore, readTranscript, type TranscriptFacts } from './transcript'
 import type { Candidate, Classified, Event, Origin, Report } from './types'
 import { warning } from './warning'
 
@@ -44,7 +44,7 @@ function phraseArg(): string | undefined {
 }
 
 /** Flags that take a value, so the value is never mistaken for a positional. */
-const VALUED = new Set(['session', 'cwd', 'transcript', 'path'])
+const VALUED = new Set(['session', 'cwd', 'transcript', 'path', 'injection'])
 
 /**
  * The first argument after the command that is neither a flag nor a flag's
@@ -231,20 +231,28 @@ function steeredBy(report: Report, events: Event[], facts: TranscriptFacts, home
  * What the session transcript says about the current run, or nothing.
  *
  * One transcript spans every run of a session, possibly in several roots, so
- * it is read by its tail, where the current run is, and cut at the run's
- * start. `events` are already this run's only, so their last start event is
+ * it is read backwards from its end, where the current run is, until a record
+ * older than the run's start shows the whole run has been read (readBack,
+ * capped at 128 MiB), and then cut at that start. `events` are already this run's only, so their last start event is
  * the boundary. Kanon's own `t` is truncated to the second, which puts it at
  * or before every transcript record of the same run, so no slack is needed.
  * No start event, or a missing or unreadable transcript, is no evidence about
  * this run and degrades to EMPTY_FACTS rather than costing the report.
  */
 function transcriptFacts(events: Event[]): TranscriptFacts {
+  const run = runTranscript(events)
+  return run === null ? EMPTY_FACTS : readTranscript(run.text, run.since)
+}
+
+/** The stretch of transcript that holds this run, and the run's start, or null when there is none to read. */
+function runTranscript(events: Event[]): { text: string; since: Date } | null {
   const path = transcriptOf(events)
   let since: Date | null = null
   for (const e of events) if (e.ev === 'start') since = new Date(e.t)
-  if (path === null || since === null || Number.isNaN(since.getTime())) return EMPTY_FACTS
-  const buf = readTail(path)
-  return buf === null ? EMPTY_FACTS : readTranscript(buf.toString('utf8'), since)
+  if (path === null || since === null || Number.isNaN(since.getTime())) return null
+  const floor = since
+  const buf = readBack(path, (head) => reachesBefore(head.toString('utf8'), floor))
+  return buf === null ? null : { text: buf.toString('utf8'), since }
 }
 
 /**
@@ -647,6 +655,91 @@ function buildModel(cwd: string): PaneModel {
   return paneModel(recorded, 'predicted', root, steered)
 }
 
+/** The `kanon show` contract version, which the pane checks like the model's. */
+const SHOW_VERSION = 1
+
+/** What `kanon show` prints: a title for the card and the text as lines, or why not. */
+interface Shown {
+  title: string
+  lines: string[]
+  /** True when the file is over the size ceiling and only its start was read. */
+  truncated: boolean
+}
+
+/**
+ * `kanon show`: the text of one thing the pane lists, so the person can read
+ * what an item says rather than only what Kanon judged about it. A file by
+ * `--path`, read to the same ceiling as everything else; or by `--injection`,
+ * the n-th injection of this run, read with the same run scoping as `model`,
+ * so the index the model gave a row names the same injection here.
+ *
+ * It only reads: main() dispatches it before the housekeeping every other
+ * command does. Every failure is one error object and exit 0, as with
+ * `model`, so the pane can show the reason.
+ */
+function runShow(cwd: string): void {
+  try {
+    console.log(JSON.stringify({ v: SHOW_VERSION, ...buildShow(cwd) }))
+  } catch (err) {
+    console.log(JSON.stringify({ v: SHOW_VERSION, error: err instanceof Error ? err.message : String(err) }))
+  }
+}
+
+function buildShow(cwd: string): Shown {
+  const file = arg('path')
+  if (file !== undefined && file !== '') return showFile(cwd, file)
+  const n = arg('injection')
+  if (n !== undefined) return showInjection(cwd, n)
+  throw new Error('usage: kanon show --cwd <path> (--path <file> | --session <id> --injection <n>)')
+}
+
+/**
+ * Text as lines the pane can draw: a tab is two spaces (stripping it would
+ * run the words either side together), a CRLF ending is a line ending, and
+ * control characters go, since the text is not Kanon's (see stripControl).
+ */
+function shownLines(text: string): string[] {
+  const lines = text.split(/\r?\n/)
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines.map((l) => stripControl(l.replace(/\t/g, '  ')))
+}
+
+/**
+ * The most `show` hands the pane. The pane wraps the whole text on every
+ * scroll, and at 4 MiB that froze it for over a second per wheel tick; an
+ * instruction file or memory worth reading in a pane is far smaller.
+ */
+const SHOW_MAX = 256 * 1024
+
+function showFile(cwd: string, file: string): Shown {
+  const root = sessionRoot(cwd)
+  const path = realPath(resolve(cwd, file))
+  const buf = readStart(path, SHOW_MAX + 1)
+  if (buf === null) throw new Error(`kanon could not read ${short(path, root)}`)
+  const truncated = buf.length > SHOW_MAX
+  return { title: short(path, root), lines: shownLines(buf.subarray(0, SHOW_MAX).toString('utf8')), truncated }
+}
+
+function showInjection(cwd: string, n: string): Shown {
+  if (!/^\d+$/.test(n)) throw new Error(`not an injection index: ${n}`)
+  const sessionArg = arg('session')
+  const session = sessionArg && sessionArg.length > 0 ? sessionArg : latestSessionFor(cwd)
+  if (session === undefined) throw new Error('no recorded session for this directory')
+  const run = runTranscript(runEvents(session))
+  const index = Number(n)
+  const texts = run === null ? [] : injectionTexts(run.text, run.since)
+  const text = texts[index]
+  if (run === null || text === undefined) throw new Error(`this run has no injection ${index}`)
+  const injection = readTranscript(run.text, run.since).injections[index]!
+  let plugin = 'unattributed'
+  try {
+    plugin = ownerOf(injection.command, pluginIndex(join(claudeHome(), 'plugins', 'cache')))
+  } catch {
+    // Attribution is a courtesy; see attribution.ts.
+  }
+  return { title: stripControl(`${plugin} ${injection.hookName}`), lines: shownLines(text), truncated: false }
+}
+
 function runBrief(session: string | undefined, cwd: string): void {
   // Unlike `alarm`, this always speaks: a session where Claude is told
   // nothing about what governs it is the failure this command exists to
@@ -944,6 +1037,9 @@ function main(): void {
   const command = process.argv[2] ?? 'report'
   const cwd = arg('cwd') ?? process.cwd()
 
+  // Before the housekeeping: `show` only ever reads.
+  if (command === 'show') return runShow(cwd)
+
   // Housekeeping, not reporting: it must never stop a report being
   // produced, so a failure here (a permissions error, a symlink where a
   // directory should be, anything) is swallowed rather than surfaced.
@@ -973,7 +1069,7 @@ function main(): void {
     if (phrase !== undefined) return runWhose(phrase, session, cwd)
   }
 
-  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn|model --json] [--session <id>] [--cwd <path>] [--path <file>] [--transcript <path>] [--hook] [--commit-state]')
+  console.log('usage: kanon [report|brief|alarm|notice|whose <phrase>|audit|ack <item-path>|warn|model --json|show] [--session <id>] [--cwd <path>] [--path <file>] [--injection <n>] [--transcript <path>] [--hook] [--commit-state]')
 }
 
 try {

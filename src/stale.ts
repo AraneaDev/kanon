@@ -1,6 +1,24 @@
+import pkg from '../package.json'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { extractNames, type Name } from './names'
 import type { Origin } from './types'
+
+/**
+ * The revision of the naming and staleness rules. Bump it whenever
+ * extractNames(), judge() or anything they call would now reach a different
+ * verdict: the steering cache is stamped with it, and a cache from other
+ * rules is discarded rather than trusted. An older development build once
+ * left five false `gone` verdicts in a cache that today's code would never
+ * produce, and every reader believed them because nothing said who wrote them.
+ */
+export const JUDGE_RULES = 1
+
+/**
+ * The identity of the code that reaches a verdict. The plugin version covers
+ * released builds; JUDGE_RULES covers development builds between releases,
+ * which all carry the same version.
+ */
+export const JUDGE = `${pkg.version}+${JUDGE_RULES}`
 
 export type Level = 'gone' | 'may-be-stale'
 export interface Verdict {

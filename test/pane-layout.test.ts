@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { layout, rowWidth, type LayoutInput, type Row, type Status, type View } from '../hooks/lib/layout'
+import { contentPage, contentScroll, injectionKey, layout, rowWidth, type LayoutInput, type Row, type Status, type View } from '../hooks/lib/layout'
 import type { PaneItem, PaneModel } from '../src/model'
 
 const text = (row: Row): string => row.segments.map(s => s.text).join('')
@@ -34,7 +34,7 @@ const small: PaneModel = {
     item({ path: 'node_modules/pkg/CLAUDE.md', real: '/home/user/app/node_modules/pkg/CLAUDE.md', origin: 'foreign', reason: 'nested_traversal' }),
   ],
   memory: [gone],
-  injected: [{ plugin: 'example', hookName: 'SessionStart', chars: 9100 }],
+  injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars: 9100, index: 0 }],
   skills: [],
   compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 160000, postTokens: 40000 }],
 }
@@ -62,7 +62,7 @@ describe('the list', () => {
       ' ',
       `── ◇ Injected by hooks · 1 ${dash(71)}──`,
       blank(100),
-      '    example  SessionStart  9.1k chars'.padEnd(100),
+      '    example  SessionStart  ×1  9.1k chars'.padEnd(100),
       ' ',
       `── ◇ Skills ${dash(83)} 0 ──`,
       ' ',
@@ -72,7 +72,7 @@ describe('the list', () => {
     ])
     expect(rows.slice(19, 39).every(r => text(r) === ' ')).toBe(true)
     expect(rows).toHaveLength(40)
-    expect(text(rows[39]!)).toBe(`${blank(91)}observed `)
+    expect(text(rows[39]!)).toBe(` tab: move  enter: open${blank(68)}observed `)
   })
 
   it('counts an injection under 1,000 characters as itself, and from 1,000 in thousands with one decimal', () => {
@@ -82,15 +82,26 @@ describe('the list', () => {
       [1000, '1.0k chars'],
       [9100, '9.1k chars'],
     ] as const) {
-      const rows = run({ model: { ...small, injected: [{ plugin: 'example', hookName: 'SessionStart', chars }] } })
-      expect(rows.map(text)).toContain(`    example  SessionStart  ${shown}`.padEnd(100))
+      const rows = run({ model: { ...small, injected: [{ plugin: 'example', hookName: 'SessionStart', count: 1, chars, index: 0 }] } })
+      expect(rows.map(text)).toContain(`    example  SessionStart  ×1  ${shown}`.padEnd(100))
     }
+  })
+
+  it('draws a collapsed injection as one row with its count, the count column as wide as the widest', () => {
+    const injected = [
+      { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 88, chars: 3520, index: 97 },
+      { plugin: 'example', hookName: 'SessionStart', count: 1, chars: 900, index: 0 },
+    ]
+    const rows = run({ model: { ...small, injected } }).map(text)
+    expect(rows).toContain(`── ◇ Injected by hooks · 2 ${dash(71)}──`)
+    expect(rows).toContain('    unattributed  UserPromptSubmit  ×88  3.5k chars'.padEnd(100))
+    expect(rows).toContain('    example       SessionStart      ×1   900 chars'.padEnd(100))
   })
 
   it('makes each file name a button that opens it, with no marker and no o outside the wide tier', () => {
     for (const columns of [60, 100]) {
       const rows = run({ columns })
-      const names = rows.flatMap(r => r.segments).filter(s => s.press?.kind === 'open' && s.hotkey === undefined)
+      const names = rows.flatMap(r => r.segments).filter(s => s.press?.kind === 'open' && 'real' in s.press && s.hotkey === undefined)
       expect(names.map(s => s.text)).toEqual(['CLAUDE.md', 'CLAUDE.md', 'notes.md'])
       expect(rows.flatMap(r => r.segments).some(s => s.hotkey !== undefined)).toBe(false)
       expect(rows.map(text).some(t => t.includes('›'))).toBe(false)
@@ -131,6 +142,19 @@ describe('the list', () => {
     const line = rows.map(text).find(t => t.includes('CLAUDE.md'))!
     expect(line).toContain('…/')
     expect(line.trimEnd().endsWith('CLAUDE.md')).toBe(true)
+  })
+
+  it('says in the list footer which keys work, at every tier: tab and enter, then o and a in the wide tier', () => {
+    expect(text(run({ columns: 60 }).at(-1)!)).toBe(` tab: move  enter: open${blank(28)}observed `)
+    expect(text(run({ columns: 100 }).at(-1)!)).toStartWith(' tab: move  enter: open ')
+    const wide = run({ columns: 140, model: { ...small, instructions: [small.instructions[0]!] } }).at(-1)!
+    expect(text(wide)).toStartWith(' tab: move  enter: open  o: open  a: acknowledge ')
+    // tab and enter are the engine's keys, drawn as text in a key's colours; o and a are the pane's buttons.
+    expect(wide.segments.filter(s => s.press !== undefined).map(s => s.hotkey)).toEqual(['o', 'a'])
+    expect(wide.segments.find(s => s.text === 'tab')?.color).toBe('suggestion')
+    // A list with nothing to open names no key for opening it; an injection alone can be opened.
+    expect(text(run({ model: { ...small, instructions: [], memory: [], injected: [] } }).at(-1)!)).not.toContain('enter')
+    expect(text(run({ model: { ...small, instructions: [], memory: [] } }).at(-1)!)).toContain('enter: open')
   })
 
   it('puts feedback in the footer and keeps its keys', () => {
@@ -180,7 +204,7 @@ describe('the detail view', () => {
     ])
     expect(rows).toHaveLength(20)
     const footer = rows.at(-1)!
-    expect(text(footer)).toBe(` a: acknowledge  b: back${blank(67)}observed `)
+    expect(text(footer)).toBe(` a: acknowledge  v: view  b: back${blank(58)}observed `)
     expect(footer.segments.find(s => s.hotkey === 'a')?.press).toEqual({ kind: 'ack', real: NOTES })
     expect(footer.segments.find(s => s.hotkey === 'b')?.press).toEqual({ kind: 'back' })
   })
@@ -190,7 +214,7 @@ describe('the detail view', () => {
     const rows = detail({ ...small, memory: [acked] }, NOTES).map(text)
     expect(rows.some(t => t.includes('a: acknowledge'))).toBe(false)
     expect(rows.some(t => t.includes('state    ✓ acknowledged, still holds'))).toBe(true)
-    expect(rows.at(-1)).toStartWith(' b: back')
+    expect(rows.at(-1)).toStartWith(' v: view  b: back')
   })
 
   it('offers no acknowledge for an item with no verdict', () => {
@@ -243,7 +267,7 @@ function big(n: number): PaneModel {
     ...small,
     instructions,
     memory,
-    injected: Array.from({ length: Math.min(n, 10) }, (_, i) => ({ plugin: `plugin-${i}`, hookName: 'SessionStart', chars: 1000 * i })),
+    injected: Array.from({ length: Math.min(n, 10) }, (_, i) => ({ plugin: `plugin-${i}`, hookName: 'SessionStart', count: 1, chars: 1000 * i, index: i })),
     skills: Array.from({ length: Math.min(n, 5) }, (_, i) => `example:skill-${i}`),
     compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'auto', preTokens: 1000, postTokens: 100 }],
   }
@@ -255,7 +279,7 @@ describe('the width sweep', () => {
     instructions: model.instructions.filter(i => i.origin === 'foreign' || i.verdict !== null).map(i => i.real),
     memory: model.memory.filter(i => i.verdict !== null).map(i => i.real),
   }
-  const views: View[] = [LIST, { kind: 'detail', real: '/home/user/.claude/projects/app/memory/gone.md' }]
+  const views: View[] = [LIST, { kind: 'detail', real: '/home/user/.claude/projects/app/memory/gone.md' }, { kind: 'detail', injection: injectionKey(model.injected[3]!) }]
   for (const columns of [40, 60, 80, 100, 130, 140, 200])
     for (const height of [8, 24, 60])
       for (const view of views)
@@ -324,7 +348,7 @@ describe('text Kanon did not write', () => {
         verdict: { level: 'gone', evidence: 'names \x1b[31mscripts/x.sh\r, which \x07is gone' },
       }),
     ],
-    injected: [{ plugin: 'ex\x1bample', hookName: 'Session\rStart', chars: 10 }],
+    injected: [{ plugin: 'ex\x1bample', hookName: 'Session\rStart', count: 1, chars: 10, index: 0 }],
     skills: ['sk\x1b[0mill'],
     compactions: [{ t: '2026-01-01T10:00:00.000Z', trigger: 'au\rto', preTokens: 1, postTokens: 1 }],
   }
@@ -350,5 +374,149 @@ describe('text Kanon did not write', () => {
   it('strips an error reason', () => {
     const rows = layout({ status: { kind: 'error', reason: 'boom\x1b[2K\rfine' }, view: LIST, columns: 60, rows: 10, feedback: null, frame: 0 })
     for (const r of rows) expect(CONTROL.test(text(r))).toBe(false)
+  })
+})
+
+describe('the injection detail', () => {
+  const prompt = { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 88, chars: 3520, index: 97 }
+  const once = { plugin: 'example', hookName: 'SessionStart', count: 1, chars: 900, index: 0 }
+  const model: PaneModel = { ...small, injected: [prompt, once] }
+
+  it('makes each injected row a button on its plugin name that opens its detail', () => {
+    const presses = run({ model }).flatMap(r => r.segments).filter(s => s.press?.kind === 'open' && 'injection' in s.press)
+    expect(presses.map(s => [s.text, s.press])).toEqual([
+      ['unattributed', { kind: 'open', injection: injectionKey(prompt) }],
+      ['example', { kind: 'open', injection: injectionKey(once) }],
+    ])
+  })
+
+  it('names the plugin, the hook, how often and how much, with v to read the most recent and b to go back', () => {
+    const rows = run({ model, view: { kind: 'detail', injection: injectionKey(prompt) }, rows: 12 })
+    expect(rows.slice(0, 7).map(text)).toEqual([
+      ' ',
+      `── ◇ UserPromptSubmit · injection ${dash(64)}──`,
+      blank(100),
+      '    plugin   unattributed'.padEnd(100),
+      '    hook     UserPromptSubmit'.padEnd(100),
+      '    injected 88 times, v shows the most recent'.padEnd(100),
+      '    size     3,520 chars in total'.padEnd(100),
+    ])
+    const footer = rows.at(-1)!
+    expect(text(footer)).toBe(` v: view  b: back${blank(74)}observed `)
+    expect(footer.segments.filter(s => s.press !== undefined).map(s => [s.hotkey, s.press])).toEqual([
+      ['v', { kind: 'view' }],
+      ['b', { kind: 'back' }],
+    ])
+    const single = run({ model, view: { kind: 'detail', injection: injectionKey(once) }, rows: 12 }).map(text)
+    expect(single).toContain('    injected once'.padEnd(100))
+    expect(single).toContain('    size     900 chars'.padEnd(100))
+  })
+
+  it('falls back to the list when the injection is no longer in the model', () => {
+    const rows = run({ model, view: { kind: 'detail', injection: injectionKey({ plugin: 'gone', hookName: 'Stop' }) } })
+    expect(rows.map(text).some(t => t.includes('◇ Instructions'))).toBe(true)
+  })
+})
+
+describe('the content view', () => {
+  const CLAUDE = '/home/user/app/CLAUDE.md'
+  const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`)
+  const content = { title: 'CLAUDE.md', lines, truncated: false }
+  const at = (scroll: number, over: Partial<LayoutInput> = {}) => run({ view: { kind: 'content', real: CLAUDE, scroll }, content, columns: 60, rows: 12, ...over })
+
+  it('draws the item as a card, the lines from scroll, where they are, and only the keys that apply', () => {
+    const rows = at(0)
+    expect(rows.map(text)).toEqual([
+      ' ',
+      `── ◇ CLAUDE.md · instruction ${dash(29)}──`,
+      blank(60),
+      ...lines.slice(0, 7).map(l => ` ${l}`),
+      ' lines 1–7 of 20',
+      ` n: next  b: back${blank(34)}observed `,
+    ])
+    expect(rows.at(-1)!.segments.filter(s => s.press !== undefined).map(s => [s.hotkey, s.press])).toEqual([
+      ['n', { kind: 'next' }],
+      ['b', { kind: 'back' }],
+    ])
+  })
+
+  it('pages within its bounds: p appears past the start, n goes at the end, and a scroll past the end is clamped', () => {
+    const middle = at(7).map(text)
+    expect(middle.slice(3, 11)).toEqual([...lines.slice(7, 14).map(l => ` ${l}`), ' lines 8–14 of 20'])
+    expect(middle.at(-1)).toStartWith(' n: next  p: previous  b: back ')
+    const end = at(100).map(text)
+    expect(end.slice(3, 11)).toEqual([...lines.slice(13, 20).map(l => ` ${l}`), ' lines 14–20 of 20'])
+    expect(end.at(-1)).toStartWith(' p: previous  b: back ')
+    expect(at(-5).map(text)[3]).toBe(' line 1')
+  })
+
+  it('agrees with the mod about the page and the bounds', () => {
+    expect(contentPage(60, 12)).toBe(7)
+    const input = { content, columns: 60, rows: 12 }
+    expect(contentScroll(input, 100)).toBe(13)
+    expect(contentScroll(input, -3)).toBe(0)
+    expect(contentScroll({ ...input, content: { loading: true } }, 5)).toBe(0)
+  })
+
+  it('wraps a long line within the width and counts the lines of the text, not the rows', () => {
+    const long = Array.from({ length: 26 }, (_, i) => `word${i}`).join(' ')
+    const rows = at(0, { content: { title: 'CLAUDE.md', lines: ['short', long, 'end'], truncated: true } })
+    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(60)
+    const shown = rows.map(text)
+    expect(shown[3]).toBe(' short')
+    expect(shown.slice(4, 7).join(' ').replace(/\s+/g, ' ').trim()).toBe(long)
+    expect(shown).toContain(' end')
+    expect(shown).toContain(' lines 1–3 of 3 · truncated')
+  })
+
+  it('cuts a word too long for a row without exceeding the width', () => {
+    const rows = at(0, { columns: 30, content: { title: 'x', lines: ['y'.repeat(100)], truncated: false } })
+    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(30)
+    expect(rows.map(text).filter(t => t.includes('yyy')).join('').replace(/ /g, '')).toBe('y'.repeat(100))
+  })
+
+  it('says it is reading, or why it could not, with only b in the footer', () => {
+    const loading = at(0, { content: { loading: true } }).map(text)
+    expect(loading.some(t => t.includes('Reading…'))).toBe(true)
+    expect(loading.at(-1)).toStartWith(' b: back ')
+    const failed = at(0, { content: { error: 'kanon could not read CLAUDE.md' } })
+    expect(failed.flatMap(r => r.segments).find(s => s.text.includes('could not read'))?.dim).toBe(true)
+    expect(text(failed.at(-1)!)).toStartWith(' b: back ')
+  })
+
+  it('opens an injection under its hook name', () => {
+    const prompt = { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 2, chars: 80, index: 3 }
+    const rows = run({ model: { ...small, injected: [prompt] }, view: { kind: 'content', injection: injectionKey(prompt), scroll: 0 }, content: { title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false }, columns: 60, rows: 12 }).map(text)
+    expect(rows[1]).toStartWith('── ◇ UserPromptSubmit · injection ')
+    expect(rows).toContain(' Remember the house style.')
+    expect(rows).toContain(' line 1 of 1')
+  })
+
+  it('strips control characters from the lines', () => {
+    const rows = at(0, { content: { title: 'x', lines: ['bad\x1b[31m\rline'], truncated: false } })
+    for (const r of rows) expect(/[\u0000-\u001F\u007F-\u009F]/.test(text(r))).toBe(false)
+  })
+
+  for (const columns of [20, 40, 60, 80, 100, 130, 140, 200])
+    for (const height of [1, 2, 4, 8, 24, 60])
+      it(`holds the width and height at ${columns}x${height}`, () => {
+        const many = { title: 'CLAUDE.md', lines: Array.from({ length: 300 }, (_, i) => `${'long words here '.repeat(i % 12)}${i}`), truncated: true }
+        for (const scroll of [0, 50, 10_000]) {
+          const rows = run({ view: { kind: 'content', real: CLAUDE, scroll }, content: many, columns, rows: height })
+          for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(columns)
+          expect(rows.length).toBeLessThanOrEqual(height)
+          expect(rows.at(-1)!.key).toBe('footer')
+          expect(text(rows.at(-1)!)).toContain('b: back')
+        }
+      })
+})
+
+describe('v in the detail view', () => {
+  it('is offered for an instruction file and a memory, beside a and b', () => {
+    const memory = run({ view: { kind: 'detail', real: NOTES }, rows: 20 }).at(-1)!
+    expect(text(memory)).toStartWith(' a: acknowledge  v: view  b: back ')
+    expect(memory.segments.find(s => s.hotkey === 'v')?.press).toEqual({ kind: 'view' })
+    const file = run({ view: { kind: 'detail', real: '/home/user/app/CLAUDE.md' }, rows: 20 }).at(-1)!
+    expect(text(file)).toStartWith(' v: view  b: back ')
   })
 })

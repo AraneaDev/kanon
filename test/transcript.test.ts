@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { EMPTY_FACTS, readTranscript } from '../src/transcript'
+import { EMPTY_FACTS, readTranscript, reachesBefore } from '../src/transcript'
 
 /**
  * The fixture is structurally real but its values are synthetic, because this
@@ -111,4 +111,14 @@ test('since keeps only records at or after it, and drops records with no timesta
     '/home/user/example/later.md',
   ])
   expect(readTranscript(text).instructions).toHaveLength(4)
+})
+
+test('reachesBefore asks whether the first record with a timestamp is older than since', () => {
+  const since = new Date('2026-10-24T00:00:00.000Z')
+  const rec = (timestamp?: string) => JSON.stringify(timestamp === undefined ? { type: 'x' } : { type: 'x', timestamp })
+  // A fragment and a record with no timestamp are passed over to the first one that has one.
+  expect(reachesBefore(['{"partial', rec(), rec('2026-10-23T23:59:59.000Z'), rec('2026-10-24T01:00:00.000Z')].join('\n'), since)).toBe(true)
+  expect(reachesBefore([rec('2026-10-24T00:00:00.000Z'), rec('2026-10-23T00:00:00.000Z')].join('\n'), since)).toBe(false)
+  expect(reachesBefore([rec(), 'not json'].join('\n'), since)).toBe(false)
+  expect(reachesBefore('', since)).toBe(false)
 })

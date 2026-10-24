@@ -69,6 +69,30 @@ function num(v: unknown): number {
 }
 
 /**
+ * Whether `text`, a stretch of transcript, reaches back before `since`: its
+ * first record with a parseable timestamp is older. Records are appended in
+ * time order, so that record is the oldest in the stretch, and once it
+ * predates the run everything the run wrote lies after it. A fragment or a
+ * record with no timestamp is passed over; a stretch with none to judge by
+ * does not reach back, so reading goes on.
+ */
+export function reachesBefore(text: string, since: Date): boolean {
+  const floor = since.getTime()
+  for (const line of text.split('\n')) {
+    const clean = cleanLine(line)
+    if (!clean) continue
+    let at: number
+    try {
+      at = Date.parse(str(obj(JSON.parse(clean))?.timestamp) ?? '')
+    } catch {
+      continue
+    }
+    if (Number.isFinite(at)) return at < floor
+  }
+  return false
+}
+
+/**
  * `since` scopes the facts to one run. A transcript outlives a run: resume,
  * clear and compact all append to the same file, from whatever directory the
  * session is in by then, so without it an earlier run's loads in another root
@@ -76,6 +100,21 @@ function num(v: unknown): number {
  * cannot be placed on either side of the boundary and is dropped.
  */
 export function readTranscript(text: string, since: Date | null = null): TranscriptFacts {
+  return scan(text, since).facts
+}
+
+/**
+ * The text of each injection of the run, in the order and at the positions
+ * `readTranscript().injections` lists them, so the index the pane shows for
+ * an injection is the index `kanon show --injection` reads back. Kept out of
+ * the facts: every report would otherwise carry every injection's text, and
+ * only `show` ever needs one.
+ */
+export function injectionTexts(text: string, since: Date | null = null): string[] {
+  return scan(text, since).pending.map((p) => p.text)
+}
+
+function scan(text: string, since: Date | null): { facts: TranscriptFacts; pending: Pending[] } {
   const floor = since === null ? null : since.getTime()
   const seen = new Set<string>()
   const pending: Pending[] = []
@@ -160,5 +199,5 @@ export function readTranscript(text: string, since: Date | null = null): Transcr
     chars: p.text.length,
     command: commandFor(p, runs),
   }))
-  return facts
+  return { facts, pending }
 }

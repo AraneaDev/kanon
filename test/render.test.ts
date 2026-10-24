@@ -435,7 +435,7 @@ test('MEMORY lists every memory that steers the session, and no instruction file
   expect(lines.length).toBe(at + 3)
 })
 
-test('INJECTED totals the characters per plugin and hook, in order of first sighting', () => {
+test('INJECTED collapses each plugin and hook to one row with its count and total, the most characters first', () => {
   const r = base()
   r.injections = [
     { hookName: 'SessionStart', chars: 5000, command: 'a', plugin: 'superpowers' },
@@ -447,9 +447,9 @@ test('INJECTED totals the characters per plugin and hook, in order of first sigh
   const at = lines.indexOf('INJECTED')
   expect(lines.slice(at, at + 4)).toEqual([
     'INJECTED',
-    '  superpowers     SessionStart          8.6k chars',
-    '  unattributed    PreToolUse:Read       0.4k chars',
-    '  kanon           SessionStart          1.2k chars',
+    '  superpowers     SessionStart          ×2   8.6k chars',
+    '  kanon           SessionStart          ×1   1.2k chars',
+    '  unattributed    PreToolUse:Read       ×1   0.4k chars',
   ])
 })
 

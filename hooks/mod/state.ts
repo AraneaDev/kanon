@@ -7,7 +7,7 @@
  * and reset on a hot reload, which is what the pane wants. It never
  * remembers being open, so a fresh load starting from "closed" is correct.
  */
-import type { Status, View } from '../lib/layout'
+import type { Content, Status, View } from '../lib/layout'
 import type { Port, Timer } from './port'
 
 /** The pane's id, and the `requestId` its render hook matches. */
@@ -22,6 +22,16 @@ export const mod = {
   view: { kind: 'list' } as View,
   feedback: null as string | null,
   frame: 0,
+  /** The content view's text (`kanon show`'s answer), or null outside it. */
+  content: null as Content | null,
+  /**
+   * Bumped whenever the text being read is let go (back, close, another
+   * view): a `show` that lands under another number belongs to text nobody is
+   * reading any more, and is dropped.
+   */
+  reading: 0,
+  /** The pane's size at its last render: what `n`, `p` and the wheel page and clamp by. */
+  drawn: { columns: 60, rows: 40 },
   /** Whether the pane is open, as this module last saw it opened or closed. */
   open: false,
   /**
@@ -98,6 +108,8 @@ export function paneOpened(io: Port): void {
   mod.open = true
   mod.view = { kind: 'list' }
   mod.feedback = null
+  mod.content = null
+  mod.reading += 1
   setStatus(io, { kind: 'loading' })
 }
 
@@ -111,5 +123,7 @@ export function paneClosed(): void {
   mod.feedback = null
   mod.status = { kind: 'loading' }
   mod.view = { kind: 'list' }
+  mod.content = null
+  mod.reading += 1
   mod.refresh.again = false
 }

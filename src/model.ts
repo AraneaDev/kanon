@@ -17,6 +17,40 @@ export interface PaneItem {
   acknowledged: boolean
 }
 
+/**
+ * Every injection of one plugin and hook event, collapsed: how many there
+ * were, their characters together, and `index`, the position of the most
+ * recent one in this run's injections, which is what `kanon show
+ * --injection` takes.
+ */
+export interface InjectedGroup {
+  plugin: string
+  hookName: string
+  count: number
+  chars: number
+  index: number
+}
+
+/**
+ * One row per plugin and hook event, the most characters first, ties in
+ * order of first sighting. A UserPromptSubmit hook injects on every prompt,
+ * and a long session listed each one: 96 rows that were nearly all the same
+ * 40 characters, which buried the one injection worth reading. The report's
+ * INJECTED section and the pane both group through here, so they cannot
+ * count differently.
+ */
+export function groupInjections(injections: ReadonlyArray<{ plugin: string; hookName: string; chars: number }>): InjectedGroup[] {
+  const groups = new Map<string, InjectedGroup>()
+  injections.forEach((i, index) => {
+    const key = JSON.stringify([i.plugin, i.hookName])
+    const g = groups.get(key)
+    if (g === undefined) groups.set(key, { plugin: i.plugin, hookName: i.hookName, count: 1, chars: i.chars, index })
+    else Object.assign(g, { count: g.count + 1, chars: g.chars + i.chars, index })
+  })
+  // Array.prototype.sort is stable, so equal totals keep first-sighting order.
+  return [...groups.values()].sort((a, b) => b.chars - a.chars)
+}
+
 export interface PaneModel {
   v: typeof MODEL_VERSION
   root: string
@@ -25,7 +59,7 @@ export interface PaneModel {
   /** Loaded (observed) files first, then every other judged item that is not a memory. */
   instructions: PaneItem[]
   memory: PaneItem[]
-  injected: Array<{ plugin: string; hookName: string; chars: number }>
+  injected: InjectedGroup[]
   skills: string[]
   compactions: Array<{ t: string; trigger: string; preTokens: number; postTokens: number }>
 }
@@ -78,7 +112,7 @@ export function paneModel(report: Report | null, basis: PaneModel['basis'], root
     ruleset: report?.ruleset ?? RULESET,
     instructions,
     memory,
-    injected: (report?.injections ?? []).map((i) => ({ plugin: i.plugin, hookName: i.hookName, chars: i.chars })),
+    injected: groupInjections(report?.injections ?? []),
     skills: (report?.skills ?? []).map((s) => s.name),
     compactions: (report?.compactions ?? []).map((c) => ({ t: c.t, trigger: c.trigger, preTokens: c.preTokens, postTokens: c.postTokens })),
   }

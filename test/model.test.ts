@@ -51,13 +51,32 @@ test('paneModel maps a report into the pane contract', () => {
       { path: 'release-flow.md', real: memory, kind: 'memory', origin: 'user', reason: null, verdict: { level: 'gone', evidence: 'names `scripts/release.sh`, which no longer exists' }, acknowledged: false },
     ],
     injected: [
-      { plugin: 'example', hookName: 'SessionStart:startup', chars: 120 },
-      { plugin: '?', hookName: 'UserPromptSubmit', chars: 30 },
+      { plugin: 'example', hookName: 'SessionStart:startup', count: 1, chars: 120, index: 0 },
+      { plugin: '?', hookName: 'UserPromptSubmit', count: 1, chars: 30, index: 1 },
     ],
     skills: ['example:skill'],
     compactions: [{ t: '2026-10-24T10:00:00Z', trigger: 'auto', preTokens: 900, postTokens: 100 }],
   })
   expect(m.instructions[0]!.path).toBe(short(foreign, root))
+})
+
+test('injections collapse to one row per plugin and hook, the most characters first, each naming its most recent', () => {
+  const { root, report } = fixture()
+  report.injections = [
+    { hookName: 'SessionStart', chars: 120, command: 'x', plugin: 'a' },
+    { hookName: 'UserPromptSubmit', chars: 30, command: null, plugin: 'unattributed' },
+    { hookName: 'UserPromptSubmit', chars: 40, command: null, plugin: 'unattributed' },
+    { hookName: 'SessionStart', chars: 5, command: 'x', plugin: 'a' },
+    { hookName: 'UserPromptSubmit', chars: 500, command: 'y', plugin: 'b' },
+    // Same hook, another plugin: its own row.
+    { hookName: 'SessionStart', chars: 1, command: null, plugin: 'unattributed' },
+  ]
+  expect(paneModel(report, 'observed', root, report.steered).injected).toEqual([
+    { plugin: 'b', hookName: 'UserPromptSubmit', count: 1, chars: 500, index: 4 },
+    { plugin: 'a', hookName: 'SessionStart', count: 2, chars: 125, index: 3 },
+    { plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 2, chars: 70, index: 2 },
+    { plugin: 'unattributed', hookName: 'SessionStart', count: 1, chars: 1, index: 5 },
+  ])
 })
 
 test('a loaded file the judge did not reach is still listed, unjudged', () => {

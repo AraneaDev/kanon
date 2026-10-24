@@ -24,6 +24,9 @@ const memoryItem = (real: string, path: string, gone: boolean) => ({
   acknowledged: false,
 })
 
+/** What `kanon show` prints by default: a hundred numbered lines. */
+const TEXT = JSON.stringify({ v: 1, title: 'notes.md', lines: Array.from({ length: 100 }, (_, i) => `line ${i + 1}`), truncated: false })
+
 const modelJson = (memory: object[] = [memoryItem(NOTES, '~/.claude/projects/-home-user-project/memory/notes.md', true)]) =>
   JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory, injected: [], skills: [], compactions: [] })
 
@@ -61,6 +64,8 @@ function world(
     report?: Run
     /** Whether `ui.panes` is refused right now (no session bound yet, as after a hot reload). */
     panesRefused?: () => boolean
+    /** What `kanon show` answers. */
+    show?: () => Run | Promise<Run>
   } = {},
 ) {
   const clock = mock.clock(on)
@@ -77,6 +82,7 @@ function world(
   on('session.surfaces', () => ({ value: (opts.surfaces ?? ['terminal']) as never }))
   on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? HOME : undefined }))
   on('ui.log', () => ({ value: undefined }))
+  on('ui.scroll', () => ({}))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('command.register', (_$, e) => {
     if (opts.refuseRegister?.() === true) throw new Error('$.command.register is not available in this mode: no session is bound in this process')
@@ -107,6 +113,7 @@ function world(
     const sub = argv[2]
     if (sub === 'report') return { value: opts.report ?? ran('kanon report\n  LOADED  CLAUDE.md\n') }
     if (sub === 'ack') return { value: ran(`kanon: acknowledged ${argv[argv.length - 1]}\n`) }
+    if (sub === 'show') return { value: await (opts.show ?? (() => ran(TEXT)))() }
     expect(sub, `a command the mod should not run: ${argv.join(' ')}`).toBe('model')
     inFlight++
     mostInFlight = Math.max(mostInFlight, inFlight)
@@ -117,7 +124,8 @@ function world(
     }
   })
   const modelRuns = () => runs.filter(r => r[2] === 'model')
-  return { clock, registered, runs, modelRuns, opened, closed, panes, mostInFlight: () => mostInFlight }
+  const showRuns = () => runs.filter(r => r[2] === 'show')
+  return { clock, registered, runs, modelRuns, showRuns, opened, closed, panes, mostInFlight: () => mostInFlight }
 }
 
 async function slash($: Engine) {
@@ -427,4 +435,112 @@ test('a report that crashed says why instead of printing an empty fence', async 
   expect(out.text).toContain('Module not found')
   expect(out.text).not.toContain('```')
   expect(out.text).not.toContain('\x1b')
+})
+
+// ------------------------------------------------------- reading an item
+
+/** Opens the pane, presses the file name, then `v`: the text of the memory, read. */
+async function openText($: Engine, w: ReturnType<typeof world>) {
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  const name = await ui.find({ type: 'Button', text: /notes\.md|it's a/ })
+  await ui.press({ key: name!.key! })
+  const v = await ui.find({ type: 'Button', text: 'v: view' })
+  expect(v).toBeDefined()
+  await ui.press({ key: v!.key! })
+  await w.clock.settle()
+  return ui
+}
+
+const SCROLL = { component: 'Pane', requestId: PANE, offset: 0, bodyRows: 30, contentRows: 30, origin: { kind: 'person' }, pointer: { row: 5, column: 5 } } as const
+
+test('v runs kanon show with the realpath as one argument and draws the text, and n and p page it by the visible height', async ($, on) => {
+  const w = world(on, { model: () => ran(modelJson([memoryItem(ODD, "it's a $(x).md", true)])) })
+  const ui = await openText($, w)
+  expect(w.showRuns()).toHaveLength(1)
+  expect(w.showRuns()[0]!.slice(2)).toEqual(['show', '--cwd', ROOT, '--path', ODD])
+  expect(w.showRuns()[0]!).toHaveLength(7)
+  // 30 rows: the footer, the gap, title and the row under it, the position line: 25 lines of text.
+  expect(await ui.find({ type: 'Text', text: /lines 1–25 of 100/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: 'p: previous' })).toBeUndefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'n: next' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /lines 26–50 of 100/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'n: next' }))!.key! })
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'n: next' }))!.key! })
+  // The last page is full: it ends at the last line, and there is no n past it.
+  expect(await ui.find({ type: 'Text', text: /lines 76–100 of 100/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: 'n: next' })).toBeUndefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'p: previous' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /lines 51–75 of 100/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an injected row opens its detail, and v shows its most recent injection by the index the model gave it', async ($, on) => {
+  const injected = [{ plugin: 'unattributed', hookName: 'UserPromptSubmit', count: 3, chars: 120, index: 7 }]
+  const model = JSON.stringify({ v: 1, root: ROOT, basis: 'observed', ruleset: 'r1', instructions: [], memory: [], injected, skills: [], compactions: [] })
+  const w = world(on, { model: () => ran(model), show: () => ran(JSON.stringify({ v: 1, title: 'unattributed UserPromptSubmit', lines: ['Remember the house style.'], truncated: false })) })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'unattributed' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /most recent/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'v: view' }))!.key! })
+  await w.clock.settle()
+  expect(w.showRuns().map(r => r.slice(2))).toEqual([['show', '--cwd', ROOT, '--session', SESSION, '--injection', '7']])
+  expect(await ui.find({ type: 'Text', text: /Remember the house style\./ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the wheel over the text scrolls it, held inside it', async ($, on) => {
+  const w = world(on)
+  const ui = await openText($, w)
+  await $.ui.scroll({ ...SCROLL, by: 3 })
+  expect(await ui.find({ type: 'Text', text: /lines 4–28 of 100/ })).toBeDefined()
+  await $.ui.scroll({ ...SCROLL, by: -10 })
+  expect(await ui.find({ type: 'Text', text: /lines 1–25 of 100/ })).toBeDefined()
+  await $.ui.scroll({ ...SCROLL, by: 500 })
+  expect(await ui.find({ type: 'Text', text: /lines 76–100 of 100/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('b steps back one level at a time: the text to the detail, the detail to the list', async ($, on) => {
+  const w = world(on)
+  const ui = await openText($, w)
+  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'b: back' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'b: back' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', text: 'b: back' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('text that arrives after the person went back is not shown, and a closed pane forgets the text', async ($, on) => {
+  const w = world(on, { show: () => w.clock.sleep(3_000).then(() => ran(TEXT)) })
+  await $.session.start(START)
+  await slash($)
+  await w.clock.settle()
+  const ui = await mountPane($)
+  await ui.press({ key: (await ui.find({ type: 'Button', text: /notes\.md/ }))!.key! })
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'v: view' }))!.key! })
+  expect(await ui.find({ type: 'Text', text: /Reading…/ })).toBeDefined()
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'b: back' }))!.key! })
+  await w.clock.advance(3_000)
+  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /evidence/ })).toBeDefined()
+  // Into the text again, then the pane closes and opens: it starts from the list.
+  await ui.press({ key: (await ui.find({ type: 'Button', text: 'v: view' }))!.key! })
+  await w.clock.advance(3_000)
+  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeDefined()
+  await slash($)
+  await slash($)
+  await w.clock.settle()
+  expect(await ui.find({ type: 'Text', text: /lines 1–25/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', text: /notes\.md/ })).toBeDefined()
+  await ui.unmount()
 })
