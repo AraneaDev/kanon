@@ -72,10 +72,10 @@ export const register: Register = on => {
     return closed
   })
 
-  // The person's wheel over a detail scrolls its text (the details stay put); over the list the pane scrolls as it would.
+  // The person's wheel over a detail scrolls its text (the details stay put), over a card on its own its rows; over the list the pane scrolls as it would.
   // The literal is PANE, as below.
   on('ui.scroll', { component: 'Pane', requestId: 'kanon' }, async ($, e, next) => {
-    if (e.origin.kind !== 'person' || mod.view.kind !== 'detail') return next(e)
+    if (e.origin.kind !== 'person' || mod.view.kind === 'list') return next(e)
     // The layout never draws more rows than the pane has, so there is no page behind the text to hand the wheel to.
     scrollContent(portOf($), (mod.view.scroll ?? 0) + e.by)
     return {}

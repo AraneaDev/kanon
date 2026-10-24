@@ -10,13 +10,14 @@ import type { Tone } from './palette'
 /**
  * What pressing a segment does: open a file in place (an item, a skill or an
  * agent memory, by its realpath) or a hook (by its key), go back to the list,
- * acknowledge an item (the record `kanon ack` writes), retry a failed read,
- * or page the text of what is open. The mod turns a segment carrying one into
+ * open one card of the list on its own (by its key), acknowledge an item
+ * (the record `kanon ack` writes), retry a failed read, or page what is open. The mod turns a segment carrying one into
  * a Button.
  */
 export type Action =
   | { kind: 'open'; real: string }
   | { kind: 'open'; hook: string }
+  | { kind: 'card'; group: string }
   | { kind: 'back' }
   | { kind: 'ack'; real: string }
   | { kind: 'retry' }

@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
-[![Tests](https://img.shields.io/badge/tests-909%20passing-2b8a3e)](test/)
+[![Tests](https://img.shields.io/badge/tests-929%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
 [![Last commit](https://img.shields.io/github/last-commit/AraneaDev/kanon?label=last%20commit)](https://github.com/AraneaDev/kanon/commits/main)
@@ -87,7 +87,9 @@ findings:
 | `✓` | acknowledged |
 
 Each file name is a button that opens it in place, and so are a hook's event and a skill's name.
-`tab` moves between them and `enter` opens the one you are on; the footer always
+A card too long for its share of the pane ends in `n more ↓`, which opens that card on its own, full
+height: the wheel and `n` and `p` scroll its rows, and `b` goes back. A file opened from there comes
+back to the card on `b`, where you left it. `tab` moves between the buttons and `enter` opens the one you are on; the footer always
 lists the keys that work. An opened item shows its details at the top (path, origin, reason, verdict,
 evidence and state; for a hook where it comes from, its command, the file it is set in, and what it
 injected) and its text under them: the file itself, or the most recent of the hook's injections.

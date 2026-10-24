@@ -27,7 +27,7 @@
  */
 import type { PaneAgentMemory, PaneHook, PaneItem, PaneModel, PaneSkill } from '../../src/model'
 import { stripControl } from './control'
-import { besideRows, cardInner, cardRows, FRAME, gridColumns, moreRows, type Section } from './cards'
+import { besideRows, cardInner, cardRows, FRAME, gridColumns, type Section } from './cards'
 import { MARK, mark, type Mark } from './marks'
 import { ACCENT, HEADING } from './palette'
 import { button, clip, dimRow, segmentsWidth, spread, walkedRow } from './rows'
@@ -49,7 +49,15 @@ export type Target = { real: string } | { hook: string }
  * item and then had to find a second key to see what it says: opening it now
  * shows both.
  */
-export type View = { kind: 'list' } | ({ kind: 'detail'; scroll?: number } & Target)
+export type View = { kind: 'list' } | CardView | ({ kind: 'detail'; scroll?: number; from?: CardView } & Target)
+/**
+ * One card of the list on its own, full height, its rows from `scroll`.
+ * Live, the wheel did nothing over the list and `n more ↓` could not be
+ * pressed, so a card longer than its share of the pane could never show the
+ * rest. Its `n more ↓` opens it; `b` goes back to the list. A file opened
+ * from it carries it as `from`, so `b` there comes back to the card.
+ */
+export type CardView = { kind: 'card'; group: string; scroll?: number }
 /**
  * An item's text as `kanon show` printed it, independent of the model's
  * status: the lines, still reading, or why it could not be read.
@@ -142,6 +150,7 @@ export function layout(input: LayoutInput): Row[] {
   // The footer's right edge: the basis, or how to give the pane the keyboard.
   const note = input.focused === false ? FOCUS_HINT : model.basis
   const content = input.content ?? { loading: true }
+  if (input.view.kind === 'card') return cardView(model, input.view, width, height, input.feedback, note)
   const opened = openedOf(model, input.view)
   if (opened !== null) {
     const shownContent = opened.kind === 'hook' && opened.hook.injected === null ? (opened.hook.shared ? SHARED : NOTHING_ADDED) : content
@@ -194,6 +203,8 @@ export function textTarget(input: Pick<LayoutInput, 'status' | 'view' | 'columns
   const model = shown(input.status.model)
   const opened = openedOf(model, input.view)
   if (opened !== null) return textOf(opened)
+  // A card on its own previews nothing: it is all the pane shows.
+  if (input.view.kind === 'card') return null
   if (tierOf(Math.max(0, Math.floor(input.columns))) !== 'wide') return null
   const previewed = previewOf(model)
   return previewed === null ? null : { real: previewed.real }
@@ -548,8 +559,14 @@ function flagNote(items: PaneItem[], terse: boolean): Segment[] {
 
 function sectionOf(g: Group, inner: number, limit: number, marked: string | null): Section {
   if (g.length === 0) return { key: g.key, title: g.title, note: [{ text: '0', color: HEADING }], body: [], empty: '0' }
-  const body = limit === 0 ? [] : [...g.rows(inner, limit, marked), ...moreRows(`${g.key}-more`, { start: 0, end: limit }, g.length, inner)]
+  const body = limit === 0 ? [] : [...g.rows(inner, limit, marked), ...moreRow(g, limit, inner)]
   return { key: g.key, title: g.title, subtitle: grouped(g.length), note: g.note, body }
+}
+
+/** `n more ↓` under a card cut short, a button that opens the card on its own; nothing when it is whole. */
+function moreRow(g: Group, limit: number, inner: number): Row[] {
+  if (limit >= g.length) return []
+  return [{ key: `${g.key}-more`, segments: clip([{ text: '   ' }, button({ kind: 'card', group: g.key }, `${grouped(g.length - limit)} more ↓`, undefined, { dim: true })], inner) }]
 }
 
 /** A card's rows at a density: the blank row before it and the one under its title only where the density keeps them. */
@@ -797,6 +814,49 @@ function detailView(opened: Opened, scroll: number, content: Content, width: num
   return pinned(body.rows, budget, footer)
 }
 
+// ------------------------------------------------------------ a card alone
+
+/**
+ * How a card shown on its own spends `budget` rows: its spacing, the rows
+ * left for its list, and how many of them are rows of the list (`page`, what
+ * `n` and `p` move by) when it needs a position line under it. Null when the
+ * model has no such card, or it is empty: the list shows instead.
+ */
+function cardGeometry(model: ShownModel, key: string, width: number, budget: number) {
+  const tier = tierOf(width)
+  const inner = cardInner(width, tier)
+  const g = groupsOf(model, tier, inner).find(x => x.key === key)
+  if (g === undefined || g.length === 0) return null
+  const head = (d: Density) => (d.gap ? 1 : 0) + 1 + (d.under ? 1 : 0)
+  const density = DENSITIES.find(d => budget - head(d) >= Math.min(g.length, TEXT_MIN)) ?? DENSITIES[DENSITIES.length - 1]!
+  const room = Math.max(0, budget - head(density))
+  const positioned = g.length > room && room >= 2
+  const page = g.length > room ? (positioned ? room - 1 : room) : g.length
+  return { g, tier, inner, density, page, positioned, total: g.length }
+}
+
+/** A card on its own: its rows from `scroll`, where they are when cut, then n and p where they move it, the list's keys and b. */
+function cardView(model: ShownModel, view: CardView, width: number, height: number, feedback: string | null, note: string): Row[] {
+  const budget = height - 1
+  const geo = cardGeometry(model, view.group, width, Math.max(0, budget))
+  if (geo === null) return listView(model, { loading: true }, width, height, feedback, note)
+  const start = clampScroll(view.scroll ?? 0, geo.total, geo.page)
+  const shown = geo.page <= 0 ? [] : geo.g.rows(geo.inner, geo.total, null).slice(start, start + geo.page)
+  const at = geo.positioned && shown.length > 0 ? [dimRow('card-at', `   ${start + 1 === start + shown.length ? `row ${start + 1}` : `rows ${start + 1}–${start + shown.length}`} of ${grouped(geo.total)}`, geo.inner)] : []
+  const section: Section = { key: geo.g.key, title: geo.g.title, subtitle: grouped(geo.total), note: geo.g.note, body: [...shown, ...at] }
+  const next = start + geo.page < geo.total
+  const previous = start > 0
+  const keys: Segment[][] = [
+    ...(next ? [[button({ kind: 'next' }, 'next', 'n')]] : []),
+    ...(previous ? [[button({ kind: 'previous' }, 'previous', 'p')]] : []),
+    ...LIST_KEYS,
+    [backKey()],
+  ]
+  const footer = footerRow(keys, note, feedback, width)
+  if (height === 1) return [footer]
+  return pinned(cardLines(section, width, geo.tier, geo.density).slice(0, budget), budget, footer)
+}
+
 /** The input the text's paging depends on: what the mod keeps, at the size it last drew. */
 type PagingInput = Pick<LayoutInput, 'status' | 'view' | 'columns' | 'rows'> & { content: Content | null }
 
@@ -809,8 +869,17 @@ function pagingOf(input: PagingInput): ReturnType<typeof detailGeometry> | null 
   return detailGeometry(opened, input.content ?? { loading: true }, width, tierOf(width), Math.max(0, heightOf(width, input.rows) - 1))
 }
 
-/** The rows of text an open detail shows at once at the drawn size: what `n` and `p` page by. */
+/** A card shown on its own at the drawn size, as cardView lays it out; null for any other view. */
+function cardPagingOf(input: PagingInput): ReturnType<typeof cardGeometry> {
+  if (input.status.kind !== 'ready' || input.view.kind !== 'card') return null
+  const width = Math.max(0, Math.floor(input.columns))
+  return cardGeometry(shown(input.status.model), input.view.group, width, Math.max(0, heightOf(width, input.rows) - 1))
+}
+
+/** The rows an open detail's text, or a card on its own, shows at once at the drawn size: what `n` and `p` page by. */
 export function contentPage(input: PagingInput): number {
+  const card = cardPagingOf(input)
+  if (card !== null) return Math.max(1, card.page)
   return Math.max(1, pagingOf(input)?.page ?? 1)
 }
 
@@ -820,6 +889,8 @@ export function contentPage(input: PagingInput): number {
  * moves at once.
  */
 export function contentScroll(input: PagingInput, scroll: number): number {
+  const card = cardPagingOf(input)
+  if (card !== null) return clampScroll(scroll, card.total, card.page)
   const g = pagingOf(input)
   return g === null || g.text.kind !== 'lines' ? 0 : clampScroll(scroll, g.total, g.page)
 }
