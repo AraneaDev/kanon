@@ -11,16 +11,17 @@
  * test/pane-layout.test.ts checks both: no row is wider than `columns` and
  * there are never more rows than `rows`, the footer last.
  *
- * Height is shared the way Knossos's fitBlocks shares it, simplified: every
- * card shows at its fewest rows (a card with a flagged item never fewer than
- * one item, so a flag is never the first thing dropped), spacing goes before
- * a card does, then flagged cards grow to show all their flags, then every
- * list grows a row at a time in turn. A cut list ends `n more ↓`.
+ * Height is shared the way Knossos's fitBlocks shares it, simplified: what
+ * gives way first is spacing, then cards without a flag, then flags beyond
+ * each card's first, then flagged cards, so a flag is never the first thing
+ * dropped; what is left grows every list a row at a time in turn. A cut list
+ * ends `n more ↓`. Only the wide tier has a marker: it marks the item the
+ * right half previews. Narrower, each file name is its own open button.
  */
 import type { PaneItem, PaneModel } from '../../src/model'
 import { besideRows, cardInner, cardRows, gridColumns, moreRows, type Section } from './cards'
 import { MARK, mark, type Mark } from './marks'
-import { HEADING } from './palette'
+import { ACCENT, HEADING } from './palette'
 import { button, clip, dimRow, segmentsWidth, spread, walkedRow } from './rows'
 import { cells, fit, fitStart, grouped, padEnd, pathParts } from './text'
 import { tierOf, type Tier } from './tiers'
@@ -40,6 +41,8 @@ export interface LayoutInput {
   rows: number
   /** A short note the footer carries for a moment (`✓ acknowledged`), or null. */
   feedback: string | null
+  /** The loading spinner's frame; the mod advances it on a clock while loading, so the layout needs none. */
+  frame: number
 }
 
 /** The engine refuses a tree over 100,000 characters; Knossos keeps this margin under it, and so does Kanon. */
@@ -54,6 +57,8 @@ const ORIGIN_MIN = 40
 const LABEL_COLUMN = 9
 /** The widest a plugin, hook or trigger column grows before its names are cut. */
 const NAME_MAX = 24
+/** The loading spinner, one glyph a frame. */
+export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
 
 const blankRow = (key: string): Row => ({ key, segments: [{ text: ' ' }] })
 
@@ -67,13 +72,16 @@ export function layout(input: LayoutInput): Row[] {
   const height = Math.max(0, Math.min(Math.floor(input.rows), Math.floor(TEXT_BUDGET / Math.max(1, width))))
   if (width === 0 || height === 0) return []
   const { status } = input
-  if (status.kind === 'loading') return loadingRows(width, height)
+  if (status.kind === 'loading') return loadingRows(width, height, input.frame)
   if (status.kind === 'error') return errorRows(status.reason, width, height)
   return readyRows(status.model, input.view, width, height, input.feedback)
 }
 
-function loadingRows(width: number, height: number): Row[] {
-  const heading: Row = { key: 'loading', segments: [{ text: fit(' Reading the session…', width), bold: true, color: HEADING }] }
+function loadingRows(width: number, height: number, frame: number): Row[] {
+  const n = Number.isFinite(frame) ? Math.abs(Math.floor(frame)) : 0
+  const glyph = SPINNER[n % SPINNER.length]!
+  const segments = clip([{ text: ` ${glyph} `, color: ACCENT }, { text: 'Reading the session…', bold: true, color: HEADING }], width)
+  const heading: Row = { key: 'loading', segments }
   return height >= 2 ? [blankRow('loading-gap'), heading] : [heading]
 }
 
@@ -94,25 +102,30 @@ function errorRows(reason: string, width: number, height: number): Row[] {
 function readyRows(model: PaneModel, view: View, width: number, height: number, feedback: string | null): Row[] {
   const items = [...model.instructions, ...model.memory]
   const opened = view.kind === 'detail' ? (items.find(i => i.real === view.real) ?? null) : null
-  const firstFlagged = items.find(flagged) ?? null
-  // What `o` opens and the marker marks: the opened item, else the first flagged one, else the first.
-  const target = opened ?? firstFlagged ?? sortFlagged(model.instructions)[0] ?? model.memory[0] ?? null
-  const keys = opened !== null ? detailKeys(opened) : target !== null ? [button({ kind: 'open', real: target.real }, 'open', 'o')] : []
+  const tier = tierOf(width)
+  // The wide tier previews an item beside the list: the opened one, else the first flagged one.
+  // Only there is there a marker, an `o` that opens the previewed item, and an `a` for it;
+  // narrower, each file name is its own open button.
+  const previewed = tier === 'wide' ? (opened ?? items.find(flagged) ?? null) : null
+  const keys =
+    opened !== null
+      ? detailKeys(opened)
+      : previewed !== null
+        ? [button({ kind: 'open', real: previewed.real }, 'open', 'o'), ...ackKey(previewed)]
+        : []
   const footer = footerRow(keys, model.basis, feedback, width)
   if (height === 1) return [footer]
 
   const budget = height - 1
-  const tier = tierOf(width)
   let body: Row[]
   if (tier === 'wide') {
     const [left, right] = gridColumns(width, LIST_SHARE)
-    const shown = opened ?? firstFlagged
-    const detail = shown !== null ? detailRows(shown, right, tier, budget) : hintRows(right)
-    body = besideRows(listRows(model, left, tier, budget, target?.real ?? null), detail, left)
+    const detail = previewed !== null ? detailRows(previewed, right, tier, budget) : hintRows(right, items.length === 0)
+    body = besideRows(listRows(model, left, tier, budget, previewed?.real ?? null), detail, left)
   } else if (opened !== null) {
     body = detailRows(opened, width, tier, budget)
   } else {
-    body = listRows(model, width, tier, budget, target?.real ?? null)
+    body = listRows(model, width, tier, budget, null)
   }
   body = body.slice(0, budget)
   // The footer is pinned to the bottom: blank rows fill what the body leaves.
@@ -136,10 +149,10 @@ function footerRow(keys: Segment[], basis: string, feedback: string | null, widt
   return spread('footer', left, [{ text: `${basis} `, dim: true }], width)
 }
 
-function detailKeys(item: PaneItem): Segment[] {
-  const ack = item.verdict !== null && !item.acknowledged ? [button({ kind: 'ack', real: item.real }, 'acknowledge', 'a')] : []
-  return [...ack, button({ kind: 'back' }, 'back', 'b')]
-}
+/** `a: acknowledge`, for an item with a verdict not yet acknowledged; else nothing. */
+const ackKey = (item: PaneItem): Segment[] => (item.verdict !== null && !item.acknowledged ? [button({ kind: 'ack', real: item.real }, 'acknowledge', 'a')] : [])
+
+const detailKeys = (item: PaneItem): Segment[] => [...ackKey(item), button({ kind: 'back' }, 'back', 'b')]
 
 /** Needs the person's eye: a verdict not yet acknowledged, or a file from a dependency. */
 const flagged = (item: PaneItem): boolean => (item.verdict !== null && !item.acknowledged) || item.origin === 'foreign'
@@ -189,7 +202,7 @@ function groupsOf(model: PaneModel, tier: Tier, inner: number): Group[] {
       title,
       length: items.length,
       flagged: items.filter(flagged).length,
-      note: flagNote(items),
+      note: flagNote(items, tier === 'narrow'),
       rows: (width, limit, marked) => sorted.slice(0, limit).map(it => itemRow(key, it, width, it.real === marked, origin)),
     }
   }
@@ -253,8 +266,12 @@ function pathSegments(item: PaneItem, room: number): Segment[] {
 /** A row that is not an item: no marker or glyph, its text where an item's glyph stands. */
 const plainRow = (key: string, segments: Segment[], inner: number): Row => walkedRow(key, false, [{ text: ' ' }, ...segments], inner)
 
-/** A card's note: each flag it holds with its count, `! 1 foreign · ▲ 1 gone`; empty when it holds none. */
-function flagNote(items: PaneItem[]): Segment[] {
+/**
+ * A card's note: each flag it holds with its count, `! 1 foreign · ▲ 1 gone`;
+ * `terse`, glyph and count only (`▲ 1 · ! 1`), so a narrow header keeps its
+ * flags. Empty when it holds none.
+ */
+function flagNote(items: PaneItem[], terse: boolean): Segment[] {
   const open = (level: 'gone' | 'may-be-stale') => items.filter(i => i.verdict?.level === level && !i.acknowledged).length
   const counts: Array<[Mark, number]> = [
     [MARK.gone, open('gone')],
@@ -267,7 +284,7 @@ function flagNote(items: PaneItem[]): Segment[] {
       ...(i === 0 ? [] : [{ text: ' · ', dim: true }]),
       mark(m, ' '),
       { text: grouped(n), color: HEADING },
-      { text: ` ${m.legend}`, dim: true },
+      ...(terse ? [] : [{ text: ` ${m.legend}`, dim: true }]),
     ])
 }
 
@@ -292,44 +309,53 @@ function cost(g: Group, limit: number, d: Density): number {
 
 /**
  * Which cards show, how long each list is, and at what density, in
- * `budget` rows. A card with a flag shows at least one item (its first, a
- * flagged one); the others may show their title alone, which carries the
- * count. Spacing goes before a card does; when even the tightest does not
- * fit, cards without a flag go first, from the last.
+ * `budget` rows. The order of what gives way is the order of what matters
+ * least: spacing first, then cards without a flag (from the last), then
+ * flagged items beyond each card's first, then flagged cards (from the
+ * last). So a card with a flag shows every flag before a plain card keeps
+ * even its title, and never shows its title without a flagged item under
+ * it. Whatever is left grows every list a row at a time in turn.
  */
 function allocate(groups: Group[], budget: number): { shown: boolean[]; limits: number[]; density: Density } {
-  const limits = groups.map(g => (g.flagged > 0 ? 1 : 0))
+  const limits = groups.map(g => g.flagged)
   const shown = groups.map(() => true)
   const total = (d: Density) => groups.reduce((n, g, i) => n + (shown[i] ? cost(g, limits[i]!, d) : 0), 0)
   let density = DENSITIES.find(d => total(d) <= budget)
   if (density === undefined) {
-    density = DENSITIES[DENSITIES.length - 1]!
-    const order = [...groups.keys()].reverse()
-    for (const i of [...order.filter(i => groups[i]!.flagged === 0), ...order.filter(i => groups[i]!.flagged > 0)]) {
-      if (total(density) <= budget) break
+    const d = DENSITIES[DENSITIES.length - 1]!
+    density = d
+    const fits = () => total(d) <= budget
+    const last = [...groups.keys()].reverse()
+    for (const i of last.filter(i => groups[i]!.flagged === 0)) {
+      if (fits()) break
+      shown[i] = false
+    }
+    // Flags beyond the first of each card, one at a time from the last card, until they fit.
+    while (!fits()) {
+      const i = last.find(i => shown[i] && limits[i]! > 1)
+      if (i === undefined) break
+      limits[i]! -= 1
+    }
+    for (const i of last) {
+      if (fits()) break
       shown[i] = false
     }
   }
   const d = density
-  const grow = (most: (i: number) => number): void => {
-    const open = new Set(groups.keys())
-    while (open.size > 0) {
-      for (const i of [...open]) {
-        if (!shown[i] || limits[i]! >= most(i)) {
-          open.delete(i)
-          continue
-        }
-        limits[i]! += 1
-        if (total(d) > budget) {
-          limits[i]! -= 1
-          open.delete(i)
-        }
+  const open = new Set([...groups.keys()].filter(i => shown[i]))
+  while (open.size > 0) {
+    for (const i of [...open]) {
+      if (limits[i]! >= groups[i]!.length) {
+        open.delete(i)
+        continue
+      }
+      limits[i]! += 1
+      if (total(d) > budget) {
+        limits[i]! -= 1
+        open.delete(i)
       }
     }
   }
-  // Flags first, every one of them; then every list a row at a time in turn.
-  grow(i => (groups[i]!.flagged > 0 ? groups[i]!.flagged : limits[i]!))
-  grow(i => groups[i]!.length)
   return { shown, limits, density: d }
 }
 
@@ -359,11 +385,16 @@ function detailRows(item: PaneItem, width: number, tier: Tier, budget: number): 
   const state = markOf(item)
   const note = state === MARK.none ? [] : [mark(state, ' '), { text: state.legend, dim: true }]
   const title = item.path.slice(item.path.lastIndexOf('/') + 1)
-  return cardLines({ key: 'detail', title, subtitle: item.kind, note, body: rows }, width, tier, DENSITIES[0]!).slice(0, budget)
+  const section: Section = { key: 'detail', title, subtitle: item.kind, note, body: rows }
+  // The spacing goes before any of the content does.
+  const lines = DENSITIES.map(d => cardLines(section, width, tier, d))
+  return (lines.find(l => l.length <= budget) ?? lines[lines.length - 1]!).slice(0, budget)
 }
 
-function hintRows(width: number): Row[] {
-  return [blankRow('hint-gap'), dimRow('hint', '  Nothing flagged. o opens the marked file.', width)]
+/** The wide tier's right half with nothing to preview. */
+function hintRows(width: number, empty: boolean): Row[] {
+  const hint = empty ? '  No instruction files in this session.' : '  Nothing flagged. Press a file name to open it.'
+  return [blankRow('hint-gap'), dimRow('hint', hint, width)]
 }
 
 /** `text` in lines of at most `width` cells, broken between words; a word too long alone is cut, a path from its front. */
