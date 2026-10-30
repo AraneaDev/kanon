@@ -23,7 +23,7 @@ export type Port = {
     every(ms: number, run: () => void): Timer
   }
   ui: {
-    open(args: { id: string; title: string; focus: true }): Promise<unknown>
+    open(args: { id: string; title: string; focus: true; backgroundColor?: 'transparent' }): Promise<unknown>
     close(args: { id: string }): Promise<unknown>
     panes(): Promise<readonly { id: string }[]>
     invalidate(event: 'ui.render'): void
