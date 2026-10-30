@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.27](https://github.com/AraneaDev/kanon/compare/v0.0.26...v0.0.27) (2026-10-30)
+
+
+### Fixes
+
+* **pane:** open the pane transparent, as the Knossos pane does ([#68](https://github.com/AraneaDev/kanon/issues/68)) ([83c8fcf](https://github.com/AraneaDev/kanon/commit/83c8fcf0b105b7673381d0d3007f84e1186f902c))
+
 ## [0.0.26](https://github.com/AraneaDev/kanon/compare/v0.0.25...v0.0.26) (2026-10-24)
 
 
