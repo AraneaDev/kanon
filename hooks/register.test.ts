@@ -66,12 +66,15 @@ function world(
     panesRefused?: () => boolean
     /** What `kanon show` answers. */
     show?: () => Run | Promise<Run>
+    /** Whether `ui.open` refuses `backgroundColor`, as a Claude Code from before it does. */
+    refuseBackground?: boolean
   } = {},
 ) {
   const clock = mock.clock(on)
   const registered: string[] = []
   const runs: string[][] = []
   const opened: string[] = []
+  const backgrounds: (string | undefined)[] = []
   const closed: string[] = []
   const panes = new Set<string>(opts.heldPanes ?? [])
   let inFlight = 0
@@ -90,7 +93,10 @@ function world(
     return { value: { command: e.name } }
   })
   on('ui.open', (_$, e) => {
+    const background = (e as { backgroundColor?: string }).backgroundColor
+    if (opts.refuseBackground === true && background !== undefined) return { deny: 'unknown option backgroundColor' }
     opened.push(e.id)
+    backgrounds.push(background)
     if (opts.placed === false) return { value: { isPlaced: false, reason: 'no room' } as never }
     panes.add(e.id)
     return { value: { isPlaced: true } }
@@ -125,7 +131,7 @@ function world(
   })
   const modelRuns = () => runs.filter(r => r[2] === 'model')
   const showRuns = () => runs.filter(r => r[2] === 'show')
-  return { clock, registered, runs, modelRuns, showRuns, opened, closed, panes, mostInFlight: () => mostInFlight }
+  return { clock, registered, runs, modelRuns, showRuns, opened, backgrounds, closed, panes, mostInFlight: () => mostInFlight }
 }
 
 async function slash($: Engine) {
@@ -193,6 +199,21 @@ test('/kanon opens the pane, a second run closes it, and two runs never leave tw
   await slash($)
   await slash($)
   expect(w.opened).toEqual([PANE, PANE, PANE])
+  expect(w.panes.size).toBe(1)
+})
+
+test('/kanon opens the pane transparent, on the terminal background as the chat is', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await slash($)
+  expect(w.backgrounds).toEqual(['transparent'])
+})
+
+test('a Claude Code that refuses backgroundColor still gets the pane, on its own fill', async ($, on) => {
+  const w = world(on, { refuseBackground: true })
+  await $.session.start(START)
+  await slash($)
+  expect(w.backgrounds).toEqual([undefined])
   expect(w.panes.size).toBe(1)
 })
 

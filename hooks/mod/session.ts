@@ -84,10 +84,15 @@ export async function toggle(io: Port): Promise<void> {
     return
   }
   paneOpened(io)
-  const placed = await io.ui.open({ id: PANE, title: 'Kanon', focus: true }).then(
-    r => (r as { isPlaced?: unknown } | undefined)?.isPlaced !== false,
-    () => false,
-  )
+  // Transparent: the pane lies on the terminal's own background, as the chat beside it does.
+  // A Claude Code from before `backgroundColor` refuses it, and gets the pane on its own fill.
+  const placed = await io.ui
+    .open({ id: PANE, title: 'Kanon', focus: true, backgroundColor: 'transparent' })
+    .catch(() => io.ui.open({ id: PANE, title: 'Kanon', focus: true }))
+    .then(
+      r => (r as { isPlaced?: unknown } | undefined)?.isPlaced !== false,
+      () => false,
+    )
   if (!placed) return paneClosed()
   refreshSoon(io)
 }
