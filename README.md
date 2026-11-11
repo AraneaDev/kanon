@@ -6,7 +6,7 @@
 **Including the rules that never loaded and the memories that went stale.**
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/kanon?label=release&include_prereleases)](https://github.com/AraneaDev/kanon/releases)
-[![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/kanon)
+[![Tool page](https://img.shields.io/badge/tool%20page-aranea.dev-0b7285)](https://aranea.dev/en/tools/kanon)
 [![Tests](https://img.shields.io/badge/tests-929%20passing-2b8a3e)](test/)
 [![License](https://img.shields.io/github/license/AraneaDev/kanon?label=license&color=yellow)](./LICENSE)
 [![Language](https://img.shields.io/github/languages/top/AraneaDev/kanon)](https://github.com/AraneaDev/kanon)
@@ -547,4 +547,4 @@ MIT.
 ---
 
 Built by [Tim Schipper](https://tim-schipper.nl/en) and released as open source under
-[Aranea Development](https://aranea-development.nl).
+[aranea.dev](https://aranea.dev).
